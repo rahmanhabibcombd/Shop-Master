@@ -138,6 +138,23 @@
         "status": { "type": "string", "enum": ["active", "inactive"] }
       },
       "required": ["name", "designation", "phone", "salary"]
+    },
+    "StockRecord": {
+      "title": "StockRecord",
+      "description": "A record of stock addition or adjustment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "type": { "type": "string", "enum": ["add", "sale", "return", "adjustment"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "expiryDate": { "type": "string", "format": "date" },
+        "batchNumber": { "type": "string" },
+        "location": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "required": ["productId", "quantity", "type", "timestamp"]
     }
   },
   "firestore": {
@@ -176,6 +193,10 @@
     "/staff_salaries/{salaryId}": {
       "schema": "StaffSalary",
       "description": "Collection of staff salary payments"
+    },
+    "/stockRecords/{recordId}": {
+      "schema": "StockRecord",
+      "description": "Collection of stock movement records"
     }
   }
 }

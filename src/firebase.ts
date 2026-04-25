@@ -1,11 +1,18 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, onSnapshot, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, onSnapshot, getDocFromServer, increment } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Using initializeFirestore with experimentalForceLongPolling can help in environments 
+// where standard streams/sockets might be blocked or unstable.
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+  useFetchStreams: false,
+}, firebaseConfig.firestoreDatabaseId);
+
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
@@ -47,12 +54,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
       emailVerified: auth.currentUser?.emailVerified,
       isAnonymous: auth.currentUser?.isAnonymous,
       tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+      providerId: provider.providerId,
+      displayName: provider.displayName,
+      email: provider.email,
+      photoUrl: provider.photoURL
+    })) || []
     },
     operationType,
     path
@@ -76,5 +83,5 @@ testConnection();
 export { 
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, 
   query, where, orderBy, limit, onSnapshot, signInWithPopup, signOut, onAuthStateChanged,
-  signInWithEmailAndPassword, createUserWithEmailAndPassword
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, increment
 };

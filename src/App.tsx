@@ -68,8 +68,10 @@ import {
   orderBy,
   limit,
   OperationType,
-  handleFirestoreError
+  handleFirestoreError,
+  increment
 } from './firebase';
+
 import { 
   BarChart, 
   Bar, 
@@ -111,6 +113,9 @@ interface ShopSettings {
   waInstanceId?: string;
   waPhoneNumberId?: string;
   autoSendWhatsApp?: boolean;
+  receiptFooter?: string;
+  waTemplateEnglish?: string;
+  waTemplateBengali?: string;
 }
 
 interface Product {
@@ -130,6 +135,18 @@ interface Product {
   imageUrl?: string;
 }
 
+interface StockRecord {
+  id: string;
+  productId: string;
+  quantity: number;
+  type: 'add' | 'sale' | 'return' | 'adjustment';
+  timestamp: any;
+  expiryDate?: string;
+  batchNumber?: string;
+  location?: string;
+  note?: string;
+}
+
 interface CartItem extends Product {
   quantity: number;
   originalPrice: number;
@@ -141,7 +158,7 @@ interface Sale {
   customerId?: string;
   customerName?: string;
   customerPhone?: string;
-  items: { productId: string; productName: string; quantity: number; price: number; originalPrice: number; cost: number }[];
+  items: { productId: string; productName: string; quantity: number; price: number; originalPrice: number; cost: number; unit?: string }[];
   totalAmount: number;
   discount: number;
   finalAmount: number;
@@ -235,9 +252,28 @@ import { FIXED_CATEGORIES } from './Categories'; //�. পশু স�. বি
 // ];
 
 // --- Utilities ---
-const toBengaliNumber = (num: number | string): string => {
+const toBengaliNumber = (num: number | string | undefined | null): string => {
+  if (num === undefined || num === null) return '';
   const bengaliDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
   return num.toString().replace(/\d/g, (digit) => bengaliDigits[parseInt(digit)]);
+};
+
+const safeDate = (timestamp: any): Date => {
+  if (!timestamp) return new Date();
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') return timestamp.toDate();
+  if (timestamp instanceof Date) return timestamp;
+  if (typeof timestamp === 'number') return new Date(timestamp);
+  if (timestamp.seconds !== undefined) {
+    return new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+  }
+  return new Date(timestamp);
+};
+
+const generateInvoiceId = (): string => {
+  const now = new Date();
+  // Formula: time (h:mm) + date (dd) + month (MM) + year (yy)
+  // Example: 9:29 on 24th April 2026 -> 929240426
+  return format(now, 'hmmddMMyy');
 };
 
 const formatCurrency = (amount: number | undefined | null): string => {
@@ -257,81 +293,120 @@ const printDailyClosing = (closing: DailyClosing, settings: ShopSettings) => {
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
 
+  const formatBN = (num: number) => toBengaliNumber((num || 0).toFixed(2));
+  
+  const expectedCash = (closing.cashSales || 0) + (closing.collections || 0) - (closing.totalExpenses || 0);
+  const discrepancy = (closing.cashInHand || 0) - expectedCash;
+
   const denominationsHtml = Object.entries(closing.denominations)
     .filter(([_, count]) => count > 0)
+    .sort((a, b) => parseInt(b[0]) - parseInt(a[0])) // Sort by high to low
     .map(([val, count]) => `
-      <div style="display: flex; justify-content: space-between; font-size: 10px;">
-        <span>${val} x ${count}</span>
-        <span>= ${(parseInt(val) * count).toFixed(2)}</span>
+      <div style="display: flex; justify-content: space-between; font-size: 11px; font-family: monospace; padding: 2px 0;">
+        <span>${toBengaliNumber(val)} x ${toBengaliNumber(count)}</span>
+        <span>= ${formatBN(parseInt(val) * count)}</span>
       </div>
     `).join('');
 
   printWindow.document.write(`
     <!DOCTYPE html>
-    <html>
+    <html lang="bn">
       <head>
-        <title>Daily Closing - ${closing.date}</title>
+        <title>ডেইলি ক্লোজিং - ${closing.date}</title>
         <style>
+          @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap');
           * { margin: 0; padding: 0; box-sizing: border-box; }
           @page { margin: 0; size: 80mm auto; }
-          html, body { width: 80mm; margin: 0; padding: 0; background: #fff; height: auto !important; }
           body { 
-            font-family: 'Courier New', Courier, monospace; 
+            font-family: 'Hind Siliguri', sans-serif;
             width: 72mm; 
             margin: 0 auto; 
-            padding: 2mm 0; 
-            font-size: 11px; 
-            line-height: 1.1;
+            padding: 8mm 0; 
+            font-size: 12px; 
+            line-height: 1.5;
+            color: #000;
           }
-          .header { text-align: center; margin-bottom: 5px; border-bottom: 1px dashed #000; padding-bottom: 3px; }
-          .title { font-size: 13px; font-weight: bold; margin-bottom: 2px; }
-          .row { display: flex; justify-content: space-between; margin-bottom: 2px; }
-          .section-title { font-weight: bold; border-bottom: 1px solid #000; margin: 6px 0 3px; font-size: 10px; }
-          .footer { text-align: center; margin-top: 10px; font-size: 8px; border-top: 1px dashed #000; padding-top: 3px; }
-          @media print {
-            body { width: 72mm; }
-            .no-print { display: none; }
-          }
+          .header { text-align: center; margin-bottom: 15px; border-bottom: 3px double #000; padding-bottom: 10px; }
+          .shop-name { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
+          .report-title { font-size: 14px; font-weight: 700; background: #000; color: #fff; display: inline-block; padding: 4px 15px; margin-top: 8px; border-radius: 20px; }
+          .meta-info { font-size: 11px; margin-top: 8px; color: #333; }
+          
+          .section { margin-bottom: 18px; }
+          .section-title { font-weight: 700; border-bottom: 1.5px solid #000; margin-bottom: 8px; font-size: 11px; text-transform: uppercase; color: #000; display: flex; justify-content: space-between; }
+          
+          .row { display: flex; justify-content: space-between; margin-bottom: 4px; border-bottom: 0.5px solid #f0f0f0; padding-bottom: 2px; }
+          .row:last-child { border-bottom: none; }
+          .row.bold { font-weight: 700; color: #000; }
+          .row.highlight { background: #f9f9f9; padding: 5px; border-radius: 4px; }
+          
+          .total-cash { font-size: 16px; border-top: 2px solid #000; margin-top: 8px; padding-top: 8px; }
+          .discrepancy { font-size: 10px; font-weight: 600; margin-top: 4px; text-align: right; }
+          
+          .footer { text-align: center; margin-top: 25px; font-size: 10px; border-top: 1px dashed #000; padding-top: 12px; color: #666; }
+          .cash-table { width: 100%; margin-top: 10px; border: 1px solid #ddd; padding: 10px; background: #fcfcfc; border-radius: 6px; }
+          .divider { border-bottom: 1px dashed #ccc; margin: 10px 0; }
         </style>
       </head>
       <body>
         <div class="header">
-          <div class="title">${settings.name}</div>
-          <div style="font-size: 10px; font-weight: bold;">DAILY CLOSING REPORT</div>
-          <div style="font-size: 9px;">Date: ${closing.date}</div>
+          <div class="shop-name">${settings.name}</div>
+          <div style="font-size: 11px;">${settings.address}</div>
+          <div class="report-title">ডেইলি ক্লোজিং রিপোর্ট</div>
+          <div class="meta-info">তারিখ: ${toBengaliNumber(closing.date)}</div>
         </div>
-        
-        <div class="section-title">SALES SUMMARY</div>
-        <div class="row"><span>Total Sales:</span> <span>TK ${closing.totalSales.toFixed(2)}</span></div>
-        <div class="row"><span>Cash Sales:</span> <span>TK ${closing.cashSales.toFixed(2)}</span></div>
-        <div class="row"><span>Due Sales:</span> <span>TK ${closing.dueSales.toFixed(2)}</span></div>
-        <div class="row"><span>Collections:</span> <span>TK ${closing.collections.toFixed(2)}</span></div>
-        
-        <div class="section-title">EXPENSES</div>
-        <div class="row"><span>Total Expenses:</span> <span>TK ${closing.totalExpenses.toFixed(2)}</span></div>
-        
-        <div class="section-title">CASH IN HAND</div>
-        <div class="row" style="font-weight: bold;"><span>Total Cash:</span> <span>TK ${closing.cashInHand.toFixed(2)}</span></div>
-        <div style="margin-top: 3px; padding-left: 5px; border-left: 1px solid #eee;">
-          ${denominationsHtml}
+
+        <div class="section">
+          <div class="section-title"><span>বিক্রয় সারসংক্ষেপ</span> <span>(SALES)</span></div>
+          <div class="row"><span>মোট পণ্য বিক্রয়:</span> <span>${formatBN(closing.totalSales)}</span></div>
+          <div class="row"><span>নগদ বিক্রয়:</span> <span>${formatBN(closing.cashSales)}</span></div>
+          <div class="row"><span>বাকি বিক্রয়:</span> <span>${formatBN(closing.dueSales)}</span></div>
+          <div class="row"><span>বাকি আদায় (Collection):</span> <span>${formatBN(closing.collections)}</span></div>
+          <div class="row bold highlight" style="margin-top: 4px;">
+            <span>মোট নগদ প্রাপ্তি:</span> <span>${formatBN((closing.cashSales || 0) + (closing.collections || 0))}</span>
+          </div>
         </div>
-        
-        <div class="section-title">DIGITAL BALANCES</div>
-        <div class="row"><span>bKash:</span> <span>TK ${closing.bkashBalance.toFixed(2)}</span></div>
-        
+
+        <div class="section">
+          <div class="section-title"><span>খরচ ও ব্যয়</span> <span>(EXPENSES)</span></div>
+          <div class="row"><span>আজকের মোট খরচ:</span> <span style="font-weight: 700;">- ${formatBN(closing.totalExpenses)}</span></div>
+        </div>
+
+        <div class="section">
+          <div class="section-title"><span>নগদ তহবিল হিসাব</span> <span>(CASH)</span></div>
+          <div class="row"><span>হিসাব অনুযায়ী নগদ (Expected):</span> <span>${formatBN(expectedCash)}</span></div>
+          <div class="row bold total-cash">
+            <span>ক্যাশ ইন হ্যান্ড (Actual):</span> <span>${formatBN(closing.cashInHand)}</span>
+          </div>
+          <div class="discrepancy" style="color: ${discrepancy >= 0 ? '#10b981' : '#ef4444'}">
+            ${discrepancy === 0 ? 'হিসাব একদম সঠিক আছে' : discrepancy > 0 ? `অতিরিক্ত: + ${formatBN(discrepancy)}` : `ঘাটতি: ${formatBN(discrepancy)}`}
+          </div>
+          
+          <div class="cash-table">
+            <div style="font-size: 10px; font-weight: 700; border-bottom: 1px solid #ddd; margin-bottom: 6px; padding-bottom: 2px;">নোটের বিবরণ:</div>
+            ${denominationsHtml || '<div style="font-size: 10px; color: #999; text-align: center; padding: 5px;">কোন তথ্য ডিটেইলস নেই</div>'}
+          </div>
+        </div>
+
+        <div class="section" style="margin-bottom: 10px;">
+          <div class="section-title"><span>ডিজিটাল ব্যালেন্স</span> <span>(ONLINE)</span></div>
+          <div class="row"><span>বিকাশ/অনলাইন ব্যালেন্স:</span> <span>${formatBN(closing.bkashBalance)}</span></div>
+        </div>
+
         ${closing.notes ? `
-          <div class="section-title">NOTES</div>
-          <div style="font-size: 9px;">${closing.notes}</div>
+          <div class="section">
+            <div class="section-title"><span>অতিরিক্ত নোট</span></div>
+            <div style="font-size: 11px; white-space: pre-wrap; color: #444; background: #fffbeb; padding: 8px; border-radius: 4px; border: 1px solid #fef3c7;">${closing.notes}</div>
+          </div>
         ` : ''}
-        
+
         <div class="footer">
-          Report Generated: ${format(new Date(), 'dd/MM/yyyy HH:mm')}<br>
-          ShopMaster POS
+          প্রিন্ট হয়েছে: ${toBengaliNumber(format(new Date(), 'dd/MM/yyyy hh:mm a'))}<br>
+          <div style="margin-top: 5px; font-weight: bold; color: #000;">MasterShop POS - Your Business Partner</div>
         </div>
         <script>
           window.onload = () => {
             window.print();
-            setTimeout(() => window.close(), 100);
+            setTimeout(() => window.close(), 1000);
           };
         </script>
       </body>
@@ -344,168 +419,186 @@ const printInvoice = (sale: Sale, settings: ShopSettings) => {
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
 
-  const itemsHtml = sale.items.map(item => `
+  const itemsHtml = sale.items.map(item => {
+    let qSuffix = '';
+    if (item.unit === 'unit') {
+      qSuffix = ' p';
+    } else if (item.unit === 'kg') {
+      if (item.quantity >= 1) {
+        qSuffix = ' K';
+      } else {
+        qSuffix = ' g';
+      }
+    }
+    
+    return `
     <tr>
-      <td style="padding: 2px 0;">${item.productName}</td>
-      <td style="padding: 2px 0; text-align: center;">${item.quantity}</td>
-      <td style="padding: 2px 0; text-align: right;">${(item.price || 0).toFixed(2)}</td>
-      <td style="padding: 2px 0; text-align: right;">${((item.price || 0) * (item.quantity || 0)).toFixed(2)}</td>
-    </tr>
-  `).join('');
+      <td style="padding: 5px 0; border-bottom: 1px solid #eee;">${item.productName}</td>
+      <td style="padding: 5px 0; text-align: center; border-bottom: 1px solid #eee;">${toBengaliNumber(item.quantity.toString())}${qSuffix}</td>
+      <td style="padding: 5px 0; text-align: right; border-bottom: 1px solid #eee;">${toBengaliNumber(item.price.toFixed(2))}</td>
+      <td style="padding: 5px 0; text-align: right; border-bottom: 1px solid #eee;">${toBengaliNumber((item.price * item.quantity).toFixed(2))}</td>
+    </tr>`;
+  }).join('');
 
   const width = settings.receiptWidth || '58mm';
-  const printableWidth = width === '80mm' ? '72mm' : '48mm';
-
   const changeAmount = Math.max(0, (sale.paidAmount || 0) - (sale.finalAmount || 0));
   const previousBalance = sale.previousBalance || 0;
-  const newBalance = previousBalance + (sale.dueAmount || 0);
+  const formatBN = (num: number) => toBengaliNumber((num || 0).toFixed(2));
 
   const html = `<!DOCTYPE html>
-    <html>
+    <html lang="bn">
       <head>
-        <title>Invoice #${sale.id.slice(-6).toUpperCase()}</title>
+        <title>Invoice #${sale.id}</title>
         <style>
-          @page {
-            margin: 0;
-            size: ${width} auto;
-          }
-          
-          * { 
-            margin: 0; 
-            padding: 0; 
-            box-sizing: border-box; 
-          }
-          
-          html, body {
-            width: ${width};
-            margin: 0;
-            padding: 0;
-            background: #fff;
-            height: auto !important;
-          }
-
+          @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap');
+          @page { margin: 0; size: auto; }
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          html, body { width: 100%; background: #fff; margin: 0; padding: 0; }
           body { 
-            font-family: 'Courier New', Courier, monospace; 
-            width: ${printableWidth}; 
-            margin: 0;
-            padding: 1mm; 
+            font-family: 'Hind Siliguri', sans-serif; 
             color: #000; 
-            font-size: 10px;
-            line-height: 1.1;
-            -webkit-print-color-adjust: exact;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            line-height: 1.4;
           }
-
-          .header { text-align: center; margin-bottom: 2px; border-bottom: 1px dashed #000; padding-bottom: 2px; }
-          .logo { max-width: 25mm; margin-bottom: 2px; filter: grayscale(100%); }
-          .shop-name { font-size: 12px; font-weight: bold; text-transform: uppercase; }
-          .shop-info { font-size: 8px; }
-          .invoice-meta { margin-bottom: 2px; font-size: 8px; border-bottom: 1px dashed #000; padding-bottom: 1px; }
-          
-          table { width: 100%; border-collapse: collapse; margin-bottom: 2px; table-layout: fixed; }
-          th { border-bottom: 1px solid #000; font-size: 8px; text-align: left; }
-          td { padding: 1px 0; font-size: 8px; vertical-align: top; word-wrap: break-word; }
-          
-          .totals { text-align: right; border-top: 1px dashed #000; padding-top: 2px; font-size: 9px; }
-          .total-row { font-weight: bold; font-size: 11px; margin-top: 1px; border-top: 1px double #000; padding-top: 1px; }
-          .balance-section { border-top: 1px solid #eee; margin-top: 2px; padding-top: 2px; font-size: 8px; text-align: right; }
-          .footer { text-align: center; margin-top: 4px; font-size: 7px; border-top: 1px dashed #000; padding-top: 2px; }
-          
-          @media print {
-            body { width: ${printableWidth}; }
-            .no-print { display: none; }
+          .receipt-container {
+            width: ${width}; 
+            max-width: 100%;
+            padding: 5mm 4mm;
+            display: flex;
+            flex-direction: column;
           }
+          .header { text-align: center; margin-bottom: 12px; border-bottom: 3.5px solid #000; padding-bottom: 15px; }
+          .logo { max-width: 25mm; max-height: 15mm; margin: 0 auto 5px auto; display: block; }
+          .shop-name { font-size: 20px; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; }
+          .shop-info { font-size: 11px; margin-bottom: 2px; color: #333; }
+          .invoice-meta { margin-bottom: 12px; font-size: 11px; border-bottom: 1px solid #000; padding: 8px 0; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+          th { border-bottom: 2px solid #000; font-size: 11px; text-align: left; padding: 8px 0; font-weight: 700; }
+          td { padding: 6px 0; font-size: 11px; vertical-align: top; }
+          .totals { text-align: right; border-top: 1px solid #000; padding-top: 10px; font-size: 12px; }
+          .total-row { font-weight: 700; font-size: 18px; margin-top: 6px; border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 10px 0; margin-bottom: 10px; }
+          .balance-section { border: 1px solid #000; margin-top: 15px; padding: 12px; font-size: 11px; background: #fafafa; border-radius: 8px; }
+          .balance-title { font-weight: 700; text-align: center; border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 4px; font-size: 13px; }
+          .footer { text-align: center; margin-top: 25px; font-size: 10px; border-top: 1px dashed #000; padding-top: 20px; font-weight: 500; }
+          @media print { .no-print { display: none; } }
         </style>
       </head>
       <body>
-        <div class="header">
-          ${settings.logoBase64 ? `<img src="${settings.logoBase64}" class="logo" />` : ''}
-          <div class="shop-name">${settings.name}</div>
-          <div class="shop-info">${settings.address}</div>
-          ${settings.phone ? `<div class="shop-info">Phone: ${settings.phone}</div>` : ''}
-        </div>
-        <div class="invoice-meta">
-          <div style="display: flex; justify-content: space-between;">
-            <span>Inv: #${sale.id.slice(-6).toUpperCase()}</span>
-            <span>${format(sale.timestamp.toDate(), 'dd/MM/yy HH:mm')}</span>
+        <div class="receipt-container">
+          <div class="header">
+            ${settings.logoBase64 ? `<img src="${settings.logoBase64}" class="logo" />` : ''}
+            <div class="shop-name">${settings.name}</div>
+            <div class="shop-info">${settings.address}</div>
+            ${settings.phone ? `<div class="shop-info">মোবাইল: ${toBengaliNumber(settings.phone)}</div>` : ''}
           </div>
-          <div>Cust: ${sale.customerName || 'Walk-in'}</div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 45%;">Item</th>
-              <th style="width: 10%; text-align: center;">Qty</th>
-              <th style="width: 20%; text-align: right;">Price</th>
-              <th style="width: 25%; text-align: right;">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml}
-          </tbody>
-        </table>
-        <div class="totals">
-          <div>Subtotal: TK ${(sale.totalAmount || 0).toFixed(2)}</div>
-          <div>Discount: TK ${(sale.discount || 0).toFixed(2)}</div>
-          <div class="total-row">Grand Total: TK ${(sale.finalAmount || 0).toFixed(2)}</div>
-          <div style="margin-top: 2px;">Paid: TK ${(sale.paidAmount || 0).toFixed(2)}</div>
-          ${changeAmount > 0 ? `<div>Change: TK ${changeAmount.toFixed(2)}</div>` : ''}
-          <div style="font-weight: bold;">Due: TK ${(sale.dueAmount || 0).toFixed(2)}</div>
-        </div>
-
-        ${sale.customerId ? `
-        <div class="balance-section">
-          <div>Previous Balance: TK ${previousBalance.toFixed(2)}</div>
-          <div>Current Transaction: TK ${(sale.dueAmount || 0).toFixed(2)}</div>
-          <div style="font-weight: bold; border-top: 1px solid #ccc; display: inline-block; padding-left: 10px;">
-            Total Balance: TK ${newBalance.toFixed(2)}
+          <div class="invoice-meta">
+            <div style="display: flex; justify-content: space-between;">
+              <span style="font-weight: 700;">আইডি: #${toBengaliNumber(sale.id)}</span>
+              <span>${toBengaliNumber(format(safeDate(sale.timestamp), 'dd/MM/yy HH:mm'))}</span>
+            </div>
+            <div style="margin-top: 3px; font-weight: 500;">ক্রেতা: ${sale.customerName || 'খুচরা সেল'}</div>
+            ${sale.customerPhone ? `<div style="margin-top: 1px;">ফোন: ${toBengaliNumber(sale.customerPhone)}</div>` : ''}
           </div>
-        </div>
-        ` : ''}
-
-        <div class="footer">
-          Thank you for shopping with us!<br>
-          Powered by ShopMaster
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 45%;">আইটেম</th>
+                <th style="width: 15%; text-align: center;">পরিমাণ</th>
+                <th style="width: 20%; text-align: right;">দর</th>
+                <th style="width: 20%; text-align: right;">মোট</th>
+              </tr>
+            </thead>
+            <tbody>${itemsHtml}</tbody>
+          </table>
+          <div class="totals">
+            <div style="display: flex; justify-content: space-between;"><span>সাবটোটাল:</span><span>${formatBN(sale.totalAmount)}</span></div>
+            ${sale.discount > 0 ? `<div style="display: flex; justify-content: space-between;"><span>ডিসকাউন্ট:</span><span>- ${formatBN(sale.discount)}</span></div>` : ''}
+            <div class="total-row" style="display: flex; justify-content: space-between;"><span>সর্বমোট বিল:</span><span>${formatBN(sale.finalAmount)}</span></div>
+            <div style="display: flex; justify-content: space-between;"><span>আজকের জমা:</span><span>${formatBN(sale.paidAmount)}</span></div>
+            ${(changeAmount > 0 && !sale.customerId) ? `<div style="display: flex; justify-content: space-between;"><span>আজ ফেরত:</span><span>${formatBN(changeAmount)}</span></div>` : ''}
+          </div>
+          ${sale.customerId ? `
+          <div class="balance-section">
+            <div class="balance-title">ব্যালেন্স সামারি</div>
+            <div style="display: flex; justify-content: space-between;"><span>পূর্বের বাকি:</span><span>${formatBN(previousBalance)}</span></div>
+            <div style="display: flex; justify-content: space-between;"><span>আজকের বিল:</span><span>${formatBN(sale.finalAmount)}</span></div>
+            <div style="display: flex; justify-content: space-between; border-top: 1px dotted #ccc; margin-top: 3px; padding-top: 3px;"><span>মোট প্রদেয়:</span><span>${formatBN(sale.finalAmount + previousBalance)}</span></div>
+            <div style="display: flex; justify-content: space-between;"><span>আজকের পরিশোধ:</span><span>- ${formatBN(sale.paidAmount)}</span></div>
+            <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 14px; border-top: 2px solid #000; margin-top: 6px; padding-top: 6px;">
+              <span>বর্তমান মোট বাকি:</span><span>${formatBN(sale.finalAmount + previousBalance - (sale.paidAmount || 0))}</span>
+            </div>
+          </div>
+          ` : `
+            <div style="margin-top: 15px; border-top: 1.5px solid #000; padding-top: 10px; text-align: right; font-weight: 700;">
+              বাকি পরিমাণ: ${formatBN(sale.finalAmount - (sale.paidAmount || 0))}
+            </div>
+          `}
+          <div class="footer">
+            ${settings.receiptFooter ? settings.receiptFooter.replace(/\n/g, '<br>') : `কেনাকাটার জন্য আপনাকে ধন্যবাদ!<br>MasterShop POS - Your Reliable Business Partner`}
+          </div>
         </div>
         <script>
           window.onload = () => {
             window.print();
-            setTimeout(() => window.close(), 100);
+            setTimeout(() => window.close(), 1500);
           };
         </script>
       </body>
     </html>`;
 
-  printWindow.document.open();
-  printWindow.document.write(html.trim());
+  printWindow.document.write(html);
   printWindow.document.close();
 };
 
-const sendWhatsAppInvoice = async (sale: Sale, settings: ShopSettings) => {
+const sendWhatsAppInvoice = async (sale: Sale, settings: ShopSettings, lang: 'en' | 'bn' = 'en') => {
   if (!sale.customerPhone) return;
   
   const cleanPhone = sale.customerPhone.replace(/\D/g, '');
   const formattedPhone = cleanPhone.startsWith('880') ? cleanPhone : `880${cleanPhone.startsWith('0') ? cleanPhone.slice(1) : cleanPhone}`;
   
-  const itemsText = sale.items.map(item => `• ${item.productName}: ${item.quantity} x ${item.price} = ${item.price * item.quantity}`).join('\n');
+  const template = lang === 'bn' ? (settings.waTemplateBengali || "") : (settings.waTemplateEnglish || "");
   
-  const previousBalance = sale.previousBalance || 0;
-  const currentDue = sale.dueAmount || 0;
-  const totalBalance = previousBalance + currentDue;
+  // Prepare variables
+  const variables: { [key: string]: string } = {
+    '{{customerName}}': sale.customerName || 'Customer',
+    '{{shopName}}': settings.name || 'Shop',
+    '{{invoiceId}}': sale.id,
+    '{{totalAmount}}': sale.finalAmount.toString(),
+    '{{discount}}': sale.discount ? sale.discount.toString() : '0',
+    '{{paidAmount}}': sale.paidAmount.toString(),
+    '{{dueAmount}}': (sale.finalAmount - sale.paidAmount).toString(),
+    '{{items}}': sale.items.map(item => `• ${item.productName}: ${item.quantity} x ${item.price}`).join('\n')
+  };
 
-  const message = `*Invoice from ${settings.name}*\n` +
-    `Invoice: #${sale.id.slice(-6).toUpperCase()}\n` +
-    `Date: ${format(sale.timestamp.toDate ? sale.timestamp.toDate() : new Date(sale.timestamp), 'dd/MM/yyyy')}\n\n` +
-    `*Items:*\n${itemsText}\n\n` +
-    `--------------------------\n` +
-    `*Subtotal:* TK ${sale.totalAmount}\n` +
-    `*Discount:* TK ${sale.discount}\n` +
-    `*Grand Total:* TK ${sale.finalAmount}\n` +
-    `*Paid Amount:* TK ${sale.paidAmount}\n` +
-    `--------------------------\n` +
-    `*Previous Balance:* TK ${previousBalance}\n` +
-    `*Current Due:* TK ${currentDue}\n` +
-    `*Total Balance:* TK ${totalBalance}\n\n` +
-    `Thank you for your purchase!`;
+  // Replace variables
+  let message = template;
+  Object.keys(variables).forEach(key => {
+    message = message.replace(new RegExp(key, 'g'), variables[key]);
+  });
+
+  // Fallback if template is not configured or just too simple
+  if (!template || message === template) {
+    const itemsText = sale.items.map(item => `• ${item.productName}: ${item.quantity} x ${item.price} = ${item.price * item.quantity}`).join('\n');
+    const previousBalance = sale.previousBalance || 0;
+    const currentDue = sale.finalAmount - sale.paidAmount;
+    const totalBalance = previousBalance + currentDue;
+    message = `*আমাদের স্টোর ${settings.name} থেকে ইনভয়েস*\n` +
+      `ইনভয়েস: #${sale.id}\n` +
+      `তারিখ: ${format(safeDate(sale.timestamp), 'dd/MM/yyyy')}\n\n` +
+      `*আইটেমসমূহ:*\n${itemsText}\n\n` +
+      `--------------------------\n` +
+      `*টোটাল প্রোডাক্ট বিল:* TK ${sale.totalAmount}\n` +
+      `*ডিসকাউন্ট:* TK ${sale.discount}\n` +
+      `*গ্র্যান্ড টোটাল:* TK ${sale.finalAmount}\n` +
+      `*আজকের জমা:* TK ${sale.paidAmount}\n` +
+      `--------------------------\n` +
+      `*পূর্বের বাকি:* TK ${previousBalance}\n` +
+      `*আজকের বিল:* TK ${sale.finalAmount}\n` +
+      `*টোটাল বাকি:* TK ${(sale.finalAmount + previousBalance - (sale.paidAmount || 0))}\n\n` +
+      `আপনার কেনাকাটার জন্য ধন্যবাদ!`;
+  }
 
   const isAuto = settings.autoSendWhatsApp;
   const method = settings.waGatewayType || 'manual';
@@ -595,15 +688,15 @@ const downloadInvoicePDF = (sale: Sale, settings: ShopSettings) => {
 
   // Invoice Info
   doc.setFontSize(12);
-  doc.text(`Invoice: #${sale.id.slice(-6).toUpperCase()}`, 20, 50);
-  doc.text(`Date: ${format(sale.timestamp.toDate(), 'dd/MM/yyyy HH:mm')}`, pageWidth - 20, 50, { align: 'right' });
+  doc.text(`Invoice: #${sale.id}`, 20, 50);
+  doc.text(`Date: ${format(safeDate(sale.timestamp), 'dd/MM/yyyy HH:mm')}`, pageWidth - 20, 50, { align: 'right' });
   doc.text(`Customer: ${sale.customerName || 'Walk-in'}`, 20, 58);
   if (sale.customerPhone) doc.text(`Phone: ${sale.customerPhone}`, 20, 64);
 
   // Table
   const tableData = sale.items.map(item => [
     item.productName,
-    item.quantity.toString(),
+    (item.quantity || 0).toString(),
     (item.price || 0).toFixed(2),
     ((item.price || 0) * (item.quantity || 0)).toFixed(2)
   ]);
@@ -627,26 +720,32 @@ const downloadInvoicePDF = (sale: Sale, settings: ShopSettings) => {
   doc.setFontSize(14);
   doc.text(`Grand Total: TK ${(sale.finalAmount || 0).toFixed(2)}`, pageWidth - 20, finalY + 14, { align: 'right' });
   doc.setFontSize(10);
-  doc.text(`Paid: TK ${(sale.paidAmount || 0).toFixed(2)}`, pageWidth - 20, finalY + 20, { align: 'right' });
-  if (changeAmount > 0) {
+  doc.text(`Paid Today: TK ${(sale.paidAmount || 0).toFixed(2)}`, pageWidth - 20, finalY + 20, { align: 'right' });
+  if (changeAmount > 0 && !sale.customerId) {
     doc.text(`Change Given: TK ${changeAmount.toFixed(2)}`, pageWidth - 20, finalY + 26, { align: 'right' });
   }
-  doc.text(`Due: TK ${(sale.dueAmount || 0).toFixed(2)}`, pageWidth - 20, finalY + (changeAmount > 0 ? 32 : 26), { align: 'right' });
+  doc.text(`REMAINING DUE: TK ${(sale.finalAmount + previousBalance - (sale.paidAmount || 0)).toFixed(2)}`, pageWidth - 20, finalY + (changeAmount > 0 && !sale.customerId ? 32 : 26), { align: 'right' });
 
   if (sale.customerId) {
-    const balanceY = finalY + (changeAmount > 0 ? 42 : 36);
+    const balanceY = finalY + (changeAmount > 0 && !sale.customerId ? 42 : 36);
     doc.setFontSize(11);
     doc.text('Customer Balance Summary', pageWidth - 20, balanceY, { align: 'right' });
     doc.setFontSize(9);
-    doc.text(`Previous Balance: TK ${previousBalance.toFixed(2)}`, pageWidth - 20, balanceY + 6, { align: 'right' });
-    doc.text(`Current Transaction: TK ${(sale.dueAmount || 0).toFixed(2)}`, pageWidth - 20, balanceY + 12, { align: 'right' });
+    doc.text(`Today's Bill: TK ${(sale.finalAmount || 0).toFixed(2)}`, pageWidth - 20, balanceY + 6, { align: 'right' });
+    doc.text(`Previous Due: TK ${previousBalance.toFixed(2)}`, pageWidth - 20, balanceY + 12, { align: 'right' });
+    doc.text(`Total Before Payment: TK ${(sale.finalAmount + previousBalance).toFixed(2)}`, pageWidth - 20, balanceY + 18, { align: 'right' });
+    doc.text(`Payment Today: TK ${(sale.paidAmount || 0).toFixed(2)}`, pageWidth - 20, balanceY + 24, { align: 'right' });
     doc.setFontSize(10);
-    doc.text(`New Total Balance: TK ${newBalance.toFixed(2)}`, pageWidth - 20, balanceY + 20, { align: 'right' });
+    doc.text(`TOTAL REMAINING: TK ${(sale.finalAmount + previousBalance - (sale.paidAmount || 0)).toFixed(2)}`, pageWidth - 20, balanceY + 32, { align: 'right' });
   }
 
-  doc.text('Thank you for shopping with us!', pageWidth / 2, finalY + 70, { align: 'center' });
+  const footerText = settings.receiptFooter || "Thank you for shopping with us!\nPowered by ShopMaster";
+  const footerLines = footerText.split('\n');
+  footerLines.forEach((line, index) => {
+    doc.text(line, pageWidth / 2, finalY + 70 + (index * 6), { align: 'center' });
+  });
 
-  doc.save(`Invoice_${sale.id.slice(-6)}.pdf`);
+  doc.save(`Invoice_${sale.id}.pdf`);
 };
 
 // --- Components ---
@@ -694,6 +793,13 @@ const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
 
 function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUser }: { settings: ShopSettings, onSaveSettings: (s: ShopSettings) => void, users: AppUser[], onAddUser: (u: Omit<AppUser, 'id'>) => void, onDeleteUser: (id: string) => void }) {
   const [activeSubTab, setActiveSubTab] = useState<'shop' | 'users'>('shop');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleClick = () => setConfirmDeleteId(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, []);
 
   const handleShopSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -720,6 +826,9 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
       waToken: formData.get('waToken') as string,
       autoSendWhatsApp: formData.get('autoSendWhatsApp') === 'on',
       receiptWidth: formData.get('receiptWidth') as '58mm' | '80mm',
+      receiptFooter: formData.get('receiptFooter') as string,
+      waTemplateEnglish: formData.get('waTemplateEnglish') as string,
+      waTemplateBengali: formData.get('waTemplateBengali') as string,
     });
   };
 
@@ -791,23 +900,23 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Shop Name</label>
-                <input name="name" defaultValue={settings.name} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <input name="name" defaultValue={settings.name || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
-                <input name="phone" defaultValue={settings.phone} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <input name="phone" defaultValue={settings.phone || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
-                <textarea name="address" defaultValue={settings.address} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none h-24" />
+                <textarea name="address" defaultValue={settings.address || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none h-24" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Logo URL (Optional)</label>
-                <input name="logoUrl" defaultValue={settings.logoUrl} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="https://..." />
+                <input name="logoUrl" defaultValue={settings.logoUrl || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="https://..." />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">WhatsApp Sender Number (Optional)</label>
-                <input name="whatsappSender" defaultValue={settings.whatsappSender} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="88017..." />
+                <input name="whatsappSender" defaultValue={settings.whatsappSender || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="88017..." />
               </div>
               <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100 space-y-4">
                 <h4 className="font-bold text-indigo-900 flex items-center gap-2">
@@ -847,8 +956,38 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
               </div>
 
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp Template (English)</label>
+                <textarea 
+                  name="waTemplateEnglish" 
+                  defaultValue={settings.waTemplateEnglish || ""} 
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                  placeholder="Use {{customerName}}, {{shopName}}, {{invoiceId}}, {{totalAmount}}, {{discount}}, {{paidAmount}}, {{dueAmount}}, {{items}}"
+                />
+                <p className="text-xs text-gray-400 mt-1">Available: {"{{customerName}}, {{shopName}}, {{invoiceId}}, {{totalAmount}}, {{discount}}, {{paidAmount}}, {{dueAmount}}, {{items}}"}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp Template (Bengali)</label>
+                <textarea 
+                  name="waTemplateBengali" 
+                  defaultValue={settings.waTemplateBengali || ""} 
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                  placeholder="Use {{customerName}}, {{shopName}}, {{invoiceId}}, {{totalAmount}}, {{discount}}, {{paidAmount}}, {{dueAmount}}, {{items}}"
+                />
+                <p className="text-xs text-gray-400 mt-1">Available: {"{{customerName}}, {{shopName}}, {{invoiceId}}, {{totalAmount}}, {{discount}}, {{paidAmount}}, {{dueAmount}}, {{items}}"}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Receipt Footer Text</label>
+                <textarea 
+                  name="receiptFooter" 
+                  defaultValue={settings.receiptFooter || "Thank you for shopping with us!\nPowered by ShopMaster"} 
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                  placeholder="Enter custom text for invoice bottom..."
+                />
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">API URL (Generic Only)</label>
-                <input name="waApiUrl" defaultValue={settings.waApiUrl} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="https://..." />
+                <input name="waApiUrl" defaultValue={settings.waApiUrl || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="https://..." />
               </div>
               <div className="flex items-center gap-3">
                 <input 
@@ -946,10 +1085,27 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
                     </td>
                     <td className="px-6 py-4 text-right">
                       <button 
-                        onClick={() => onDeleteUser(u.id)}
-                        className="p-2 text-gray-400 hover:text-red-600 transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirmDeleteId === u.id) {
+                            onDeleteUser(u.id);
+                            setConfirmDeleteId(null);
+                          } else {
+                            setConfirmDeleteId(u.id);
+                          }
+                        }}
+                        className={`p-2 rounded-lg transition-all relative ${
+                          confirmDeleteId === u.id 
+                            ? "bg-red-600 text-white hover:bg-red-700 shadow-lg scale-110" 
+                            : "text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        }`}
+                        title={confirmDeleteId === u.id ? "Click again to confirm" : "Delete User"}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        {confirmDeleteId === u.id ? (
+                          <span className="text-[10px] font-bold px-1 animate-pulse">Confirm?</span>
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
                       </button>
                     </td>
                   </tr>
@@ -974,6 +1130,7 @@ export default function App() {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
   const [selectedProductForHistory, setSelectedProductForHistory] = useState<Product | null>(null);
+  const [stockRecords, setStockRecords] = useState<StockRecord[]>([]);
   
   // Auth Form State
   const [username, setUsername] = useState('');
@@ -1021,8 +1178,13 @@ export default function App() {
   const [shopSettings, setShopSettings] = useState<ShopSettings>({
     name: 'Bismillah Store',
     address: 'Your Shop Address',
-    phone: '01XXXXXXXXX',
-    receiptWidth: '58mm'
+    phone: '',
+    receiptWidth: '58mm',
+    receiptFooter: "Thank you for shopping with us!\nPowered by ShopMaster",
+    waGatewayType: 'manual',
+    autoSendWhatsApp: false,
+    waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is TK {{totalAmount}}.",
+    waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{totalAmount}} টাকা।"
   });
   
   // POS State
@@ -1071,6 +1233,10 @@ export default function App() {
       setSales(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Sale)));
     }, (err) => console.error("Sales sync error", err));
 
+    const unsubStock = onSnapshot(collection(db, 'stockRecords'), (snapshot) => {
+      setStockRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StockRecord)));
+    }, (err) => console.error("Stock records sync error", err));
+
     const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
       setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer)));
     }, (err) => console.error("Customers sync error", err));
@@ -1102,6 +1268,7 @@ export default function App() {
     return () => {
       unsubProducts();
       unsubSales();
+      unsubStock();
       unsubCustomers();
       unsubCategories();
       unsubExpenses();
@@ -1238,61 +1405,64 @@ export default function App() {
     paymentMethod: 'cash' as 'cash' | 'due'
   });
 
-  // Auto-set paid amount for cash sales
+  // Automatic Customer Selection
   useEffect(() => {
-    if (checkoutData.paymentMethod === 'cash' && finalTotal > 0) {
-      setCheckoutData(prev => ({ ...prev, paidAmount: finalTotal }));
+    if (checkoutData.walkInName || checkoutData.walkInPhone) {
+      const matchingCustomer = customers.find(c => 
+        (checkoutData.walkInName && c.name.toLowerCase() === checkoutData.walkInName.toLowerCase()) ||
+        (checkoutData.walkInPhone && c.phone === checkoutData.walkInPhone)
+      );
+      if (matchingCustomer && checkoutData.customerId !== matchingCustomer.id) {
+        setCheckoutData(prev => ({...prev, customerId: matchingCustomer.id}));
+      }
     }
-  }, [finalTotal, checkoutData.paymentMethod]);
+  }, [checkoutData.walkInName, checkoutData.walkInPhone, customers]);
 
-  const handleCheckout = async () => {
+  const handleCheckout = async (sendWhatsApp: boolean = false) => {
     if (cart.length === 0) return;
 
     try {
       const selectedCustomer = customers.find(c => c.id === checkoutData.customerId);
-      const dueAmount = checkoutData.paymentMethod === 'due' ? finalTotal : Math.max(0, finalTotal - checkoutData.paidAmount);
+      const dueAmount = Math.max(0, finalTotal - checkoutData.paidAmount);
 
       // Revert old sale effects if editing
       if (editingSale) {
         for (const item of editingSale.items) {
-          const productRef = doc(db, 'products', item.productId);
-          const product = products.find(p => p.id === item.productId);
-          if (product) {
-            await updateDoc(productRef, { stock: product.stock + item.quantity });
+          if (item.productId) {
+            const productRef = doc(db, 'products', item.productId);
+            await updateDoc(productRef, { stock: increment(item.quantity || 0) });
           }
         }
         if (editingSale.customerId) {
           const customerRef = doc(db, 'customers', editingSale.customerId);
-          const customer = customers.find(c => c.id === editingSale.customerId);
-          if (customer) {
-            await updateDoc(customerRef, {
-              currentDue: Math.max(0, (customer.currentDue || 0) - editingSale.dueAmount),
-              totalSpent: Math.max(0, (customer.totalSpent || 0) - editingSale.finalAmount)
-            });
-          }
+          await updateDoc(customerRef, {
+            currentDue: increment(-(editingSale.dueAmount || 0)),
+            totalSpent: increment(-(editingSale.finalAmount || 0))
+          });
         }
       }
 
       const saleData: any = {
         customerName: selectedCustomer?.name || checkoutData.walkInName || 'Walk-in Customer',
-        customerPhone: selectedCustomer?.phone || checkoutData.walkInPhone,
+        customerPhone: selectedCustomer?.phone || checkoutData.walkInPhone || '',
         items: cart.map(item => ({
-          productId: item.id,
-          productName: item.name,
-          quantity: item.quantity,
-          price: item.discountedPrice,
-          originalPrice: item.originalPrice,
+          productId: item.id || '',
+          productName: item.name || 'Unknown Product',
+          quantity: item.quantity || 0,
+          unit: item.unit || 'unit',
+          price: item.discountedPrice || 0,
+          originalPrice: item.originalPrice || 0,
           cost: item.cost || 0
         })),
         totalAmount: cartTotal,
         discount: discount,
         finalAmount: finalTotal,
-        paidAmount: checkoutData.paymentMethod === 'cash' ? checkoutData.paidAmount : 0,
+        paidAmount: checkoutData.paidAmount || 0,
         dueAmount: dueAmount,
         previousBalance: selectedCustomer?.currentDue || 0,
         paymentMethod: checkoutData.paymentMethod,
         timestamp: editingSale ? editingSale.timestamp : new Date(),
-        sellerId: user.uid
+        sellerId: auth.currentUser?.uid || 'unknown'
       };
 
       if (checkoutData.customerId) {
@@ -1306,30 +1476,27 @@ export default function App() {
         await updateDoc(doc(db, 'sales', editingSale.id), saleData);
         finalSale = { ...saleData, id: editingSale.id } as Sale;
       } else {
-        const docRef = await addDoc(collection(db, 'sales'), saleData);
-        finalSale = { ...saleData, id: docRef.id } as Sale;
+        const customId = generateInvoiceId();
+        await setDoc(doc(db, 'sales', customId), saleData);
+        finalSale = { ...saleData, id: customId } as Sale;
       }
       
       // Apply new sale effects
       for (const item of cart) {
         const productRef = doc(db, 'products', item.id);
-        const product = products.find(p => p.id === item.id);
-        if (product) {
-          // Note: Stock might be slightly off if multiple updates happen fast, 
-          // but for this app it's acceptable.
-          await updateDoc(productRef, { stock: Math.max(0, product.stock - item.quantity) });
-        }
+        await updateDoc(productRef, { stock: increment(-item.quantity) });
+      }
+
+      if (sendWhatsApp) {
+        await sendWhatsAppInvoice(finalSale, shopSettings, 'bn');
       }
 
       if (checkoutData.customerId) {
         const customerRef = doc(db, 'customers', checkoutData.customerId);
-        const customer = customers.find(c => c.id === checkoutData.customerId);
-        if (customer) {
-          await updateDoc(customerRef, {
-            currentDue: (customer.currentDue || 0) + dueAmount,
-            totalSpent: (customer.totalSpent || 0) + finalTotal
-          });
-        }
+        await updateDoc(customerRef, {
+          currentDue: increment(finalTotal - checkoutData.paidAmount),
+          totalSpent: increment(finalTotal)
+        });
       }
 
       setLastSale(finalSale);
@@ -1343,7 +1510,7 @@ export default function App() {
 
       // Auto Send WhatsApp if customer has phone
       if (finalSale.customerPhone) {
-        sendWhatsAppInvoice(finalSale, shopSettings);
+        sendWhatsAppInvoice(finalSale, shopSettings, 'bn');
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'sales');
@@ -1351,33 +1518,50 @@ export default function App() {
   };
 
   const handleDeleteSale = async (sale: Sale) => {
-    if (!confirm("Are you sure you want to delete this invoice? This will revert stock and customer balance.")) return;
+    if (loading) return;
+    
+    // Confirmation is now handled in the UI component (SalesHistory) via setConfirmDeleteId
     
     try {
-      for (const item of sale.items) {
-        const productRef = doc(db, 'products', item.productId);
-        const product = products.find(p => p.id === item.productId);
-        if (product) {
-          await updateDoc(productRef, { stock: product.stock + item.quantity });
+      setLoading(true);
+      setNotification({ message: "Deleting invoice and reverting balances...", type: 'info' });
+
+      // Revert stock
+      if (sale.items && Array.isArray(sale.items)) {
+        for (const item of sale.items) {
+          if (item.productId) {
+            try {
+              const productRef = doc(db, 'products', item.productId);
+              await updateDoc(productRef, { 
+                stock: increment(Number(item.quantity) || 0) 
+              });
+            } catch (e) {
+              console.warn(`Could not revert stock for product ${item.productId}:`, e);
+            }
+          }
         }
       }
 
+      // Revert customer balance
       if (sale.customerId) {
-        const customerRef = doc(db, 'customers', sale.customerId);
-        const customer = customers.find(c => c.id === sale.customerId);
-        if (customer) {
+        try {
+          const customerRef = doc(db, 'customers', sale.customerId);
           await updateDoc(customerRef, {
-            currentDue: Math.max(0, (customer.currentDue || 0) - sale.dueAmount),
-            totalSpent: Math.max(0, (customer.totalSpent || 0) - sale.finalAmount)
+            currentDue: increment(-(Number(sale.dueAmount) || 0)),
+            totalSpent: increment(-(Number(sale.finalAmount) || 0))
           });
+        } catch (e) {
+          console.warn(`Could not revert balance for customer ${sale.customerId}:`, e);
         }
       }
 
       await deleteDoc(doc(db, 'sales', sale.id));
       setNotification({ message: "Invoice deleted successfully", type: 'success' });
     } catch (error) {
-      console.error("Delete sale error", error);
-      setNotification({ message: "Failed to delete invoice", type: 'error' });
+      console.error("Delete sale error:", error);
+      setNotification({ message: `Failed to delete invoice: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1400,10 +1584,12 @@ export default function App() {
     setDiscount(sale.discount);
     setCheckoutData({
       customerId: sale.customerId || '',
-      paidAmount: sale.paidAmount,
-      paymentMethod: sale.paymentMethod
+      walkInName: !sale.customerId ? (sale.customerName || '') : '',
+      walkInPhone: !sale.customerId ? (sale.customerPhone || '') : '',
+      paidAmount: sale.paidAmount || 0,
+      paymentMethod: sale.paymentMethod || 'cash'
     });
-    setNotification({ message: `Editing Invoice #${sale.id.slice(-6).toUpperCase()}`, type: 'info' });
+    setNotification({ message: `Editing Invoice #${sale.id}`, type: 'info' });
   };
 
   useEffect(() => {
@@ -1438,7 +1624,6 @@ export default function App() {
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!confirm("Delete this user?")) return;
     try {
       await deleteDoc(doc(db, 'users', userId));
       setNotification({ message: 'User deleted successfully', type: 'success' });
@@ -1466,7 +1651,6 @@ export default function App() {
   };
 
   const handleDeleteEmployee = async (id: string) => {
-    if (!confirm("Delete this employee?")) return;
     try {
       await deleteDoc(doc(db, 'employees', id));
       setNotification({ message: 'Employee deleted successfully', type: 'success' });
@@ -1689,6 +1873,7 @@ export default function App() {
                 sales={sales} 
                 customers={customers} 
                 expenses={expenses}
+                dailyClosings={dailyClosings}
                 onViewProductHistory={(p) => {
                   setSelectedProductForHistory(p);
                 }}
@@ -1711,7 +1896,6 @@ export default function App() {
                 customers={customers}
                 checkoutData={checkoutData}
                 setCheckoutData={setCheckoutData}
-                onScanClick={() => setIsScannerOpen(true)}
                 editingSale={editingSale}
                 onCancelEdit={() => {
                   setEditingSale(null);
@@ -1726,9 +1910,11 @@ export default function App() {
               <Inventory 
                 products={products} 
                 categories={categories} 
+                stockRecords={stockRecords}
                 onViewHistory={(p) => {
                   setSelectedProductForHistory(p);
                 }}
+                setNotification={setNotification}
               />
             )}
             {activeTab === 'sales' && (
@@ -1739,7 +1925,14 @@ export default function App() {
                 settings={shopSettings}
               />
             )}
-            {activeTab === 'customers' && <Customers customers={customers} sales={sales} />}
+            {activeTab === 'customers' && (
+              <Customers 
+                customers={customers} 
+                sales={sales} 
+                setNotification={setNotification}
+                shopSettings={shopSettings}
+              />
+            )}
             {activeTab === 'employees' && (
               <EmployeeManagement 
                 employees={employees} 
@@ -1801,7 +1994,7 @@ export default function App() {
                 <CheckCircle2 className="w-10 h-10 text-green-600" />
               </div>
               <h2 className="text-2xl font-bold text-gray-900 mb-2">Order Successful!</h2>
-              <p className="text-gray-500 mb-8">Invoice #{lastCompletedSale.id.slice(-6).toUpperCase()} has been generated.</p>
+              <p className="text-gray-500 mb-8">Invoice #{lastCompletedSale.id} has been generated.</p>
               
               <div className="grid grid-cols-1 gap-3">
                 <button 
@@ -1883,7 +2076,7 @@ export default function App() {
                     )}
                     <h4 className="text-2xl font-black text-indigo-600">{shopSettings.name}</h4>
                     <p className="text-[10px] text-gray-500 max-w-[200px] mx-auto leading-relaxed">{shopSettings.address}</p>
-                    <p className="text-sm text-gray-500 pt-2">Invoice: #{lastSale.id.slice(-6).toUpperCase()}</p>
+                    <p className="text-sm text-gray-500 pt-2">Invoice: #{lastSale.id}</p>
                     <p className="text-xs text-gray-400">{format(new Date(), 'MMM dd, yyyy hh:mm a')}</p>
                   </div>
 
@@ -1895,7 +2088,12 @@ export default function App() {
                     {lastSale.customerPhone && (
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-500">Phone:</span>
-                        <span className="text-gray-900">{lastSale.customerPhone}</span>
+                        <a 
+                          href={`tel:${lastSale.customerPhone.replace(/\D/g, '')}`} 
+                          className="text-gray-900 hover:text-indigo-600 hover:underline transition-colors"
+                        >
+                          {lastSale.customerPhone}
+                        </a>
                       </div>
                     )}
                   </div>
@@ -1978,6 +2176,7 @@ export default function App() {
           <ProductHistory 
             product={selectedProductForHistory} 
             sales={sales} 
+            stockRecords={stockRecords}
             onClose={() => setSelectedProductForHistory(null)} 
           />
         )}
@@ -2031,15 +2230,32 @@ function BarcodeScanner({ onScan, onClose }: { onScan: (data: string) => void, o
   );
 }
 
-function Dashboard({ products, sales, customers, expenses, onViewProductHistory }: { products: Product[], sales: Sale[], customers: Customer[], expenses: Expense[], onViewProductHistory: (p: Product) => void }) {
+function Dashboard({ products, sales, customers, expenses, dailyClosings, onViewProductHistory }: { products: Product[], sales: Sale[], customers: Customer[], expenses: Expense[], dailyClosings: DailyClosing[], onViewProductHistory: (p: Product) => void }) {
   const [period, setPeriod] = useState<'day' | 'week' | 'month' | 'year'>('day');
   const [viewMetric, setViewMetric] = useState<'revenue' | 'profit'>('revenue');
   const now = new Date();
 
+  // Find the last closing timestamp to define the current session
+  const lastClosingDate = useMemo(() => {
+    if (!dailyClosings || dailyClosings.length === 0) return null;
+    const sorted = [...dailyClosings].sort((a, b) => safeDate(b.timestamp).getTime() - safeDate(a.timestamp).getTime());
+    return safeDate(sorted[0].timestamp).getTime();
+  }, [dailyClosings]);
+
   const filteredSales = useMemo(() => {
     return sales.filter(s => {
-      const saleDate = s.timestamp.toDate();
-      if (period === 'day') return format(saleDate, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd');
+      const saleDate = safeDate(s.timestamp);
+      const saleTime = saleDate.getTime();
+      
+      // For 'day' view, we now show since last closing if a closing exists for today,
+      // or just today's sales if no closing or user wants session view.
+      // Based on user request: "whenever I do closing... after that moment it is zero"
+      if (period === 'day') {
+        const isSameDay = format(saleDate, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd');
+        const isAfterLastClosing = !lastClosingDate || saleTime > lastClosingDate;
+        return isSameDay && isAfterLastClosing;
+      }
+      
       if (period === 'week') {
         const weekAgo = new Date();
         weekAgo.setDate(now.getDate() - 7);
@@ -2060,8 +2276,13 @@ function Dashboard({ products, sales, customers, expenses, onViewProductHistory 
   }, 0);
 
   const totalExpensesInPeriod = expenses.filter(e => {
-    const expDate = e.timestamp.toDate();
-    if (period === 'day') return format(expDate, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd');
+    const expDate = safeDate(e.timestamp);
+    const expTime = expDate.getTime();
+    if (period === 'day') {
+      const isSameDay = format(expDate, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd');
+      const isAfterLastClosing = !lastClosingDate || expTime > lastClosingDate;
+      return isSameDay && isAfterLastClosing;
+    }
     if (period === 'week') {
       const weekAgo = new Date();
       weekAgo.setDate(now.getDate() - 7);
@@ -2093,7 +2314,10 @@ function Dashboard({ products, sales, customers, expenses, onViewProductHistory 
 
   const stats = useMemo(() => {
     const today = format(now, 'yyyy-MM-dd');
-    const todaySales = sales.filter(s => format(s.timestamp.toDate(), 'yyyy-MM-dd') === today);
+    const todaySales = sales.filter(s => {
+      const ts = safeDate(s.timestamp);
+      return format(ts, 'yyyy-MM-dd') === today && (!lastClosingDate || ts.getTime() > lastClosingDate);
+    });
     const todayCash = todaySales.reduce((sum, s) => sum + s.paidAmount, 0);
     const todayDue = todaySales.reduce((sum, s) => sum + s.dueAmount, 0);
     
@@ -2123,7 +2347,7 @@ function Dashboard({ products, sales, customers, expenses, onViewProductHistory 
 
     return labels.map(label => {
       const periodSales = sales.filter(s => {
-        const saleDate = s.timestamp.toDate();
+        const saleDate = safeDate(s.timestamp);
         if (period === 'year') return format(saleDate, 'MMM') === label;
         return format(saleDate, 'MMM dd') === label;
       });
@@ -2360,7 +2584,20 @@ function Dashboard({ products, sales, customers, expenses, onViewProductHistory 
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-gray-900">{sale.customerName || 'Walk-in'}</p>
-                    <p className="text-xs text-gray-500">{format(sale.timestamp.toDate(), 'hh:mm a')}</p>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <span>{format(safeDate(sale.timestamp), 'hh:mm a')}</span>
+                      {sale.customerPhone && (
+                        <>
+                          <span>•</span>
+                          <a 
+                            href={`tel:${sale.customerPhone.replace(/\D/g, '')}`} 
+                            className="hover:text-indigo-600 hover:underline transition-colors"
+                          >
+                            {sale.customerPhone}
+                          </a>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="text-right">
@@ -2406,8 +2643,9 @@ function AlertBox({ icon: Icon, label, count, color, bgColor, items, onItemClick
   );
 }
 
-function ProductHistory({ product, sales, onClose }: { product: Product, sales: Sale[], onClose: () => void }) {
+function ProductHistory({ product, sales, stockRecords, onClose }: { product: Product, sales: Sale[], stockRecords: StockRecord[], onClose: () => void }) {
   const productSales = sales.filter(s => s.items.some(item => item.productId === product.id));
+  const productStockRecords = stockRecords.filter(r => r.productId === product.id);
   
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -2448,8 +2686,8 @@ function ProductHistory({ product, sales, onClose }: { product: Product, sales: 
                       <div key={sale.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100">
                         <div className="flex items-center gap-4">
                           <div className="text-center min-w-[60px]">
-                            <p className="text-xs font-bold text-gray-400">{format(sale.timestamp.toDate(), 'MMM dd')}</p>
-                            <p className="text-[10px] text-gray-400">{format(sale.timestamp.toDate(), 'yyyy')}</p>
+                            <p className="text-xs font-bold text-gray-400">{format(safeDate(sale.timestamp), 'MMM dd')}</p>
+                            <p className="text-[10px] text-gray-400">{format(safeDate(sale.timestamp), 'yyyy')}</p>
                           </div>
                           <div className="w-px h-8 bg-gray-200" />
                           <div>
@@ -2459,11 +2697,63 @@ function ProductHistory({ product, sales, onClose }: { product: Product, sales: 
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-bold text-indigo-600">TK {(item?.quantity || 0) * (item?.price || 0)}</p>
-                          <p className="text-[10px] text-gray-400">Invoice: #{sale.id.slice(-6).toUpperCase()}</p>
+                          <p className="text-[10px] text-gray-400">Invoice: #{sale.id}</p>
                         </div>
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </section>
+
+            <section>
+              <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
+                Stock In / Adjustment History
+              </h4>
+              {productStockRecords.length === 0 ? (
+                <p className="text-sm text-gray-400 italic">No stock adjustments recorded yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {productStockRecords
+                    .sort((a,b) => safeDate(b.timestamp).getTime() - safeDate(a.timestamp).getTime())
+                    .map(record => (
+                      <div key={record.id} className="flex items-center justify-between p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100">
+                        <div className="flex items-center gap-4">
+                          <div className="text-center min-w-[60px]">
+                            <p className="text-xs font-bold text-gray-400">{format(safeDate(record.timestamp), 'MMM dd')}</p>
+                            <p className="text-[10px] text-gray-400">{format(safeDate(record.timestamp), 'yyyy')}</p>
+                          </div>
+                          <div className="w-px h-8 bg-emerald-200" />
+                          <div>
+                            <p className="text-sm font-bold text-gray-900">
+                              {record.type === 'add' ? 'Stock Added' : 'Adjustment'}
+                              {record.batchNumber && <span className="ml-2 text-[10px] bg-emerald-200 px-1.5 py-0.5 rounded uppercase">Batch: {record.batchNumber}</span>}
+                            </p>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 mt-1">
+                              <span className="flex items-center gap-1">
+                                <Plus className="w-3 h-3" /> {record.quantity} {product.unit}
+                              </span>
+                              {record.location && (
+                                <span className="flex items-center gap-1">
+                                  <WarehouseIcon className="w-3 h-3" /> {record.location}
+                                </span>
+                              )}
+                              {record.expiryDate && (
+                                <span className="flex items-center gap-1 text-amber-600 font-semibold">
+                                  <Calendar className="w-3 h-3" /> Exp: {record.expiryDate}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        {record.note && (
+                          <div className="max-w-[150px] text-right">
+                            <p className="text-[10px] text-gray-400 italic truncate" title={record.note}>{record.note}</p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                 </div>
               )}
             </section>
@@ -2493,7 +2783,8 @@ function Calculator() {
     } else if (val === '=') {
       try {
         // eslint-disable-next-line no-eval
-        setDisplay(eval(display).toString());
+        const result = eval(display);
+        setDisplay(String(result ?? '0'));
       } catch {
         setDisplay('Error');
       }
@@ -2568,12 +2859,19 @@ function StatCard({ label, value, icon: Icon, color }: { label: string, value: s
 function EmployeeManagement({ employees, onAdd, onUpdate, onDelete }: { employees: Employee[], onAdd: (e: Omit<Employee, 'id'>) => void, onUpdate: (id: string, e: Partial<Employee>) => void, onDelete: (id: string) => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleClick = () => setConfirmDeleteId(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, []);
   const [searchTerm, setSearchTerm] = useState('');
 
   const filteredEmployees = employees.filter(e => 
-    e.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    e.designation.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    e.phone.includes(searchTerm)
+    e.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    e.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    e.phone?.includes(searchTerm)
   );
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -2655,7 +2953,12 @@ function EmployeeManagement({ employees, onAdd, onUpdate, onDelete }: { employee
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <p className="text-sm text-gray-900">{emp.phone}</p>
+                    <a 
+                      href={`tel:${emp.phone.replace(/\D/g, '')}`} 
+                      className="text-sm text-gray-900 hover:text-indigo-600 hover:underline transition-colors"
+                    >
+                      {emp.phone}
+                    </a>
                     <p className="text-xs text-gray-500">{emp.email || 'No email'}</p>
                   </td>
                   <td className="px-6 py-4">
@@ -2678,10 +2981,27 @@ function EmployeeManagement({ employees, onAdd, onUpdate, onDelete }: { employee
                         <Edit className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={() => onDelete(emp.id)}
-                        className="p-2 text-gray-400 hover:text-red-600 transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirmDeleteId === emp.id) {
+                            onDelete(emp.id);
+                            setConfirmDeleteId(null);
+                          } else {
+                            setConfirmDeleteId(emp.id);
+                          }
+                        }}
+                        className={`p-2 rounded-lg transition-all relative ${
+                          confirmDeleteId === emp.id 
+                            ? "bg-red-600 text-white hover:bg-red-700 shadow-lg scale-110" 
+                            : "text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        }`}
+                        title={confirmDeleteId === emp.id ? "Click again to confirm" : "Delete Employee"}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        {confirmDeleteId === emp.id ? (
+                          <span className="text-[10px] font-bold px-1 animate-pulse">Confirm?</span>
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
                       </button>
                     </div>
                   </td>
@@ -2711,31 +3031,31 @@ function EmployeeManagement({ employees, onAdd, onUpdate, onDelete }: { employee
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Full Name *</label>
-                    <input name="name" defaultValue={editingEmployee?.name} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    <input name="name" defaultValue={editingEmployee?.name || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Designation *</label>
-                    <input name="designation" defaultValue={editingEmployee?.designation} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    <input name="designation" defaultValue={editingEmployee?.designation || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Phone Number *</label>
-                    <input name="phone" defaultValue={editingEmployee?.phone} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    <input name="phone" defaultValue={editingEmployee?.phone || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Email Address</label>
-                    <input name="email" type="email" defaultValue={editingEmployee?.email} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    <input name="email" type="email" defaultValue={editingEmployee?.email || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Monthly Salary *</label>
-                    <input name="salary" type="number" defaultValue={editingEmployee?.salary} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    <input name="salary" type="number" defaultValue={editingEmployee?.salary || 0} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Joining Date</label>
-                    <input name="joiningDate" type="date" defaultValue={editingEmployee?.joiningDate} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    <input name="joiningDate" type="date" defaultValue={editingEmployee?.joiningDate || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Work Schedule</label>
-                    <input name="schedule" defaultValue={editingEmployee?.schedule} placeholder="e.g. 9 AM - 6 PM" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    <input name="schedule" defaultValue={editingEmployee?.schedule || ''} placeholder="e.g. 9 AM - 6 PM" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Status</label>
@@ -2783,11 +3103,18 @@ function POS({
 }: any) {
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
   const filteredProducts = products.filter((p: Product) => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    p.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
     p.barcode?.includes(searchTerm)
+  );
+
+  const filteredCustomers = customers.filter((c: Customer) => 
+    c.name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
+    c.phone?.includes(customerSearch)
   );
 
   const selectedCustomer = customers.find((c: Customer) => c.id === checkoutData.customerId);
@@ -2799,87 +3126,111 @@ function POS({
       exit={{ opacity: 0, x: -20 }}
       className="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:h-[calc(100vh-8rem)]"
     >
-      <div className="lg:col-span-2 flex flex-col space-y-6 min-h-[500px] lg:min-h-0">
-        <div className="flex flex-col sm:flex-row gap-4">
+      <div className="lg:col-span-2 flex flex-col space-y-4">
+        <div className="flex items-center gap-2">
           <div className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input 
               type="text"
               placeholder="Search products..."
-              className="w-full pl-12 pr-4 py-4 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
+              className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-lg outline-none text-sm"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <div className="flex gap-2">
-            <button 
+          <button 
               onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-              className="px-4 py-4 bg-white border border-gray-200 text-gray-600 rounded-2xl hover:bg-gray-50 transition-colors shadow-sm"
-              title={viewMode === 'grid' ? 'Switch to List View' : 'Switch to Grid View'}
+              className="p-2 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
             >
               {viewMode === 'grid' ? <Menu className="w-5 h-5" /> : <LayoutDashboard className="w-5 h-5" />}
-            </button>
-            <button 
-              onClick={onScanClick}
-              className="px-4 py-4 bg-indigo-50 text-indigo-600 rounded-2xl hover:bg-indigo-100 transition-colors flex items-center gap-2 border border-indigo-100"
-            >
-              <Scan className="w-5 h-5" />
-              <span className="hidden sm:inline">Scan</span>
-            </button>
-            <div className="flex flex-col sm:flex-row gap-2 flex-1">
-              <select 
-                className="w-full sm:w-64 px-4 py-4 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
-                value={checkoutData.customerId}
-                onChange={(e) => setCheckoutData({ ...checkoutData, customerId: e.target.value })}
-              >
-                <option value="">Walk-in Customer</option>
-                {customers.map((c: Customer) => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
-                ))}
-              </select>
-              {!checkoutData.customerId && (
-                <div className="flex gap-2 flex-1">
-                  <input 
-                    type="text"
-                    placeholder="Walk-in Name (Optional)"
-                    className="flex-1 px-4 py-4 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
-                    value={checkoutData.walkInName}
-                    onChange={(e) => setCheckoutData({ ...checkoutData, walkInName: e.target.value })}
-                  />
-                  <input 
-                    type="text"
-                    placeholder="Phone (Optional)"
-                    className="w-32 px-4 py-4 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
-                    value={checkoutData.walkInPhone}
-                    onChange={(e) => setCheckoutData({ ...checkoutData, walkInPhone: e.target.value })}
-                  />
+          </button>
+          
+          {/* Compact Customer Area */}
+          <div className="flex-1 relative bg-white border border-gray-200 rounded-lg shadow-sm text-sm">
+            {checkoutData.customerId ? (
+              <div className="flex items-center justify-between px-3 py-2">
+                <div className="flex flex-col truncate">
+                  <span className="font-bold text-indigo-700 truncate">{selectedCustomer?.name}</span>
+                  <span className="text-[10px] text-gray-500">{selectedCustomer?.phone}</span>
                 </div>
-              )}
-            </div>
+                <button 
+                  onClick={() => setCheckoutData({...checkoutData, customerId: '', paymentMethod: 'cash'})}
+                  className="text-gray-400 hover:text-red-500"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex">
+                <input
+                  type="text"
+                  placeholder="Cust. Name"
+                  className="flex-[2] px-3 py-2 outline-none"
+                  value={isCustomerDropdownOpen ? customerSearch : checkoutData.walkInName}
+                  onChange={(e) => {
+                    setCustomerSearch(e.target.value);
+                    setIsCustomerDropdownOpen(true);
+                    setCheckoutData({...checkoutData, walkInName: e.target.value});
+                  }}
+                  onFocus={() => setIsCustomerDropdownOpen(true)}
+                />
+                <input 
+                  type="text"
+                  placeholder="Phone"
+                  className="flex-[3] px-2 py-2 border-l border-gray-100 outline-none"
+                  value={checkoutData.walkInPhone}
+                  onChange={(e) => {
+                    const phone = e.target.value;
+                    const matchingCustomer = customers.find(c => c.phone === phone);
+                    if (matchingCustomer) {
+                      setCheckoutData({ ...checkoutData, customerId: matchingCustomer.id, walkInName: matchingCustomer.name, walkInPhone: phone, paymentMethod: 'due' });
+                    } else {
+                      setCheckoutData({ ...checkoutData, walkInPhone: phone });
+                    }
+                  }}
+                />
+              </div>
+            )}
+            
+            {isCustomerDropdownOpen && !checkoutData.customerId && (
+              <div className="absolute top-full left-0 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-40 overflow-y-auto">
+                {filteredCustomers.map((c: Customer) => (
+                  <div 
+                    key={c.id}
+                    className="px-4 py-2 hover:bg-indigo-50 cursor-pointer text-xs"
+                    onClick={() => {
+                      setCheckoutData({ ...checkoutData, customerId: c.id, walkInName: c.name, walkInPhone: c.phone, paymentMethod: 'due' });
+                      setCustomerSearch('');
+                      setIsCustomerDropdownOpen(false);
+                    }}
+                  >
+                    <span className="font-bold">{c.name}</span> - <span>{c.phone}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
         <div className="flex-1 lg:overflow-y-auto pb-4">
           {viewMode === 'grid' ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
               {filteredProducts.map((product: Product) => (
-                <button
-                  key={product.id}
-                  onClick={() => addToCart(product)}
-                  className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:border-indigo-500 hover:shadow-md transition-all text-left group"
-                >
-                  <div className="w-full aspect-square bg-gray-50 rounded-xl mb-4 flex items-center justify-center group-hover:bg-indigo-50 transition-colors">
-                    <Package className="w-10 h-10 text-gray-300 group-hover:text-indigo-300" />
-                  </div>
-                  <p className="font-bold text-gray-900 truncate">{product.name}</p>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className="text-indigo-600 font-bold">{formatCurrency(product.price)}</span>
-                    <span className="text-[10px] text-gray-400">/{product.unit}</span>
-                  </div>
-                  {product.expiryDate && (
-                    <p className="text-[10px] text-amber-600 mt-1">Exp: {product.expiryDate}</p>
-                  )}
-                </button>
+                  <button
+                    key={product.id}
+                    onClick={() => addToCart(product)}
+                    className="bg-white p-1 rounded-lg border border-gray-100 shadow-sm hover:border-indigo-500 hover:shadow-md transition-all text-left group"
+                  >
+                    <div className="w-full aspect-square bg-gray-50 rounded mb-1 flex items-center justify-center group-hover:bg-indigo-50 transition-colors">
+                      <Package className="w-4 h-4 text-gray-300 group-hover:text-indigo-300" />
+                    </div>
+                    <p className="font-bold text-gray-900 truncate text-[9px]">{product.name}</p>
+                    <p className="text-[9px] text-gray-500">Stock: {product.stock} {product.unit}</p>
+                    <div className="flex items-center justify-between mt-0.5">
+                      <span className="text-indigo-600 font-bold text-xs">{formatCurrency(product.price)}</span>
+                      <span className="text-[9px] text-gray-400">/{product.unit}</span>
+                    </div>
+                  </button>
               ))}
             </div>
           ) : (
@@ -2937,7 +3288,7 @@ function POS({
           </div>
           {editingSale && (
             <div className="mt-2 p-2 bg-indigo-50 rounded-lg text-[10px] text-indigo-700 font-bold">
-              Editing Invoice: #{editingSale.id.slice(-6).toUpperCase()}
+              Editing Invoice: #{editingSale.id}
             </div>
           )}
           {selectedCustomer && (
@@ -3020,7 +3371,7 @@ function POS({
                       <input 
                         type="number" 
                         step="0.01"
-                        value={item.quantity} 
+                        value={item.quantity || 0} 
                         onChange={(e) => updateCartQuantityManual(item.id, Number(e.target.value))}
                         className="w-12 text-center font-bold text-gray-900 bg-transparent outline-none text-xs"
                       />
@@ -3041,18 +3392,29 @@ function POS({
                     )}
                   </div>
 
-                  <div className="flex flex-col items-end gap-0.5">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-1 justify-end">
                       <input 
                         type="number" 
                         step="0.01"
-                        value={item.discountedPrice}
+                        value={item.discountedPrice || 0}
                         onChange={(e) => updateCartPriceManual(item.id, Number(e.target.value))}
-                        className="w-16 px-2 py-1 border border-gray-200 rounded-lg bg-white text-right font-bold text-indigo-600 outline-none focus:ring-2 focus:ring-indigo-500 text-xs"
+                        className="w-14 px-1 py-0.5 border border-gray-200 rounded text-right font-bold text-indigo-600 outline-none text-[10px]"
+                        title="Unit Price"
                       />
-                      <div className="text-right">
-                        <p className="font-bold text-gray-900 text-sm">{formatCurrency(item.discountedPrice * item.quantity)}</p>
-                      </div>
+                      <span className="text-[10px] text-gray-400">x</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={((item.discountedPrice || 0) * (item.quantity || 0)).toFixed(2)}
+                        onChange={(e) => {
+                          const newTotal = Number(e.target.value);
+                          const newPrice = newTotal / (item.quantity || 1);
+                          updateCartPriceManual(item.id, newPrice);
+                        }}
+                        className="w-16 px-1 py-0.5 border border-gray-200 rounded text-right font-bold text-gray-900 outline-none text-[10px]"
+                        title="Total Price"
+                      />
                     </div>
                   </div>
                 </div>
@@ -3071,7 +3433,7 @@ function POS({
               <span>Discount</span>
               <input 
                 type="number" 
-                value={discount} 
+                value={discount || 0} 
                 onChange={(e) => setDiscount(Number(e.target.value))}
                 className="w-16 bg-white border border-gray-200 rounded px-2 py-1 text-right text-xs outline-none focus:ring-1 focus:ring-indigo-500"
               />
@@ -3086,16 +3448,17 @@ function POS({
             <div className="flex gap-2">
               <button 
                 onClick={() => setCheckoutData({ ...checkoutData, paymentMethod: 'cash' })}
-                className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${checkoutData.paymentMethod === 'cash' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 border border-gray-200'}`}
+                disabled={!!checkoutData.customerId}
+                className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${checkoutData.paymentMethod === 'cash' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 border border-gray-200'} ${!!checkoutData.customerId ? 'opacity-50 cursor-not-allowed' : ''}`}
               >Cash</button>
               <button 
                 onClick={() => setCheckoutData({ ...checkoutData, paymentMethod: 'due' })}
-                className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${checkoutData.paymentMethod === 'due' ? 'bg-amber-600 text-white' : 'bg-white text-gray-500 border border-gray-200'}`}
+                disabled={!checkoutData.customerId}
+                className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${checkoutData.paymentMethod === 'due' ? 'bg-amber-600 text-white' : 'bg-white text-gray-500 border border-gray-200'} ${!checkoutData.customerId ? 'opacity-50 cursor-not-allowed' : ''}`}
               >Due</button>
             </div>
             
-            {checkoutData.paymentMethod === 'cash' && (
-              <div>
+            <div>
                 <div className="flex justify-between items-center mb-0.5">
                   <label className="block text-[9px] font-bold text-gray-400 uppercase">Paid Amount</label>
                   <button 
@@ -3107,51 +3470,99 @@ function POS({
                 </div>
                 <input 
                   type="number" 
-                  value={checkoutData.paidAmount}
+                  value={checkoutData.paidAmount || 0}
                   onChange={(e) => setCheckoutData({ ...checkoutData, paidAmount: Number(e.target.value) })}
                   className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                 />
-                {checkoutData.paidAmount < finalTotal && (
+                
+                {checkoutData.customerId && (
+                  <div className="mt-2 space-y-1 text-xs border-t pt-2 mt-2">
+                    <div className="flex justify-between">
+                      <span>Today's Bill:</span>
+                      <span className="font-bold">TK {finalTotal.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Previous Due:</span>
+                      <span className="font-bold">TK {(selectedCustomer?.currentDue || 0).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-gray-900 border-t pt-1">
+                      <span>Total Before Payment:</span>
+                      <span>TK {(finalTotal + (selectedCustomer?.currentDue || 0)).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-indigo-600">
+                      <span>Payment Today:</span>
+                      <span className="font-bold">TK {checkoutData.paidAmount || 0}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-lg text-indigo-900 border-t pt-1 mt-1">
+                      <span>Remaining Due:</span>
+                      <span>TK {(finalTotal + (selectedCustomer?.currentDue || 0) - (checkoutData.paidAmount || 0)).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
+                
+                {!checkoutData.customerId && checkoutData.paidAmount < finalTotal && (
                   <p className="text-[9px] text-amber-600 mt-0.5">Remaining TK {finalTotal - checkoutData.paidAmount} will be added to Due</p>
                 )}
-                {checkoutData.paidAmount > finalTotal && (
+                {!checkoutData.customerId && checkoutData.paidAmount > finalTotal && (
                   <p className="text-[9px] text-emerald-600 mt-0.5">Change: TK {checkoutData.paidAmount - finalTotal}</p>
                 )}
               </div>
-            )}
           </div>
 
-          <button 
-            onClick={handleCheckout}
-            disabled={cart.length === 0}
-            className={`w-full py-3 text-white rounded-2xl font-bold transition-all shadow-lg disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2 text-sm ${editingSale ? 'bg-indigo-700 hover:bg-indigo-800 shadow-indigo-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            {editingSale ? 'Update Order' : 'Complete Order'}
-          </button>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button 
+              onClick={() => handleCheckout(false)}
+              disabled={cart.length === 0}
+              className={`py-3 text-white rounded-xl text-xs font-bold ${editingSale ? 'bg-indigo-700' : 'bg-indigo-600'}`}
+            >
+              Order {editingSale ? 'Update' : 'Complete'}
+            </button>
+            <button 
+              onClick={() => handleCheckout(true)}
+              disabled={cart.length === 0}
+              className={`py-3 text-white rounded-xl text-xs font-bold ${editingSale ? 'bg-emerald-700' : 'bg-emerald-600'}`}
+            >
+              + WhatsApp
+            </button>
+          </div>
         </div>
       </div>
     </motion.div>
   );
 }
 
-function Inventory({ products, categories, onViewHistory }: { products: Product[], categories: Category[], onViewHistory: (p: Product) => void }) {
+function Inventory({ products, categories, stockRecords, onViewHistory, setNotification }: { 
+  products: Product[], 
+  categories: Category[], 
+  stockRecords: StockRecord[],
+  onViewHistory: (p: Product) => void,
+  setNotification: (n: { message: string, type: 'success' | 'error' | 'info' } | null) => void
+}) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [addingStockProduct, setAddingStockProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [productImage, setProductImage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [categorySearch, setCategorySearch] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Clear confirmation state if user clicks elsewhere
+  useEffect(() => {
+    const handleClick = () => setConfirmDeleteId(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, []);
 
   const filteredCategories = FIXED_CATEGORIES.filter(cat => 
     cat.toLowerCase().includes(categorySearch.toLowerCase())
   );
 
   const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    p.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
     p.barcode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.serialNumber.toString().includes(searchTerm) ||
-    p.category.toLowerCase().includes(searchTerm.toLowerCase())
+    p.serialNumber?.toString().includes(searchTerm) ||
+    p.category?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   useEffect(() => {
@@ -3161,6 +3572,52 @@ function Inventory({ products, categories, onViewHistory }: { products: Product[
       setProductImage(null);
     }
   }, [editingProduct]);
+
+  const handleAddStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addingStockProduct) return;
+    
+    const form = e.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const quantity = Number(formData.get('quantity'));
+    const expiryDate = formData.get('expiryDate') as string;
+    
+    if (isNaN(quantity) || quantity <= 0) {
+      setNotification({ message: "Please enter a valid quantity", type: 'error' });
+      return;
+    }
+
+    try {
+      const stockData = {
+        productId: addingStockProduct.id,
+        quantity: quantity,
+        type: 'add' as const,
+        timestamp: new Date(),
+        expiryDate: expiryDate || '',
+        batchNumber: formData.get('batchNumber') as string || '',
+        location: formData.get('location') as string || '',
+        note: formData.get('note') as string || 'Manual stock add'
+      };
+
+      await addDoc(collection(db, 'stockRecords'), stockData);
+      
+      const updateData: any = {
+        stock: increment(quantity)
+      };
+      
+      // If new expiry date provided, update product's main expiry date too
+      if (expiryDate) {
+        updateData.expiryDate = expiryDate;
+      }
+
+      await updateDoc(doc(db, 'products', addingStockProduct.id), updateData);
+
+      setNotification({ message: "Stock added successfully", type: 'success' });
+      setAddingStockProduct(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'stockRecords');
+    }
+  };
 
   const handleDownloadCSV = () => {
     const csvData = products.map(p => ({
@@ -3300,11 +3757,13 @@ function Inventory({ products, categories, onViewHistory }: { products: Product[
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this product?")) return;
     try {
       await deleteDoc(doc(db, 'products', id));
+      setNotification({ message: "Product deleted successfully", type: 'success' });
+      setConfirmDeleteId(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'products');
+      setNotification({ message: "Failed to delete product", type: 'error' });
     }
   };
 
@@ -3383,6 +3842,12 @@ function Inventory({ products, categories, onViewHistory }: { products: Product[
                           <span className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">SN: {product.serialNumber}</span>
                           <span>Barcode: {product.barcode || 'N/A'}</span>
                         </div>
+                        {product.expiryDate && (
+                          <div className="flex items-center gap-1 text-[9px] text-amber-600 font-bold mt-1 uppercase bg-amber-50 w-fit px-1.5 rounded">
+                            <Calendar className="w-2.5 h-2.5" />
+                            Exp: {product.expiryDate}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -3404,15 +3869,22 @@ function Inventory({ products, categories, onViewHistory }: { products: Product[
                       </span>
                     </div>
                   </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                      product.stock < 10 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
+                  <td className="px-6 py-4 cursor-pointer group" onClick={() => onViewHistory(product)}>
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium transition-all group-hover:ring-2 group-hover:ring-offset-2 ${
+                      product.stock < 10 ? 'bg-red-50 text-red-600 group-hover:ring-red-500' : 'bg-emerald-50 text-emerald-600 group-hover:ring-emerald-500'
                     }`}>
                       {product.stock} {product.unit || 'pcs'}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <button 
+                        onClick={() => setAddingStockProduct(product)}
+                        className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                        title="Add Stock"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
                       <button 
                         onClick={() => onViewHistory(product)}
                         className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
@@ -3427,10 +3899,26 @@ function Inventory({ products, categories, onViewHistory }: { products: Product[
                         <Edit className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={() => handleDelete(product.id)}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirmDeleteId === product.id) {
+                            handleDelete(product.id);
+                          } else {
+                            setConfirmDeleteId(product.id);
+                          }
+                        }}
+                        className={`p-2 rounded-lg transition-all relative ${
+                          confirmDeleteId === product.id 
+                            ? "bg-red-600 text-white hover:bg-red-700 shadow-lg scale-110" 
+                            : "text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        }`}
+                        title={confirmDeleteId === product.id ? "Click again to confirm" : "Delete Product"}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        {confirmDeleteId === product.id ? (
+                          <span className="text-[10px] font-bold px-1 animate-pulse">Confirm?</span>
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
                       </button>
                     </div>
                   </td>
@@ -3488,7 +3976,7 @@ function Inventory({ products, categories, onViewHistory }: { products: Product[
                 <div className="grid grid-cols-2 gap-6">
                   <div className="col-span-2">
                     <label className="block text-sm font-bold text-gray-700 mb-2">Product Name *</label>
-                    <input name="name" defaultValue={editingProduct?.name} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Enter product name" />
+                    <input name="name" defaultValue={editingProduct?.name || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Enter product name" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Category *</label>
@@ -3498,12 +3986,12 @@ function Inventory({ products, categories, onViewHistory }: { products: Product[
                         <input 
                           type="text" 
                           placeholder="Search category..." 
-                          value={categorySearch}
+                          value={categorySearch || ''}
                           onChange={(e) => setCategorySearch(e.target.value)}
                           className="w-full pl-9 pr-4 py-2 text-sm rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none"
                         />
                       </div>
-                      <select name="category" defaultValue={editingProduct?.category} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none">
+                      <select name="category" defaultValue={editingProduct?.category || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none">
                         <option value="">Select Category</option>
                         {filteredCategories.map(cat => (
                           <option key={cat} value={cat}>{cat}</option>
@@ -3520,11 +4008,11 @@ function Inventory({ products, categories, onViewHistory }: { products: Product[
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Selling Price *</label>
-                    <input name="price" type="number" step="0.01" defaultValue={editingProduct?.price} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="0.00" />
+                    <input name="price" type="number" step="0.01" defaultValue={editingProduct?.price || 0} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="0.00" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Buying Price (Cost)</label>
-                    <input name="cost" type="number" step="0.01" defaultValue={editingProduct?.cost} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="0.00" />
+                    <input name="cost" type="number" step="0.01" defaultValue={editingProduct?.cost || 0} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="0.00" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Initial Stock</label>
@@ -3532,21 +4020,80 @@ function Inventory({ products, categories, onViewHistory }: { products: Product[
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Barcode</label>
-                    <input name="barcode" defaultValue={editingProduct?.barcode} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Scan or enter barcode" />
+                    <input name="barcode" defaultValue={editingProduct?.barcode || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Scan or enter barcode" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Expiry Date</label>
-                    <input name="expiryDate" type="date" defaultValue={editingProduct?.expiryDate} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    <input name="expiryDate" type="date" defaultValue={editingProduct?.expiryDate || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Location (Shelf/Aisle)</label>
-                    <input name="location" defaultValue={editingProduct?.location} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. Shelf A1" />
+                    <input name="location" defaultValue={editingProduct?.location || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. Shelf A1" />
                   </div>
                 </div>
                 <div className="flex justify-end gap-4 pt-4">
                   <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-3 text-gray-600 font-semibold hover:bg-gray-100 rounded-xl transition-colors">Cancel</button>
                   <button type="submit" className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
                     Save Product
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Stock Modal */}
+      <AnimatePresence>
+        {addingStockProduct && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600">
+                    <TrendingUp className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900">Add Stock</h3>
+                    <p className="text-xs text-gray-500">{addingStockProduct.name}</p>
+                  </div>
+                </div>
+                <button onClick={() => setAddingStockProduct(null)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleAddStock} className="p-8 space-y-6">
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="col-span-2">
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Quantity ({addingStockProduct.unit}) *</label>
+                    <input name="quantity" type="number" step="0.001" required autoFocus className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Enter quantity to add" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Batch Number</label>
+                    <input name="batchNumber" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Batch #" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Expiry Date</label>
+                    <input name="expiryDate" type="date" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-amber-500 outline-none" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Stock Location</label>
+                    <input name="location" defaultValue={addingStockProduct.location || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. Shelf A1" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Notes</label>
+                    <textarea name="note" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none" placeholder="Optional notes..."></textarea>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-4 pt-4">
+                  <button type="button" onClick={() => setAddingStockProduct(null)} className="px-6 py-3 text-gray-600 font-semibold hover:bg-gray-100 rounded-xl transition-colors">Cancel</button>
+                  <button type="submit" className="px-8 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100">
+                    Update Stock
                   </button>
                 </div>
               </form>
@@ -3561,7 +4108,15 @@ function Inventory({ products, categories, onViewHistory }: { products: Product[
 function SalesHistory({ sales, onEdit, onDelete, settings }: { sales: Sale[], onEdit: (s: Sale) => void, onDelete: (s: Sale) => void, settings: ShopSettings }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
-  
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Clear confirmation state if user clicks elsewhere
+  useEffect(() => {
+    const handleClick = () => setConfirmDeleteId(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, []);
+
   const filteredSales = sales.filter(s => 
     s.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
     s.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -3613,13 +4168,21 @@ function SalesHistory({ sales, onEdit, onDelete, settings }: { sales: Sale[], on
                   onClick={() => setSelectedSale(sale)}
                 >
                   <td className="px-6 py-4">
-                    <p className="font-semibold text-gray-900">{format(sale.timestamp.toDate(), 'MMM dd, yyyy')}</p>
-                    <p className="text-xs text-gray-500">{format(sale.timestamp.toDate(), 'hh:mm a')}</p>
-                    <p className="text-[10px] font-mono text-indigo-400">#{sale.id.slice(-6).toUpperCase()}</p>
+                    <p className="font-semibold text-gray-900">{format(safeDate(sale.timestamp), 'MMM dd, yyyy')}</p>
+                    <p className="text-xs text-gray-500">{format(safeDate(sale.timestamp), 'hh:mm a')}</p>
+                    <p className="text-[10px] font-mono text-indigo-400">#{sale.id}</p>
                   </td>
                   <td className="px-6 py-4">
                     <p className="font-semibold text-gray-900">{sale.customerName || 'Walk-in'}</p>
-                    <p className="text-xs text-gray-500">{sale.customerPhone || 'N/A'}</p>
+                    {sale.customerPhone && (
+                      <a 
+                        href={`tel:${sale.customerPhone.replace(/\D/g, '')}`} 
+                        className="text-xs text-gray-500 hover:text-indigo-600 hover:underline transition-colors"
+                      >
+                        {sale.customerPhone}
+                      </a>
+                    )}
+                    {!sale.customerPhone && <p className="text-xs text-gray-500">N/A</p>}
                   </td>
                   <td className="px-6 py-4 font-bold text-gray-900">{formatCurrency(sale.finalAmount)}</td>
                   <td className="px-6 py-4">
@@ -3635,43 +4198,95 @@ function SalesHistory({ sales, onEdit, onDelete, settings }: { sales: Sale[], on
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-2">
                       <button 
-                        onClick={() => printInvoice(sale, settings)}
-                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        id={`print-sale-${sale.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          printInvoice(sale, settings);
+                        }}
+                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all relative z-10"
                         title="Print Invoice"
                       >
                         <Printer className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={() => downloadInvoicePDF(sale, settings)}
-                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        id={`download-sale-${sale.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          downloadInvoicePDF(sale, settings);
+                        }}
+                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all relative z-10"
                         title="Download PDF"
                       >
                         <Download className="w-4 h-4" />
                       </button>
                       {sale.customerPhone && (
-                        <button 
-                          onClick={() => sendWhatsAppInvoice(sale, settings)}
-                          className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-                          title="Send via WhatsApp"
-                        >
-                          <MessageCircle className="w-4 h-4" />
-                        </button>
+                        <div className="flex gap-1">
+                          {settings.waTemplateEnglish && (
+                            <button 
+                              id={`wa-sale-en-${sale.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                sendWhatsAppInvoice(sale, settings, 'en');
+                              }}
+                              className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all relative z-10"
+                              title="Send via WhatsApp (English)"
+                            >
+                              <MessageCircle className="w-4 h-4" />
+                              <span className="text-[9px] font-bold">En</span>
+                            </button>
+                          )}
+                          {settings.waTemplateBengali && (
+                            <button 
+                              id={`wa-sale-bn-${sale.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                sendWhatsAppInvoice(sale, settings, 'bn');
+                              }}
+                              className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all relative z-10"
+                              title="Send via WhatsApp (Bengali)"
+                            >
+                              <MessageCircle className="w-4 h-4" />
+                              <span className="text-[9px] font-bold">Bn</span>
+                            </button>
+                          )}
+                        </div>
                       )}
                       <button 
-                        onClick={() => onEdit(sale)}
-                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        id={`edit-sale-${sale.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEdit(sale);
+                        }}
+                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all relative z-10"
                         title="Edit Order"
                       >
                         <Edit className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={() => onDelete(sale)}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                        title="Delete Order"
+                        id={`delete-btn-${sale.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirmDeleteId === sale.id) {
+                            onDelete(sale);
+                            setConfirmDeleteId(null);
+                          } else {
+                            setConfirmDeleteId(sale.id);
+                          }
+                        }}
+                        className={`p-2 rounded-lg transition-all relative z-10 ${
+                          confirmDeleteId === sale.id 
+                            ? "bg-red-600 text-white hover:bg-red-700 shadow-lg scale-110" 
+                            : "text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        }`}
+                        title={confirmDeleteId === sale.id ? "Click again to confirm" : "Delete Order"}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        {confirmDeleteId === sale.id ? (
+                          <span className="text-[10px] font-bold px-1 animate-pulse">Confirm?</span>
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
                       </button>
                     </div>
                   </td>
@@ -3702,18 +4317,25 @@ function SalesHistory({ sales, onEdit, onDelete, settings }: { sales: Sale[], on
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="text-sm text-gray-500">Invoice ID</p>
-                    <p className="text-lg font-bold text-gray-900">#{selectedSale.id.slice(-6).toUpperCase()}</p>
+                    <p className="text-lg font-bold text-gray-900">#{selectedSale.id}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-gray-500">Date & Time</p>
-                    <p className="text-lg font-bold text-gray-900">{format(selectedSale.timestamp.toDate(), 'MMM dd, yyyy hh:mm a')}</p>
+                    <p className="text-lg font-bold text-gray-900">{format(safeDate(selectedSale.timestamp), 'MMM dd, yyyy hh:mm a')}</p>
                   </div>
                 </div>
 
                 <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
                   <p className="text-sm font-bold text-gray-900 mb-2">Customer Info</p>
                   <p className="text-gray-700">{selectedSale.customerName || 'Walk-in'}</p>
-                  {selectedSale.customerPhone && <p className="text-sm text-gray-500">{selectedSale.customerPhone}</p>}
+                  {selectedSale.customerPhone && (
+                    <a 
+                      href={`tel:${selectedSale.customerPhone.replace(/\D/g, '')}`} 
+                      className="text-sm text-gray-500 hover:text-indigo-600 hover:underline transition-colors block"
+                    >
+                      {selectedSale.customerPhone}
+                    </a>
+                  )}
                 </div>
 
                 <div className="space-y-3">
@@ -3972,7 +4594,7 @@ function Accounting({
             <tbody className="divide-y divide-gray-100">
               {expenses.map(exp => (
                 <tr key={exp.id}>
-                  <td className="px-6 py-4 text-sm text-gray-600">{format(exp.timestamp.toDate(), 'dd MMM yyyy')}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{format(safeDate(exp.timestamp), 'dd MMM yyyy')}</td>
                   <td className="px-6 py-4">
                     <span className="px-3 py-1 bg-red-50 text-red-600 rounded-full text-xs font-bold uppercase">
                       {exp.category}
@@ -3998,7 +4620,7 @@ function Accounting({
             <tbody className="divide-y divide-gray-100">
               {investments.map(inv => (
                 <tr key={inv.id}>
-                  <td className="px-6 py-4 text-sm text-gray-600">{format(inv.timestamp.toDate(), 'dd MMM yyyy')}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{format(safeDate(inv.timestamp), 'dd MMM yyyy')}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{inv.description}</td>
                   <td className="px-6 py-4 text-sm font-bold text-emerald-600 text-right">TK {inv.amount.toLocaleString()}</td>
                 </tr>
@@ -4020,7 +4642,7 @@ function Accounting({
             <tbody className="divide-y divide-gray-100">
               {staffSalaries.map(sal => (
                 <tr key={sal.id}>
-                  <td className="px-6 py-4 text-sm text-gray-600">{format(sal.timestamp.toDate(), 'dd MMM yyyy')}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{format(safeDate(sal.timestamp), 'dd MMM yyyy')}</td>
                   <td className="px-6 py-4 text-sm font-bold text-gray-900">{sal.staffName}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{sal.month}</td>
                   <td className="px-6 py-4 text-sm font-bold text-indigo-600 text-right">TK {sal.amount.toLocaleString()}</td>
@@ -4053,7 +4675,15 @@ function Accounting({
                   <div className="flex justify-between items-start mb-4">
                     <div>
                       <h4 className="font-bold text-gray-900">{customer.name}</h4>
-                      <p className="text-xs text-gray-500">{customer.phone}</p>
+                      {customer.phone && (
+                        <a 
+                          href={`tel:${customer.phone.replace(/\D/g, '')}`} 
+                          className="text-xs text-gray-500 hover:text-indigo-600 hover:underline transition-colors block"
+                        >
+                          {customer.phone}
+                        </a>
+                      )}
+                      {!customer.phone && <p className="text-xs text-gray-500">No phone</p>}
                     </div>
                     <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${
                       customer.currentDue >= 10000 ? 'bg-yellow-200 text-yellow-800' : 'bg-red-200 text-red-800'
@@ -4071,13 +4701,22 @@ function Accounting({
                       <span>Promised: {format(new Date(customer.dueDate), 'dd MMM yyyy')}</span>
                     </div>
                   )}
-                  <button 
-                    onClick={() => sendWhatsAppReminder(customer)}
-                    className="w-full py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 transition-all"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                    Send Reminder
-                  </button>
+                  <div className="flex gap-2 w-full">
+                    <button 
+                      onClick={() => sendWhatsAppReminder(customer)}
+                      className="flex-1 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 hover:bg-emerald-700 transition-all"
+                    >
+                      <MessageCircle className="w-3 h-3" />
+                      Remind (En)
+                    </button>
+                    <button 
+                      onClick={() => sendWhatsAppReminder(customer)}
+                      className="flex-1 py-2 bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 hover:bg-emerald-800 transition-all"
+                    >
+                      <MessageCircle className="w-3 h-3" />
+                      Remind (Bn)
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -4170,13 +4809,35 @@ function Accounting({
   );
 }
 
-function Customers({ customers, sales }: { customers: Customer[], sales: Sale[] }) {
+function Customers({ customers, sales, setNotification, shopSettings }: { 
+  customers: Customer[], 
+  sales: Sale[],
+  setNotification: (n: { message: string, type: 'success' | 'error' | 'info' } | null) => void,
+  shopSettings: ShopSettings
+}) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Partial<Customer> | null>(null);
   const [selectedCustomerForHistory, setSelectedCustomerForHistory] = useState<Customer | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const sendWhatsAppReminder = (customer: Customer) => {
-    const message = `Assalamu Alaikum ${customer.name}, this is a reminder regarding your outstanding due of TK ${customer.currentDue?.toFixed(2)}. ${customer.dueDate ? `Your promised date was ${customer.dueDate}.` : ''} Please settle the amount as soon as possible. Thank you!`;
+  // Clear confirmation state if user clicks elsewhere
+  useEffect(() => {
+    const handleClick = () => setConfirmDeleteId(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, []);
+
+  const sendCustomerWhatsApp = (customer: Customer, lang: 'en' | 'bn') => {
+    const template = lang === 'bn' 
+      ? (shopSettings.waTemplateBengali || "প্রিয় {{customerName}}, {{shopName}}-এ আপনার বকেয়া {{dueAmount}} টাকা। অনুগ্রহ করে সময়মতো পরিশোধ করুন।") 
+      : (shopSettings.waTemplateEnglish || "Dear {{customerName}}, your due amount at {{shopName}} is {{dueAmount}}. Please pay on time.");
+    
+    // Basic variable substitution
+    const message = template
+      .replace('{{customerName}}', customer.name || 'Customer')
+      .replace('{{shopName}}', shopSettings.name || 'Shop')
+      .replace('{{dueAmount}}', (customer.currentDue || 0).toString());
+
     const cleanPhone = customer.phone.replace(/\D/g, '');
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
@@ -4218,6 +4879,17 @@ function Customers({ customers, sales }: { customers: Customer[], sales: Sale[] 
   const openWhatsApp = (phone: string) => {
     const cleanPhone = phone.replace(/\D/g, '');
     window.open(`https://wa.me/${cleanPhone}`, '_blank');
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'customers', id));
+      setNotification({ message: "Customer deleted successfully", type: 'success' });
+      setConfirmDeleteId(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'customers');
+      setNotification({ message: "Failed to delete customer", type: 'error' });
+    }
   };
 
   return (
@@ -4265,7 +4937,13 @@ function Customers({ customers, sales }: { customers: Customer[], sales: Sale[] 
                       <div>
                         <p className="font-semibold text-gray-900">{customer.name}</p>
                         <p className="text-[10px] font-mono text-indigo-400">SN: {customer.serialNumber || 'N/A'}</p>
-                        <p className="text-xs text-gray-500">{customer.phone || 'No phone'}</p>
+                        <a 
+                          href={customer.phone ? `tel:${customer.phone.replace(/\D/g, '')}` : '#'} 
+                          className="text-xs text-gray-500 hover:text-indigo-600 hover:underline transition-colors block"
+                          onClick={(e) => !customer.phone && e.preventDefault()}
+                        >
+                          {customer.phone || 'No phone'}
+                        </a>
                       </div>
                     </div>
                   </td>
@@ -4297,18 +4975,71 @@ function Customers({ customers, sales }: { customers: Customer[], sales: Sale[] 
                   <td className="px-6 py-4 font-bold text-gray-900">TK {customer.totalSpent || 0}</td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <div className="flex gap-1">
+                        {shopSettings.waTemplateEnglish && (
+                          <button 
+                            onClick={() => sendCustomerWhatsApp(customer, 'en')}
+                            className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                            title="Send Message (English)"
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                            <span className="text-[9px] font-bold">En</span>
+                          </button>
+                        )}
+                        {shopSettings.waTemplateBengali && (
+                          <button 
+                            onClick={() => sendCustomerWhatsApp(customer, 'bn')}
+                            className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                            title="Send Message (Bengali)"
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                            <span className="text-[9px] font-bold">Bn</span>
+                          </button>
+                        )}
+                        {(!shopSettings.waTemplateEnglish && !shopSettings.waTemplateBengali) && (
+                          <button 
+                            onClick={() => sendCustomerWhatsApp(customer, 'en')}
+                            className="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all"
+                            title="Send Reminder"
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                       <button 
-                        onClick={() => sendWhatsAppReminder(customer)}
-                        className="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all"
-                        title="Send Reminder"
+                        onClick={() => setSelectedCustomerForHistory(customer)}
+                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                        title="View History"
                       >
-                        <MessageCircle className="w-4 h-4" />
+                        <HistoryIcon className="w-4 h-4" />
                       </button>
                       <button 
                         onClick={() => { setEditingCustomer(customer); setIsModalOpen(true); }}
                         className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
                       >
                         <Edit className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirmDeleteId === customer.id) {
+                            handleDelete(customer.id);
+                          } else {
+                            setConfirmDeleteId(customer.id);
+                          }
+                        }}
+                        className={`p-2 rounded-lg transition-all relative ${
+                          confirmDeleteId === customer.id 
+                            ? "bg-red-600 text-white hover:bg-red-700 shadow-lg scale-110" 
+                            : "text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        }`}
+                        title={confirmDeleteId === customer.id ? "Click again to confirm" : "Delete Customer"}
+                      >
+                        {confirmDeleteId === customer.id ? (
+                          <span className="text-[10px] font-bold px-1 animate-pulse">Confirm?</span>
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
                       </button>
                     </div>
                   </td>
@@ -4339,23 +5070,23 @@ function Customers({ customers, sales }: { customers: Customer[], sales: Sale[] 
               <form onSubmit={handleSave} className="p-8 space-y-4 max-h-[70vh] overflow-y-auto">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                  <input name="name" defaultValue={editingCustomer?.name} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  <input name="name" defaultValue={editingCustomer?.name || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
-                  <input name="phone" defaultValue={editingCustomer?.phone} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  <input name="phone" defaultValue={editingCustomer?.phone || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Father's Name</label>
-                  <input name="fatherName" defaultValue={editingCustomer?.fatherName} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  <input name="fatherName" defaultValue={editingCustomer?.fatherName || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">House Name/No</label>
-                  <input name="houseName" defaultValue={editingCustomer?.houseName} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  <input name="houseName" defaultValue={editingCustomer?.houseName || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
-                  <input name="address" defaultValue={editingCustomer?.address} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  <input name="address" defaultValue={editingCustomer?.address || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Initial Due (TK)</label>
@@ -4363,7 +5094,7 @@ function Customers({ customers, sales }: { customers: Customer[], sales: Sale[] 
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Promised Due Date</label>
-                  <input name="dueDate" type="date" defaultValue={editingCustomer?.dueDate} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  <input name="dueDate" type="date" defaultValue={editingCustomer?.dueDate || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
                 </div>
                 <div className="flex justify-end gap-4 pt-4">
                   <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-3 text-gray-600 font-semibold hover:bg-gray-100 rounded-xl transition-colors">Cancel</button>
@@ -4388,11 +5119,11 @@ function Customers({ customers, sales }: { customers: Customer[], sales: Sale[] 
             >
               <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
-                    <AlertCircle className="w-6 h-6 text-red-600" />
+                  <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center">
+                    <HistoryIcon className="w-6 h-6 text-indigo-600" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-gray-900">{selectedCustomerForHistory.name} Due History</h3>
+                    <h3 className="text-xl font-bold text-gray-900">{selectedCustomerForHistory.name} - Transaction History</h3>
                     <p className="text-xs text-gray-500">Total Outstanding: TK {selectedCustomerForHistory.currentDue}</p>
                   </div>
                 </div>
@@ -4402,28 +5133,39 @@ function Customers({ customers, sales }: { customers: Customer[], sales: Sale[] 
               </div>
               <div className="flex-1 overflow-y-auto p-6">
                 <div className="space-y-4">
-                  {sales.filter(s => s.customerId === selectedCustomerForHistory.id && s.dueAmount > 0).length === 0 ? (
-                    <p className="text-center text-gray-400 py-8 italic">No active dues found for this customer.</p>
+                  {sales.filter(s => s.customerId === selectedCustomerForHistory.id).length === 0 ? (
+                    <p className="text-center text-gray-400 py-8 italic">No transactions found for this customer.</p>
                   ) : (
-                    sales.filter(s => s.customerId === selectedCustomerForHistory.id && s.dueAmount > 0).map(sale => (
-                      <div key={sale.id} className="p-4 bg-red-50/50 rounded-2xl border border-red-100 flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className="text-center min-w-[60px]">
-                            <p className="text-xs font-bold text-gray-400">{format(sale.timestamp.toDate(), 'MMM dd')}</p>
-                            <p className="text-[10px] text-gray-400">{format(sale.timestamp.toDate(), 'hh:mm a')}</p>
-                          </div>
-                          <div className="w-px h-8 bg-red-100" />
-                          <div>
-                            <p className="text-sm font-bold text-gray-900">Invoice #{sale.id.slice(-6).toUpperCase()}</p>
-                            <p className="text-xs text-gray-500">Total: TK {sale.finalAmount}</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-lg font-black text-red-600">TK {sale.dueAmount}</p>
-                          <p className="text-[10px] text-red-400">Remaining Due</p>
-                        </div>
-                      </div>
-                    ))
+                    <table className="w-full text-sm text-left">
+                      <thead className="text-gray-500 uppercase border-b border-gray-200">
+                        <tr>
+                          <th className="py-2">Date</th>
+                          <th className="py-2">Invoice #</th>
+                          <th className="py-2 text-right">Spent</th>
+                          <th className="py-2 text-right">Paid</th>
+                          <th className="py-2 text-right">Due</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {sales.filter(s => s.customerId === selectedCustomerForHistory.id)
+                          .sort((a,b) => safeDate(b.timestamp).getTime() - safeDate(a.timestamp).getTime())
+                          .map(sale => (
+                            <tr key={sale.id}>
+                              <td className="py-3 text-xs">{format(safeDate(sale.timestamp), 'dd/MM/yy HH:mm')}</td>
+                              <td 
+                                className="py-3 font-semibold text-gray-900 cursor-pointer hover:text-indigo-600 transition-colors"
+                                onDoubleClick={() => printInvoice(sale, shopSettings)}
+                                title="Double-click to print invoice"
+                              >
+                                {sale.id}
+                              </td>
+                              <td className="py-3 text-right">TK {sale.finalAmount.toFixed(0)}</td>
+                              <td className="py-3 text-right text-emerald-600">TK {sale.paidAmount.toFixed(0)}</td>
+                              <td className="py-3 text-right text-red-600">TK {sale.dueAmount.toFixed(0)}</td>
+                            </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </div>
               </div>
@@ -4446,15 +5188,38 @@ function Customers({ customers, sales }: { customers: Customer[], sales: Sale[] 
 function DailyClosingView({ sales, expenses, dailyClosings, settings }: { sales: Sale[], expenses: Expense[], dailyClosings: DailyClosing[], settings: ShopSettings }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const today = format(new Date(), 'yyyy-MM-dd');
+
+  // Find the last closing timestamp to define the current session
+  const lastClosingDate = useMemo(() => {
+    if (!dailyClosings || dailyClosings.length === 0) return null;
+    const sorted = [...dailyClosings].sort((a, b) => safeDate(b.timestamp).getTime() - safeDate(a.timestamp).getTime());
+    return safeDate(sorted[0].timestamp).getTime();
+  }, [dailyClosings]);
   
-  // Calculate today's stats
-  const todaySales = sales.filter(s => format(s.timestamp.toDate(), 'yyyy-MM-dd') === today);
+  // Calculate stats for the current session (since last closing)
+  // We filter by 'today' as well to keep the context of "Daily Closing"
+  // but if user wants it purely session-based regardless of date, we'd remove the 'today' check.
+  // Given it's called 'DailyClosing', keeping the today check is safer to avoid multi-day aggregation in a single report.
+  const todaySales = sales.filter(s => {
+    const ts = safeDate(s.timestamp);
+    const tsTime = ts.getTime();
+    const isSameDay = format(ts, 'yyyy-MM-dd') === today;
+    const isAfterLastClosing = !lastClosingDate || tsTime > lastClosingDate;
+    return isSameDay && isAfterLastClosing;
+  });
+  
   const totalSales = todaySales.reduce((sum, s) => sum + s.finalAmount, 0);
   const cashSales = todaySales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + s.paidAmount, 0);
   const dueSales = todaySales.reduce((sum, s) => sum + s.dueAmount, 0);
   const cashReceived = todaySales.reduce((sum, s) => sum + s.paidAmount, 0);
   
-  const todayExpenses = expenses.filter(e => format(e.timestamp.toDate(), 'yyyy-MM-dd') === today).reduce((sum, e) => sum + e.amount, 0);
+  const todayExpenses = expenses.filter(e => {
+    const ts = safeDate(e.timestamp);
+    const tsTime = ts.getTime();
+    const isSameDay = format(ts, 'yyyy-MM-dd') === today;
+    const isAfterLastClosing = !lastClosingDate || tsTime > lastClosingDate;
+    return isSameDay && isAfterLastClosing;
+  }).reduce((sum, e) => sum + e.amount, 0);
 
   const [denominations, setDenominations] = useState<{ [key: string]: number }>({
     '1000': 0, '500': 0, '200': 0, '100': 0, '50': 0, '20': 0, '10': 0, '5': 0

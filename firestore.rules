@@ -106,6 +106,13 @@ service cloud.firestore {
              (!('status' in data) || (data.status in ['active', 'inactive']));
     }
 
+    function isValidStockRecord(data) {
+      return data.productId is string && data.productId.size() > 0 &&
+             data.quantity is number &&
+             data.type in ['add', 'sale', 'return', 'adjustment'] &&
+             data.timestamp is timestamp;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -122,7 +129,8 @@ service cloud.firestore {
 
     match /customers/{customerId} {
       allow read: if true;
-      allow write: if isValidCustomer(request.resource.data);
+      allow create, update: if isValidCustomer(request.resource.data);
+      allow delete: if true;
     }
 
     match /expenses/{expenseId} {
@@ -153,7 +161,14 @@ service cloud.firestore {
 
     match /employees/{employeeId} {
       allow read: if true;
-      allow write: if isValidEmployee(request.resource.data);
+      allow create, update: if isValidEmployee(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /stockRecords/{recordId} {
+      allow read: if true;
+      allow create: if isValidStockRecord(request.resource.data);
+      allow update, delete: if true;
     }
 
     match /settings/{settingId} {
