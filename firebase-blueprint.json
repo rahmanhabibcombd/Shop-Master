@@ -203,6 +203,18 @@
         "note": { "type": "string" }
       },
       "required": ["customerId", "amount", "method", "timestamp", "receivedBy"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "A personal note",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "color": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "color", "timestamp"]
     }
   },
   "firestore": {
@@ -257,6 +269,10 @@
     "/due_payments/{paymentId}": {
       "schema": "DuePayment",
       "description": "Collection of customer due payments"
+    },
+    "/notes/{noteId}": {
+      "schema": "Note",
+      "description": "Collection of user notes"
     }
   }
 }

@@ -148,15 +148,145 @@ export const parseVoiceCommandQuantity = (rawText: string) => {
   };
 };
 
-export const isPhoneticMatch = (text: string | null | undefined, query: string) => {
-  if (!text || !query) return false;
-  const stdQuery = query.toLowerCase();
-  const stdText = text.toLowerCase();
-  if (stdText.includes(stdQuery)) return true;
+export const formatToBnDate = (dateStr: string): string => {
+  if (!dateStr) return '';
   
+  // Try to parse DD/MM/YYYY or YYYY-MM-DD
+  let date: Date;
+  if (dateStr.includes('/')) {
+    const [d, m, y] = dateStr.split('/').map(Number);
+    date = new Date(y, m - 1, d);
+  } else {
+    date = new Date(dateStr);
+  }
+
+  if (isNaN(date.getTime())) return dateStr;
+
+  const bnMonths = [
+    'জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন',
+    'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'
+  ];
+
+  const toBnNum = (n: number | string) => {
+    const nums: Record<string, string> = {
+      '0': '০', '1': '১', '2': '২', '3': '৩', '4': '৪',
+      '5': '৫', '6': '৬', '7': '৭', '8': '৮', '9': '৯'
+    };
+    return n.toString().split('').map(d => nums[d] || d).join('');
+  };
+
+  const day = toBnNum(date.getDate());
+  const month = bnMonths[date.getMonth()];
+  const year = toBnNum(date.getFullYear());
+
+  return `${day} ${month} ${year}`;
+};
+
+export const formatToArDate = (dateStr: string): string => {
+  if (!dateStr) return '';
+  
+  let date: Date;
+  if (dateStr.includes('/')) {
+    const [d, m, y] = dateStr.split('/').map(Number);
+    date = new Date(y, m - 1, d);
+  } else {
+    date = new Date(dateStr);
+  }
+
+  if (isNaN(date.getTime())) return dateStr;
+
+  const arMonths = [
+    'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+    'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+  ];
+
+  const toArNum = (n: number | string) => {
+    const nums: Record<string, string> = {
+      '0': '٠', '1': '١', '2': '٢', '3': '٣', '4': '٤',
+      '5': '٥', '6': '٦', '7': '٧', '8': '٨', '9': '٩'
+    };
+    return n.toString().split('').map(d => nums[d] || d).join('');
+  };
+
+  const day = toArNum(date.getDate());
+  const month = arMonths[date.getMonth()];
+  const year = toArNum(date.getFullYear());
+
+  return `${day} ${month} ${year}`;
+};
+
+export const isPhoneticMatch = (text: string | null | undefined, query: string) => {
+  if (!query || query.trim() === '') return true;
+  if (!text) return false;
+  
+  const stdQuery = query.toLowerCase().trim();
+  const stdText = text.toLowerCase().trim();
+  
+  if (stdText.includes(stdQuery)) return true;
+
   const stdBnQuery = standardizeBn(query);
   const stdBnText = standardizeBn(text);
   if (stdBnText.includes(stdBnQuery)) return true;
+
+  // If the query is just a long number (e.g. barcode), do not perform phonetic checks
+  // to avoid false positives with unrelated product names or categories that have matching collapsed digits.
+  if (/^\d+$/.test(stdBnQuery) && stdBnQuery.length > 3) {
+    return false;
+  }
+  
+  // Basic English to Bengali keyword mapping for common categories
+  const categoryMap: Record<string, string[]> = {
+    'grocery': ['মুদি', 'মুদী'],
+    'rice': ['চাল', 'ধান'],
+    'fish': ['মাছ', 'মৎস্য'],
+    'meat': ['মাংস', 'গোশত'],
+    'oil': ['তেল'],
+    'spice': ['মশলা', 'মসালা'],
+    'fruit': ['ফল'],
+    'vegetable': ['সবজি', 'শাকসবজি'],
+    'bakery': ['বেকারি', 'বিকারি'],
+    'dairy': ['ডেইরি', 'দুগ্ধ'],
+    'frozen': ['হিমায়িত'],
+    'snack': ['নাস্তা', 'স্ন্যাকস'],
+    'biscuit': ['বিস্কুট'],
+    'cake': ['কেক'],
+    'chocolate': ['চকোলেট'],
+    'drink': ['পানীয়'],
+    'juice': ['জুস'],
+    'milk': ['দুধ'],
+    'baby': ['শিশু', 'বেবি'],
+    'health': ['স্বাস্থ্য'],
+    'medicine': ['ওষুধ', 'মেডিসিন', 'চিকিৎসা'],
+    'clean': ['পরিষ্কার', 'ক্লিন'],
+    'soap': ['সাবান'],
+    'stationery': ['স্টেশনারি'],
+    'clothe': ['পোশাক', 'কাপড়'],
+    'toy': ['খেলনা'],
+    'egg': ['ডিম'],
+    'chicken': ['মুরগি'],
+    'bread': ['রুটি', 'ব্রেড'],
+    'tea': ['চা'],
+    'coffee': ['কফি'],
+    'sugar': ['চিনি'],
+    'salt': ['লবণ', 'লবন'],
+    'flour': ['আটা', 'ময়দা'],
+    'pulse': ['ডাল'],
+    'electronics': ['ইলেকট্রনিক্স'],
+    'agriculture': ['কৃষি'],
+    'seed': ['বীজ'],
+    'fertilizer': ['সার'],
+    'mobile': ['মোবাইল'],
+    'gift': ['উপহার'],
+    'cosmetics': ['প্রসাধন', 'কসমেটিকস'],
+    'personal care': ['ব্যক্তিগত যত্ন']
+  };
+
+  // Check if any mapped Bengali word matches the text
+  for (const [en, bnList] of Object.entries(categoryMap)) {
+    if (stdQuery.includes(en)) {
+      if (bnList.some(bn => stdText.includes(bn))) return true;
+    }
+  }
   
   const phQuery = toPhonetic(stdBnQuery);
   const phText = toPhonetic(stdBnText);

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 
-export function useVoiceSearch(onCommand: (text: string) => void) {
+export function useVoiceSearch(onCommand: (text: string) => void, onError?: (error: string) => void) {
   const [isListening, setIsListening] = useState(false);
   const [voiceFeedback, setVoiceFeedback] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -26,9 +26,15 @@ export function useVoiceSearch(onCommand: (text: string) => void) {
   }, []);
 
   const onCommandRef = useRef(onCommand);
+  const onErrorRef = useRef(onError);
+  
   useEffect(() => {
     onCommandRef.current = onCommand;
   }, [onCommand]);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   const isListeningRef = useRef(isListening);
   useEffect(() => {
@@ -57,6 +63,9 @@ export function useVoiceSearch(onCommand: (text: string) => void) {
     recognitionRef.current.onerror = (e: any) => {
       if (e.error !== 'no-speech' && e.error !== 'aborted') {
           console.error("Speech recognition error:", e.error);
+          if (onErrorRef.current) {
+            onErrorRef.current(e.error);
+          }
       }
       setIsListening(false);
     };

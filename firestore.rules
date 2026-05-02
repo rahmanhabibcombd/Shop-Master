@@ -137,6 +137,12 @@ service cloud.firestore {
              data.receivedBy is string;
     }
 
+    function isValidNote(data) {
+      return data.text is string && data.text.size() > 0 &&
+             data.color is string &&
+             data.timestamp is timestamp;
+    }
+
     function isValidDailyClosing(data) {
       return data.date is string &&
              data.totalSales is number && data.totalSales >= 0 &&
@@ -228,6 +234,12 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isValidDuePayment(request.resource.data);
       allow update, delete: if isAdmin();
+    }
+
+    match /notes/{noteId} {
+      allow read: if true;
+      allow create, update: if isValidNote(request.resource.data);
+      allow delete: if true;
     }
   }
 }
