@@ -26,10 +26,10 @@ export const parsePosVoiceCommandAI = async (
   const prompt = `
 You are an intelligent POS assistant helping extract intents from voice queries in Bengali, Arabic, and English.
 The user may want to:
-1. Set a customer (e.g., "customer John" or "কাস্টমার করিম" or "العميل محمد")
-2. Add one or multiple products at once (e.g., "flour, 2kg sugar, onion" or "ময়দা, ২ কেজি চিনি, পেঁয়াজ, রসুন, আদা, জুস, কলা" or "سكر ٢ كيلو")
+1. Set a customer (e.g., "customer John" or "কাস্টমার করিম")
+2. Add one or multiple products at once (e.g., "flour, 2kg sugar, onion" or "ময়দা, ২ কেজি চিনি, পেঁয়াজ")
 
-Transcript: "${rawText}"
+Transcript: "${rawText.replace(/"/g, "'")}"
 
 Available Products (ID:::NAME):
 ${productListStr}
@@ -38,35 +38,18 @@ Available Customers (ID:::NAME:::PHONE):
 ${customerListStr}
 
 Rules:
-1. NEVER output or echo the list of products or customers in the JSON response.
-2. CRITICAL: IDENTIFY ALL PRODUCTS MENTIONED. If the user mentions 10 products, you MUST return an array of 10 items. Do NOT omit any product mentioned!
-3. If no quantity is mentioned for a product, you MUST assume the quantity is 1.
-4. Quantity & Unit Mapping (Support ALL variations):
-   - Bengali: "হাফ", "আধা" (0.5), "দেড়", "দেড়" (1.5), "আড়াই", "আড়াই" (2.5), "পৌনে" (0.75), "সোয়া" (1.25).
-   - Weights: "গ্রাম" (gram), "কেজি" (kg), "ছটাক", "সের", "পোয়া" (0.25 kg).
-   - Packs/Pieces: "প্যাকেট" (packet), "পিস" (piece), "ডজন" (12).
-   - "২৫০ গ্রাম" = 0.25 (if kg is standard) or 250.
-   - "১০ প্যাকেট ৪ পিস": This is a common Bengali shop convention. It means 4 pieces of an item that is usually sold in 10-packet bundles. Adjust quantity/name to match the closest record.
-5. Search Strategy (Multilingual & Cross-Language):
-   - CRITICAL: The user speaks in ONE language (dictated by the transcript), but the "Available Products" list might be in ANY of the three languages (Bengali, Arabic, English).
-   - Identity Mapping: "চাউল" / "চাল" (Bengali) == "Rice" (English) == "أرز" / "Uruj" / "Oruj" / "Rice" (Arabic/Mixed). They are the SAME product.
-   - Script Invariant: If transcript is "এয়ার ফ্রেশ" (Bengali) and product list is "Air Fresh" (English), match them!
-   - Script Invariant: If transcript is "Uruj" (Arabic rice) and product is "Rice" or "চাল", match them.
-   - Dialects: Handle regional variations. "আরিজ" might also mean rice.
-   - Example: If transcript is "Air Fresh" match "এয়ার ফ্রেশ". If transcript is "এয়ার ফ্রেশ" match "Air Fresh".
-   - Identify if the user wants to set a customer FIRST, then process products.
-   - Find the BEST matching productId from "Available Products".
-   - If a product is mentioned that is definitely NOT in "Available Products", use action "newProduct".
-6. Support multiple items separated by commas, "and", "এবং", "ও", "তারপর", "সাথে", "এরপর", "بعدين", "و", "ثم", or just a pause/spacing.
-7. Output strictly valid JSON. Focus on high reliability for items like "আদা" (Ginger), "রসুন" (Garlic), "পেঁয়াজ" (Onion), "ময়দা" (Flour), "চিনি" (Sugar) in Bengali, "ملح" (Salt), "رز" (Rice) in Arabic, etc.
+1. Output strictly valid JSON without any markdown formatting. Ensure the JSON is complete and not truncated.
+2. If the transcript is in English but represents a Bengali word (transliteration, e.g., "moyda" for "ময়দা"), match it correctly.
+3. Identified items should be returned in the "items" array.
+4. If a word is ambiguous, favor the matching product NAME from the list above.
 `;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash", 
+      model: "gemini-3-flash-preview", 
       contents: prompt,
       config: {
-        temperature: 0.1,
+        temperature: 0,
         maxOutputTokens: 2048,
         responseMimeType: "application/json",
         responseSchema: {
@@ -77,17 +60,17 @@ Rules:
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  action: { type: Type.STRING, description: '"setCustomer", "addProduct", "newProduct" or "unknown"' },
+                  action: { type: Type.STRING, enum: ["setCustomer", "addProduct", "newProduct", "unknown"] },
                   customerId: { type: Type.STRING, nullable: true },
                   productId: { type: Type.STRING, nullable: true },
                   quantity: { type: Type.NUMBER },
-                  recognizedName: { type: Type.STRING, description: "The name the user said for this item" },
-                  unit: { type: Type.STRING, nullable: true, description: "kg, gram, piece, packet, etc." }
+                  recognizedName: { type: Type.STRING },
+                  unit: { type: Type.STRING, nullable: true }
                 },
-                required: ["action", "quantity"]
+                required: ["action", "quantity", "recognizedName"]
               }
             },
-            summary: { type: Type.STRING, description: "A summary of what was understood (e.g. Added 3 items)" }
+            summary: { type: Type.STRING }
           },
           required: ["items", "summary"]
         }
@@ -95,11 +78,21 @@ Rules:
     });
 
     if (response && response.text) {
-      let cleanText = response.text.trim();
-      if (cleanText.startsWith('```')) {
-          cleanText = cleanText.replace(/^```(json)?\n?/, '').replace(/\n?```$/, '').trim();
+      const cleanText = response.text.trim();
+      try {
+        return JSON.parse(cleanText);
+      } catch (parseError) {
+        console.error("JSON parse failed. Text:", cleanText);
+        // Fallback: try to extract JSON if there's garbage
+        const start = cleanText.indexOf('{');
+        const end = cleanText.lastIndexOf('}');
+        if (start !== -1 && end !== -1) {
+          try {
+            return JSON.parse(cleanText.slice(start, end + 1));
+          } catch (e) {}
+        }
+        return { items: [], summary: "Error parsing AI response" };
       }
-      return JSON.parse(cleanText);
     }
   } catch (error: any) {
     console.error("AI parse voice command failed:", error);

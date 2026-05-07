@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useVoiceSearch } from './hooks/useVoiceSearch';
 import { standardizeBn, toPhonetic, parseVoiceCommandQuantity, isPhoneticMatch, parseNewProductVoiceCommand, formatToBnDate } from './utils/voiceUtils';
+import { parseMathVoiceCommandAI } from './utils/mathVoiceParser';
 import { parsePosVoiceCommandAI } from './utils/aiVoiceParser';
 import { addToSyncQueue, getSyncQueue, removeFromSyncQueue } from './utils/offlineDb';
 import { 
@@ -3497,72 +3498,77 @@ export default function App() {
 
           <nav className="flex-1 px-4 py-6 overflow-y-auto custom-scrollbar space-y-1.5 bg-gray-50/30">
             {[
-              { id: 'dashboard', icon: LayoutDashboard, label: st('dashboard'), roles: ['admin', 'manager'], color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
-              { id: 'pos', icon: ShoppingCart, label: st('pos'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'], color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
-              { id: 'inventory', icon: Package, label: st('inventory'), roles: ['admin', 'manager', 'assistant_manager'], color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100' },
-              { id: 'sales', icon: History, label: st('sales'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'], color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100' },
-              { id: 'customers', icon: Users, label: st('customers'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'], color: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-100' },
-              { id: 'employees', icon: Briefcase, label: st('employees'), roles: ['admin', 'manager'], color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
-              { id: 'daily_closing', icon: Clock, label: st('dailyClosing'), roles: ['admin', 'manager'], color: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-100' },
-              { id: 'barcode', icon: Barcode, label: st('barcode'), roles: ['admin', 'manager'], color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-100' },
-              { id: 'note', icon: StickyNote, label: st('note'), roles: ['admin', 'manager'], color: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-100' },
-              { id: 'warranty', icon: ShieldCheck, label: st('warranty'), roles: ['admin', 'manager'], color: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-100' },
-              { id: 'loan_management', icon: Banknote, label: st('loanManagement'), roles: ['admin', 'manager'], color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100' },
-              { id: 'payment_method', icon: CreditCard, label: st('paymentMethod'), roles: ['admin', 'manager'], color: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-100' },
-              { id: 'courier', icon: Truck, label: st('courier'), roles: ['admin', 'manager'], color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
-              { id: 'supplier', icon: Users, label: st('supplier'), roles: ['admin', 'manager'], color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100' },
-              { id: 'activation_code', icon: KeySquare, label: st('activationCode'), roles: ['admin', 'manager'], color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100' },
-              { id: 'service_offer', icon: Gift, label: st('serviceOffer'), roles: ['admin', 'manager'], color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100' },
-              { id: 'online_shop', icon: Globe, label: st('onlineShop'), roles: ['admin', 'manager'], color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
-              { id: 'main_admin', icon: UserCog, label: st('mainAdmin'), roles: ['admin'], color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
-              { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['admin', 'manager'], color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
-              { id: 'branch', icon: Building, label: st('branch'), roles: ['admin', 'manager'], color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-100' },
-              { id: 'accounting', icon: CalculatorIcon, label: st('hishabNikash'), roles: ['admin', 'manager'], color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
-              { id: 'settings', icon: Settings, label: st('settings'), roles: ['admin'], color: 'text-gray-600', bg: 'bg-gray-100', border: 'border-gray-200' },
-              { id: 'recycle_bin', icon: Trash2, label: st('recycleBin'), roles: ['admin'], color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100' },
-            ].filter(item => item.roles.includes(user.role)).map((item, idx) => (
-              <motion.button
-                key={item.id}
-                initial={{ x: -20, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: idx * 0.02, ease: "easeOut" }}
-                whileHover={{ x: 6, scale: 1.01 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => {
-                  setActiveTab(item.id);
-                  setIsSidebarOpen(false);
-                }}
-                className={`w-full flex items-center justify-between group px-4 py-3.5 rounded-2xl transition-all duration-300 relative overflow-hidden ${
-                  activeTab === item.id 
-                    ? `${item.bg} ${item.color} shadow-[0_4px_12px_-2px_rgba(0,0,0,0.05)] ring-1 ${item.border}` 
-                    : 'text-gray-500 hover:bg-white hover:text-gray-900 hover:shadow-md'
-                }`}
-              >
-                <div className="flex items-center gap-3.5 relative z-10">
-                  <div className={`p-2 rounded-xl transition-all duration-300 ${
-                    activeTab === item.id ? 'bg-white shadow-sm scale-110' : 'bg-gray-100/50 group-hover:bg-white group-hover:shadow-sm'
-                  }`}>
-                    <item.icon className={`w-5 h-5 ${activeTab === item.id ? item.color : 'text-gray-400 group-hover:text-gray-600'}`} />
-                  </div>
-                  <span className={`text-[13px] font-bold tracking-tight transition-all ${
-                    activeTab === item.id ? 'translate-x-0' : 'group-hover:translate-x-1'
-                  }`}>
-                    {item.label}
-                  </span>
-                </div>
-                
-                {activeTab === item.id && (
-                  <>
-                    <motion.div 
-                      layoutId="active-indicator"
-                      className="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-8 rounded-r-full bg-current shadow-[0_0_8px_currentColor]"
-                    />
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 bg-white/50 rounded-lg backdrop-blur-sm shadow-sm ring-1 ring-black/5">
-                      <ChevronRight className="w-3.5 h-3.5 opacity-60" />
+              { id: 'core', label: 'Core', items: [
+                { id: 'dashboard', icon: LayoutDashboard, label: st('dashboard'), roles: ['admin', 'manager'], color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
+                { id: 'pos', icon: ShoppingCart, label: st('pos'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'], color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
+              ]},
+              { id: 'inventory', label: 'Inventory', items: [
+                { id: 'inventory', icon: Package, label: st('inventory'), roles: ['admin', 'manager', 'assistant_manager'], color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100' },
+                { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['admin', 'manager'], color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
+                { id: 'supplier', icon: Users, label: st('supplier'), roles: ['admin', 'manager'], color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100' },
+                { id: 'barcode', icon: Barcode, label: st('barcode'), roles: ['admin', 'manager'], color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-100' },
+              ]},
+              { id: 'sales_crm', label: 'Sales & CRM', items: [
+                { id: 'sales', icon: History, label: st('sales'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'], color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100' },
+                { id: 'customers', icon: Users, label: st('customers'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'], color: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-100' },
+                { id: 'loan_management', icon: Banknote, label: st('loanManagement'), roles: ['admin', 'manager'], color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100' },
+              ]},
+              { id: 'accounting', label: 'Accounting', items: [
+                { id: 'accounting', icon: CalculatorIcon, label: st('hishabNikash'), roles: ['admin', 'manager'], color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
+                { id: 'daily_closing', icon: Clock, label: st('dailyClosing'), roles: ['admin', 'manager'], color: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-100' },
+                { id: 'payment_method', icon: CreditCard, label: st('paymentMethod'), roles: ['admin', 'manager'], color: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-100' },
+              ]},
+              { id: 'management', label: 'Management', items: [
+                { id: 'online_shop', icon: Globe, label: st('onlineShop'), roles: ['admin', 'manager'], color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
+                { id: 'courier', icon: Truck, label: st('courier'), roles: ['admin', 'manager'], color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
+                { id: 'warranty', icon: ShieldCheck, label: st('warranty'), roles: ['admin', 'manager'], color: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-100' },
+                { id: 'service_offer', icon: Gift, label: st('serviceOffer'), roles: ['admin', 'manager'], color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100' },
+                { id: 'activation_code', icon: KeySquare, label: st('activationCode'), roles: ['admin', 'manager'], color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100' },
+                { id: 'employees', icon: Briefcase, label: st('employees'), roles: ['admin', 'manager'], color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
+                { id: 'note', icon: StickyNote, label: st('note'), roles: ['admin', 'manager'], color: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-100' },
+                { id: 'branch', icon: Building, label: st('branch'), roles: ['admin', 'manager'], color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-100' },
+                { id: 'settings', icon: Settings, label: st('settings'), roles: ['admin'], color: 'text-gray-600', bg: 'bg-gray-100', border: 'border-gray-200' },
+                { id: 'recycle_bin', icon: Trash2, label: st('recycleBin'), roles: ['admin'], color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100' },
+                { id: 'main_admin', icon: UserCog, label: st('mainAdmin'), roles: ['admin'], color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
+              ]},
+            ].map((group) => (
+              <div key={group.id} className="space-y-1 mb-6">
+                <h3 className="px-5 text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">{group.label}</h3>
+                {group.items.filter(item => item.roles.includes(user.role)).map((item, idx) => (
+                  <motion.button
+                    key={item.id}
+                    initial={{ x: -20, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ delay: idx * 0.02, ease: "easeOut" }}
+                    whileHover={{ x: 6, scale: 1.01 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setIsSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between group px-4 py-3 rounded-2xl transition-all duration-300 relative overflow-hidden ${
+                      activeTab === item.id                
+                        ? `${item.bg} ${item.color} shadow-sm ring-1 ${item.border}` 
+                        : 'text-gray-500 hover:bg-white hover:text-gray-900 hover:shadow-sm'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 relative z-10">
+                      <div className={`p-2 rounded-xl transition-all duration-300 ${
+                        activeTab === item.id ? 'bg-white' : 'bg-gray-50 group-hover:bg-white'
+                      }`}>
+                        <item.icon className={`w-4 h-4 ${activeTab === item.id ? item.color : 'text-gray-400 group-hover:text-gray-600'}`} />
+                      </div>
+                      <span className="text-[13px] font-bold tracking-tight">{item.label}</span>
                     </div>
-                  </>
-                )}
-              </motion.button>
+                    {activeTab === item.id && (
+                      <motion.div 
+                        layoutId="active-indicator"
+                        className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-l-full bg-current"
+                      />
+                    )}
+                  </motion.button>
+                ))}
+              </div>
             ))}
           </nav>
 
@@ -3951,6 +3957,7 @@ export default function App() {
           onDelete={handleDeleteNote}
           settings={shopSettings}
         />
+        <Calculator settings={shopSettings} />
       </div>
     </ErrorBoundary>
   );
@@ -4463,15 +4470,19 @@ function ProductHistory({ product, sales, stockRecords, onClose, onDeleteStockRe
   );
 }
 
-function Calculator() {
+function Calculator({ settings }: { settings: ShopSettings }) {
   const [display, setDisplay] = useState('0');
   const [isOpen, setIsOpen] = useState(false);
+  const [lastEquation, setLastEquation] = useState<string | null>(null);
 
   const handleAction = (val: string) => {
     if (val === 'C') {
       setDisplay('0');
+      setLastEquation(null);
     } else if (val === '=') {
+      if (display === '0' || display === 'Error') return;
       try {
+        setLastEquation(display);
         // eslint-disable-next-line no-eval
         const result = eval(display);
         setDisplay(String(result ?? '0'));
@@ -4479,49 +4490,124 @@ function Calculator() {
         setDisplay('Error');
       }
     } else {
-      setDisplay(prev => prev === '0' ? val : prev + val);
+      setDisplay(prev => (prev === '0' || prev === 'Error') ? val : prev + val);
     }
   };
+
+  const handleVoiceCommand = async (text: string) => {
+    const expression = await parseMathVoiceCommandAI(text);
+    if (!expression) return;
+    
+    // Instead of building on top, treat the parsed voice command as the primary input.
+    // If it's a simple number/operator, append. If it looks like a complete thought from the AI, replace.
+    setDisplay(prev => {
+        const current = (prev === '0' || prev === 'Error') ? '' : prev;
+        // Basic heuristic: if the AI parsed a complex expression, replace.
+        if (expression.length > 5 || /[\+\-\*\/]/.test(expression)) {
+            return expression;
+        }
+        return current + expression;
+    });
+  };
+
+  const voiceLang = settings.systemLanguage === 'ar' ? 'ar-SA' : (settings.systemLanguage === 'bn' ? 'bn-BD' : 'en-US');
+
+  const { isListening, voiceFeedback, toggleVoiceSearch } = useVoiceSearch(handleVoiceCommand, (err) => {
+    console.error('Voice calculator error:', err);
+  }, voiceLang);
+
+  useEffect(() => {
+    if (!isOpen && isListening) {
+      toggleVoiceSearch();
+    }
+  }, [isOpen, isListening, toggleVoiceSearch]);
 
   return (
     <>
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-24 right-8 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-all z-50"
+        className="fixed bottom-24 right-8 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-50 group"
       >
-        <CalculatorIcon className="w-6 h-6" />
+        <CalculatorIcon className="w-6 h-6 group-hover:rotate-12 transition-transform" />
       </button>
 
       <AnimatePresence>
         {isOpen && (
           <motion.div 
-            initial={{ opacity: 0, y: 20, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.9 }}
-            className="fixed bottom-40 right-8 w-72 bg-white rounded-3xl shadow-2xl border border-gray-100 p-6 z-50 overflow-hidden"
+            initial={{ opacity: 0, y: 20, scale: 0.9, x: 20 }}
+            animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9, x: 20 }}
+            className="fixed bottom-40 right-8 w-72 bg-white rounded-[2.5rem] shadow-2xl border border-indigo-100 p-6 z-50 overflow-hidden"
           >
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-gray-900">Calculator</h3>
-              <button onClick={() => setIsOpen(false)} className="p-1 hover:bg-gray-100 rounded-lg">
-                <X className="w-4 h-4" />
-              </button>
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
+            
+            <div className="flex justify-between items-center mb-5">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 shadow-inner">
+                  <CalculatorIcon className="w-4 h-4" />
+                </div>
+                <h3 className="font-black text-gray-900 text-xs tracking-widest uppercase">Calculator</h3>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button 
+                  onClick={toggleVoiceSearch}
+                  title="Voice Command"
+                  className={`p-2 rounded-xl transition-all shadow-sm ${isListening ? 'bg-red-50 text-red-500 animate-pulse ring-2 ring-red-100' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 active:scale-90'}`}
+                >
+                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </button>
+                <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all text-gray-400 active:scale-90">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-            <div className="bg-gray-50 p-4 rounded-2xl mb-4 text-right">
-              <p className="text-2xl font-mono font-bold text-gray-900 truncate">{display}</p>
+
+            {voiceFeedback && (
+              <div className="mb-2 px-3 py-1.5 bg-indigo-50/50 text-[10px] font-black text-indigo-600 rounded-xl border border-indigo-100 animate-pulse flex items-center gap-2">
+                <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-ping"></span>
+                {voiceFeedback}...
+              </div>
+            )}
+
+            <div className="bg-gray-50/80 p-5 rounded-[1.5rem] mb-4 text-right shadow-inner border border-gray-100 min-h-[90px] flex flex-col justify-end overflow-hidden group">
+              {lastEquation && (
+                <div className="text-[10px] text-gray-400 font-mono font-bold mb-1 opacity-60 group-hover:opacity-100 transition-opacity">{lastEquation} =</div>
+              )}
+              <p className={`text-2xl font-mono font-black text-gray-900 truncate tracking-tighter ${display === 'Error' ? 'text-red-500' : ''}`}>
+                {display}
+              </p>
             </div>
+
             <div className="grid grid-cols-4 gap-2">
-              {['7', '8', '9', '/', '4', '5', '6', '*', '1', '2', '3', '-', '0', '.', '=', '+', 'C'].map(btn => (
+              {[
+                { val: 'C', color: 'bg-rose-50 text-rose-600 hover:bg-rose-100' },
+                { val: '/', color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
+                { val: '*', color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
+                { val: 'del', icon: <X className="w-4 h-4"/>, color: 'bg-orange-50 text-orange-600 hover:bg-orange-100' },
+                
+                { val: '7' }, { val: '8' }, { val: '9' }, { val: '-', color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
+                
+                { val: '4' }, { val: '5' }, { val: '6' }, { val: '+', color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
+                
+                { val: '1' }, { val: '2' }, { val: '3' }, 
+                { val: '=', color: 'row-span-2 bg-gradient-to-br from-indigo-600 to-purple-600 text-white hover:shadow-lg hover:shadow-indigo-200 active:scale-95' },
+                
+                { val: '0', color: 'col-span-2' }, { val: '.' }
+              ].map((btn, i) => (
                 <button
-                  key={btn}
-                  onClick={() => handleAction(btn)}
-                  className={`p-3 rounded-xl font-bold transition-all ${
-                    btn === 'C' ? 'col-span-4 bg-red-50 text-red-600 hover:bg-red-100' :
-                    btn === '=' ? 'bg-indigo-600 text-white hover:bg-indigo-700' :
-                    ['/', '*', '-', '+'].includes(btn) ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' :
-                    'bg-gray-50 text-gray-900 hover:bg-gray-100'
+                  key={i}
+                  onClick={() => {
+                    if (btn.val === 'del') {
+                      setDisplay(prev => prev.length > 1 ? prev.slice(0, -1) : '0');
+                    } else {
+                      handleAction(btn.val)
+                    }
+                  }}
+                  className={`p-4 rounded-2xl font-black text-sm transition-all active:scale-90 shadow-sm border border-transparent ${
+                    btn.color || 'bg-white border-gray-100 text-gray-900 hover:bg-gray-50'
                   }`}
                 >
-                  {btn}
+                  {btn.icon || btn.val}
                 </button>
               ))}
             </div>
@@ -4547,7 +4633,7 @@ function NoteGlobal({ notes, onAdd, onDelete, settings }: {
     setNewNote(prev => prev + (prev ? ' ' : '') + text);
   };
 
-  const voiceLang = settings.systemLanguage === 'bn' ? 'bn-BD' : (settings.systemLanguage === 'ar' ? 'ar-SA' : 'en-US');
+  const voiceLang = settings.systemLanguage === 'ar' ? 'ar-SA' : 'bn-BD';
   const { isListening, voiceFeedback, toggleVoiceSearch } = useVoiceSearch(handleVoiceCommand, (err) => {
     console.error('Voice note error:', err);
   }, voiceLang);
@@ -5126,7 +5212,7 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
     setNewNote(prev => prev + (prev ? ' ' : '') + text);
   };
 
-  const voiceLang = settings.systemLanguage === 'bn' ? 'bn-BD' : (settings.systemLanguage === 'ar' ? 'ar-SA' : 'en-US');
+  const voiceLang = settings.systemLanguage === 'ar' ? 'ar-SA' : 'bn-BD';
   const { isListening, voiceFeedback, toggleVoiceSearch } = useVoiceSearch(handleVoiceCommand, (err) => {
     console.error('Voice note error:', err);
   }, voiceLang);
@@ -7019,7 +7105,8 @@ function POS({
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
 
   const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) && 
+    (isPhoneticMatch(p.name, searchTerm) || 
+     (p.barcode && p.barcode.toLowerCase().includes(searchTerm.toLowerCase()))) && 
     (categoryFilter === '' || p.category === categoryFilter)
   );
 
@@ -7035,53 +7122,87 @@ function POS({
 
       if (aiResult && aiResult.items && aiResult.items.length > 0) {
         let addedCount = 0;
-        let missingProducts: string[] = [];
+        let missingItems: string[] = [];
+        let customerSet = false;
         
-        aiResult.items.forEach((item: any) => {
-          if (item.action === 'addProduct' && item.productId) {
-            const match = products.find(p => p.id === item.productId);
+        for (const item of aiResult.items) {
+          if (item.action === 'addProduct' || item.action === 'newProduct') {
+            let match = null;
+            if (item.productId) {
+              match = products.find(p => p.id === item.productId);
+            }
+            
+            if (!match && item.recognizedName) {
+              const nameLower = item.recognizedName.toLowerCase();
+              match = products.find(p => 
+                p.name.toLowerCase().includes(nameLower) || 
+                isPhoneticMatch(p.name, nameLower)
+              );
+              
+              if (!match && nameLower.length > 2) {
+                const words = nameLower.split(/\s+/).filter(w => w.length > 2);
+                match = products.find(p => 
+                  words.some(w => p.name.toLowerCase().includes(w) || isPhoneticMatch(p.name, w))
+                );
+              }
+            }
+
             if (match) {
               addToCart(match, item.quantity > 0 ? item.quantity : 1);
               addedCount++;
             } else {
-              missingProducts.push(item.recognizedName || 'Unknown');
+              missingItems.push(item.recognizedName || 'Unknown');
             }
-          } else if (item.action === 'setCustomer' && item.customerId) {
-            setCheckoutData((prev: any) => ({ ...prev, customerId: item.customerId }));
-          } else if (item.action === 'newProduct' || (item.action === 'addProduct' && !item.productId)) {
-            missingProducts.push(item.recognizedName || 'Unknown');
+          } else if (item.action === 'setCustomer') {
+            let cMatch = null;
+            if (item.customerId) {
+              cMatch = customers.find(c => c.id === item.customerId);
+            }
+            if (!cMatch && item.recognizedName) {
+              const cName = item.recognizedName.toLowerCase();
+              cMatch = customers.find(c => 
+                c.name.toLowerCase().includes(cName) || 
+                isPhoneticMatch(c.name, cName) ||
+                (c.phone && c.phone.includes(cName))
+              );
+            }
+
+            if (cMatch) {
+              setCheckoutData(prev => ({ ...prev, customerId: cMatch.id }));
+              customerSet = true;
+            } else {
+              missingItems.push(item.recognizedName || 'Customer');
+            }
           }
-        });
+        }
 
         if (addedCount > 0) {
           setNotification({ 
             type: 'success', 
-            message: `${aiResult.summary || `Added ${addedCount} items.`} ${missingProducts.length > 0 ? `(Missing: ${missingProducts.join(', ')})` : ''}` 
+            message: `${aiResult.summary || `Added ${addedCount} items.`} ${missingItems.length > 0 ? `(Unrecognized: ${missingItems.join(', ')})` : ''}` 
           });
-        } else if (missingProducts.length > 0) {
-          setSearchTerm(missingProducts[0]);
+        } else if (customerSet && missingItems.length === 0) {
+          setNotification({ type: 'success', message: aiResult.summary || 'Customer set successfully.' });
+        } else if (missingItems.length > 0) {
+          setSearchTerm(missingItems[0]);
           setNotification({ 
             type: 'warning', 
-            message: `Product(s) not found: ${missingProducts.join(', ')}. Searching for the first one.` 
+            message: `Could not exactly match: ${missingItems.join(', ')}. Searching instead.` 
           });
-        } else if (aiResult.items.some(i => i.action === 'setCustomer')) {
-            setNotification({ type: 'success', message: aiResult.summary || 'Customer set successfully.' });
         } else {
             setSearchTerm(rawText.trim());
-            setNotification({ type: 'warning', message: 'No matching products found. Searching instead.' });
+            setNotification({ type: 'warning', message: 'No clear command identified. Searching instead.' });
         }
       } else {
-        // Fallback to simple query
         setSearchTerm(rawText.trim());
       }
     } catch (err) {
       console.warn("AI parsing failed:", err);
-      // Fallback
       setSearchTerm(rawText.trim());
     }
   };
 
-  const voiceLang = settings.systemLanguage === 'bn' ? 'bn-BD' : (settings.systemLanguage === 'ar' ? 'ar-SA' : 'en-US');
+  const voiceLang = settings.systemLanguage === 'ar' ? 'ar-SA' : 'bn-BD';
   const { isListening, voiceFeedback, toggleVoiceSearch } = useVoiceSearch(handleVoiceCommand, (err) => {
     if (err === 'not-allowed') {
       setNotification({ message: "Microphone access denied. Please allow microphone in browser settings.", type: 'error' });
@@ -7094,19 +7215,40 @@ function POS({
     if (e.key === 'Enter' && searchTerm.trim()) {
       e.preventDefault();
       
-      let match = products.find(p => p.barcode && p.barcode === searchTerm.trim());
-      
-      if (!match && filteredProducts.length > 0) {
-        match = filteredProducts[0];
+      const term = searchTerm.trim();
+      // 1. Exact Barcode Match
+      let match = products.find(p => p.barcode && p.barcode === term);
+      let qty = 1;
+
+      if (!match) {
+        // 2. Try parsing as a command (e.g. "5 kg sugar")
+        const parsed = parseVoiceCommandQuantity(term);
+        qty = parsed.quantity;
+        const sName = parsed.searchName.toLowerCase();
+        
+        // Find best match for sName
+        match = products.find(p => 
+          p.name.toLowerCase() === sName || 
+          isPhoneticMatch(p.name, sName) ||
+          (p.barcode && p.barcode === sName)
+        );
+
+        if (!match && filteredProducts.length > 0) {
+          match = filteredProducts[0];
+          // If we found a match via filteredProducts, we might want to still use the parsed quantity
+          // if the search term contained a quantity.
+          if (parsed.matchFound) {
+            qty = parsed.quantity;
+          }
+        }
       }
 
       if (match) {
-        addToCart(match, 1);
-        setNotification({ type: 'success', message: `Added "${match.name}" to cart.` });
+        addToCart(match, qty);
+        setNotification({ type: 'success', message: `${qty > 1 ? qty + ' ' : ''}Added "${match.name}" to cart.` });
         setSearchTerm('');
       } else {
-        setNotification({ type: 'error', message: `No product found for "${searchTerm.trim()}"` });
-        setSearchTerm('');
+        setNotification({ type: 'error', message: `No product found for "${term}"` });
       }
     }
   };
@@ -7202,8 +7344,8 @@ function POS({
               <div className="relative flex-1 group">
                 <input 
                   type="text"
-                  placeholder="Search product..."
-                  className="w-full h-10 md:h-12 pl-4 md:pl-6 pr-10 md:pr-12 bg-white/90 border border-emerald-50/50 rounded-xl md:rounded-[1.25rem] text-[11px] md:text-[13px] font-black focus:ring-2 focus:ring-emerald-500 transition-all shadow-sm outline-none text-gray-800 placeholder:text-gray-400"
+                  placeholder="Search product (phonetic/smart)..."
+                  className="w-full h-10 md:h-12 pl-4 md:pl-6 pr-10 md:pr-12 bg-white/90 border border-emerald-100/50 rounded-xl md:rounded-[1.25rem] text-[11px] md:text-[13px] font-black focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-sm outline-none text-gray-800 placeholder:text-gray-400 group-hover/search:border-emerald-200"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -7700,7 +7842,7 @@ Return the result as JSON with a "category" field containing exactly one string 
     }
   };
 
-  const voiceLang = settings.systemLanguage === 'bn' ? 'bn-BD' : (settings.systemLanguage === 'ar' ? 'ar-SA' : 'en-US');
+  const voiceLang = settings.systemLanguage === 'ar' ? 'ar-SA' : 'bn-BD';
   const { isListening, voiceFeedback, toggleVoiceSearch } = useVoiceSearch(handleVoiceCommand, (err) => {
     if (err === 'not-allowed') {
       setNotification({ message: "Microphone access denied. Please allow microphone in browser settings (click lock icon in address bar).", type: 'error' });
@@ -8243,7 +8385,7 @@ Return the result as JSON with a "category" field containing exactly one string 
               <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5 group-focus-within:text-amber-500 transition-colors" />
               <input 
                 type="text"
-                placeholder="Find products by name, company, or serial..."
+                placeholder="Search Inventory (Name/Serial/Smart)..."
                 className="w-full pl-14 pr-6 py-4 bg-gray-50/50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-amber-500 transition-all outline-none placeholder:text-gray-400"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -8311,6 +8453,8 @@ Return the result as JSON with a "category" field containing exactly one string 
                               whileHover={{ scale: 1.15, rotate: 2 }}
                               className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center text-gray-300 border border-gray-100 overflow-hidden shrink-0 shadow-sm relative group/img"
                             >
+                              {/* Standard Image Rendering: Only displays manually uploaded images. 
+                                  No automatic fetching from external sources like Wikipedia is implemented. */}
                               {p.imageUrl ? (
                                 <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover group-hover/img:scale-110 transition-transform duration-500" />
                               ) : (
@@ -9013,7 +9157,7 @@ function SalesHistory({ sales, onEdit, onDelete, settings, isOnline }: { sales: 
   const handleVoiceCommand = (text: string) => {
     setSearchTerm(text.trim());
   };
-  const voiceLang = settings.systemLanguage === 'bn' ? 'bn-BD' : (settings.systemLanguage === 'ar' ? 'ar-SA' : 'en-US');
+  const voiceLang = settings.systemLanguage === 'ar' ? 'ar-SA' : 'bn-BD';
   const { isListening, voiceFeedback, toggleVoiceSearch } = useVoiceSearch(handleVoiceCommand, undefined, voiceLang);
 
   const filteredSales = sales.filter(sale => {
@@ -10262,7 +10406,7 @@ function Customers({
   const handleVoiceCommand = (text: string) => {
     setSearchTerm(text.trim());
   };
-  const voiceLang = shopSettings.systemLanguage === 'bn' ? 'bn-BD' : (shopSettings.systemLanguage === 'ar' ? 'ar-SA' : 'en-US');
+  const voiceLang = shopSettings.systemLanguage === 'ar' ? 'ar-SA' : 'bn-BD';
   const { isListening, voiceFeedback, toggleVoiceSearch } = useVoiceSearch(handleVoiceCommand, undefined, voiceLang);
 
   const filteredCustomers = useMemo(() => {
@@ -10537,7 +10681,7 @@ function Customers({
                 <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5 group-focus-within:text-purple-500 transition-colors" />
                 <input 
                   type="text"
-                  placeholder="Find customer by name, health, or location..."
+                  placeholder="Find customer (smart/phonetic)..."
                   className="w-full pl-16 pr-16 py-5 bg-gray-50/50 border-none rounded-2xl text-base font-bold focus:ring-2 focus:ring-purple-500 transition-all outline-none placeholder:text-gray-400"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}

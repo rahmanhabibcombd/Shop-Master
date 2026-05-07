@@ -19,6 +19,7 @@ export const translateNumbers = (str: string) => {
   const wordNumbers: Record<string, string> = {
       'এক':'1', 'দুই':'2', 'তিন':'3', 'চার':'4', 'পাঁচ':'5', 'ছয়':'6', 'সাত':'7', 'আট':'8', 'নয়':'9', 'দশ':'10',
       'এগারো':'11', 'বারো':'12', 'তেরো':'13', 'চোদ্দ':'14', 'পনেরো':'15', 'ষোল':'16', 'সতেরো':'17', 'আঠারো':'18', 'উনিশ':'19', 'কুড়ি':'20', 'বিশ':'20',
+      'ত্রিশ':'30', 'চল্লিশ':'40', 'পঞ্চাশ':'50', 'ষাট':'60', 'সত্তর':'70', 'আশি':'80', 'নব্বই':'90', 'একশো':'100', 'শো':'100',
       'واحد':'1', 'اثنان':'2', 'ثلاثة':'3', 'أربعة':'4', 'خمسة':'5', 'ستة':'6', 'سبعة':'7', 'ثمانية':'8', 'تسعة':'9', 'عشرة':'10'
   };
   text = text.replace(/[০-৯٠-٩]/g, (m) => bnToEn[m]);
@@ -26,13 +27,13 @@ export const translateNumbers = (str: string) => {
   // Replace word numbers when they are at the start of a word, possibly followed by typical unit suffixes
   Object.keys(wordNumbers).forEach(key => {
      // Allow standard unit suffixes directly attached to the number word
-     const regex = new RegExp(`(^|\\s)${key}(টা|টি|পিস|প্যাকেট|কেজি|গ্রাম|লিটার|মিলি|kg|g|gm|ml)?(\\s|$)`, 'g');
+     const regex = new RegExp(`(^|\\s)${key}(টা|টি|পিস|প্যাকেট|কেজি|গ্রাম|লিটার|মিলি|ডজন|ভরি|হালি|পোয়া|kg|g|gm|ml)?(\\s|$)`, 'g');
      text = text.replace(regex, (match, prefix, suffix, postfix) => {
         return `${prefix}${wordNumbers[key]} ${suffix || ''}${postfix}`;
      });
      
      // Also try replacing it if it appears right before a suffix word without space
-     const regex2 = new RegExp(`(^|\\s)${key}(প্যাকেটের|কেজির|গ্রামের|লিটারের|পিসের)?(\\s|$)`, 'g');
+     const regex2 = new RegExp(`(^|\\s)${key}(প্যাকেটের|কেজির|গ্রামের|লিটারের|পিসের|ডজনের|ভরির)?(\\s|$)`, 'g');
      text = text.replace(regex2, (match, prefix, suffix, postfix) => {
         return `${prefix}${wordNumbers[key]} ${suffix || ''}${postfix}`;
      });
@@ -40,6 +41,38 @@ export const translateNumbers = (str: string) => {
   
   // Clean up extra spaces
   return text.replace(/\s+/g, ' ').trim();
+};
+
+export const parseMathVoiceCommand = (rawText: string): string | null => {
+  let text = translateNumbers(rawText.trim().toLowerCase());
+  
+  // Replace words with symbols
+  const operators: Record<string, string> = {
+    'plus': '+', 'যোগ': '+', 'প্লাস': '+', 'একসাথে': '+',
+    'minus': '-', 'বিয়োগ': '-', 'মাইনাস': '-', 'বাদ': '-',
+    'times': '*', 'multiplied by': '*', 'গুণ': '*', 'গুন': '*', 'পূরণ': '*', 'ইনটু': '*',
+    'divided by': '/', 'ভাগ': '/', 'ডিভাইডেড বাই': '/',
+    'x': '*', 'into': '*'
+  };
+
+  Object.keys(operators).forEach(op => {
+    // Escaping regex special characters if necessary, though these common words are fine
+    const regex = new RegExp(`\\s*${op}\\s*`, 'g');
+    text = text.replace(regex, operators[op]);
+  });
+
+  // Handle words for "equal"
+  const equals = ['equals', 'equal', 'সমান', 'রেজাল্ট', 'কত হয়', 'হবে', 'is'];
+  equals.forEach(eq => {
+    const regex = new RegExp(`\\s*${eq}\\s*`, 'g');
+    text = text.replace(regex, '=');
+  });
+
+  // Remove any non-math characters (everything except digits, ., +, -, *, /, (, ), and =)
+  // But keep = as a special indicator to evaluate
+  const cleaned = text.replace(/[^0-9\.\+\-\*\/\(\)\=]/g, '');
+  
+  return cleaned.length > 0 ? cleaned : null;
 };
 
 export const toPhonetic = (str: string) => {
@@ -101,6 +134,9 @@ export const parseVoiceCommandQuantity = (rawText: string) => {
     text = text.replace(new RegExp(key, 'g'), val);
   }
   
+  // Handle cases like "দেড় কেজি" correctly by ensuring a space or matching the pattern
+  text = text.replace(/(1.5|2.5|0.5|0.25)(কেজি|গ্রাম|লিটার|মিলি|পিস|টি|টা|kg|g|gm|ml)/g, '$1 $2');
+  
   text = text.replace(/সোয়া\s*(\d+(\.\d+)?)/g, (match, n) => (parseFloat(n) + 0.25).toString());
   text = text.replace(/সা[ড়ড]়?ে\s*(\d+(\.\d+)?)/g, (match, n) => (parseFloat(n) + 0.5).toString());
   text = text.replace(/পৌনে\s*(\d+(\.\d+)?)/g, (match, n) => (parseFloat(n) - 0.25).toString());
@@ -108,9 +144,9 @@ export const parseVoiceCommandQuantity = (rawText: string) => {
   text = text.trim();
 
   // Try extracting from prefix
-  const qtyPrefixRegex = /^(\d+(\.\d+)?)\s*(কেজি|কিলো|গ্রাম|লিটার|মিলি|পিস|টি|টা|kg|g|gm|liter|ml|pcs|piece|كجم|كيلو|جرام|لتر|مل|قطعة|حبة)?\s+/i;
+  const qtyPrefixRegex = /^(\d+(\.\d+)?)\s*(কেজি|কিলো|গ্রাম|লিটার|মিলি|পিস|টি|টা|ডজন|হালি|পোয়া|kg|g|gm|liter|ml|pcs|piece|كجم|كيلو|جرام|لتر|مل|قطعة|حبة)?\s+/i;
   // Try extracting from suffix
-  const qtySuffixRegex = /\s+(\d+(\.\d+)?)\s*(কেজি|কিলো|গ্রাম|লিটার|মিলি|পিস|টি|টা|kg|g|gm|liter|ml|pcs|piece|كجم|كيلو|جرام|لتر|مل|قطعة|حبة)?$/i;
+  const qtySuffixRegex = /\s+(\d+(\.\d+)?)\s*(কেজি|কিলো|গ্রাম|লিটার|মিলি|পিস|টি|টা|ডজন|হালি|পোয়া|kg|g|gm|liter|ml|pcs|piece|كجم|كيلو|جرام|لتر|مل|قطعة|حبة)?$/i;
   
   let quantity = 1;
   let searchName = text;
@@ -126,8 +162,14 @@ export const parseVoiceCommandQuantity = (rawText: string) => {
         if (parsedNum >= 50) {
            parsedNum = parsedNum / 1000;
         }
+    } else if (unit === 'পোয়া') {
+        parsedNum = parsedNum * 0.25;
+    } else if (unit === 'ডজন') {
+        parsedNum = parsedNum * 12;
+    } else if (unit === 'হালি') {
+        parsedNum = parsedNum * 4;
     }
-    return Math.max(0.1, parsedNum);
+    return Math.max(0.01, parsedNum);
   };
 
   if (prefixMatch) {
@@ -239,11 +281,11 @@ export const isPhoneticMatch = (text: string | null | undefined, query: string) 
   // Basic English to Bengali keyword mapping for common categories
   const categoryMap: Record<string, string[]> = {
     'grocery': ['মুদি', 'মুদী', 'بقالة'],
-    'rice': ['চাল', 'ধান', 'চাউল', 'أرز', 'رز', 'aroz', 'aruz', 'oruj', 'uruj'],
+    'rice': ['chal', 'caul', 'cal', 'aroz', 'চাল', 'ধান', 'চাউল', 'rice'],
     'fish': ['মাছ', 'মৎস্য', 'সমক', 'سمك'],
     'meat': ['মাংস', 'গোশত', 'গরু', 'খাসি', 'لحম'],
-    'oil': ['তেল', 'অয়েল', 'তৈল', 'زيت'],
-    'soybean oil': ['সয়াবিন তেল', 'সয়াবিন', 'সোয়াবিন', 'زيت فول الصويا'],
+    'oil': ['tel', 'tal', 'তেল', 'অয়েল', 'তৈল'],
+    'soybean oil': ['সয়াবিন তেল', 'সয়াবিন', 'সোয়াবিন', 'soyabin'],
     'spice': ['মশলা', 'মসালা', 'মসলা', 'توابل', 'بهارات'],
     'fruit': ['ফল', 'ফস', 'فاكهة'],
     'vegetable': ['সবজি', 'শাকসবজি', 'সবজী', 'খضروات'],
@@ -264,8 +306,8 @@ export const isPhoneticMatch = (text: string | null | undefined, query: string) 
     'clean': ['পরিষ্কার', 'ক্লিন', 'ক্লিনার', 'نظيف'],
     'soap': ['সাবান', 'সাবুন', 'صابون'],
     'shampoo': ['শ্যাম্পু', 'শ্যাম্পূ', 'شামبو'],
-    'air freshener': ['এয়ার ফ্রেশনার', 'এয়ার ফ্রেশনার', 'রুম ফ্রেশনার', 'এয়ার ফ্রেশ', 'এয়ার ফ্রেশ', 'معطر جو'],
-    'noodles': ['নুডুলস', 'নুডলস', 'নুডুল', 'نودلز', 'مكرونة'],
+    'air freshener': ['এয়ার ফ্রেশনার', 'এয়ার ফ্রেশনার', 'রুম ফ্রেশনার', 'এয়ার ফ্রেশ', 'এয়ার ফ্রেশ', 'معطر جو', 'air freshness', 'air fresh'],
+    'noodles': ['নুডুলস', 'নুডলস', 'নুডুল', 'নودلز', 'মكرونة', 'মিস্টার নুডুলস', 'মিস্টার নুডলস', 'nuduls', 'noodles'],
     'mr noodles': ['মিস্টার নুডুলস', 'মিস্টার নুডলস', 'মিস্টার নুডুল'],
     'stationery': ['স্টেশনারি', 'قرطاسية'],
     'pen': ['কলম', 'قلم'],
@@ -273,18 +315,18 @@ export const isPhoneticMatch = (text: string | null | undefined, query: string) 
     'paper': ['কাগজ', 'ورق'],
     'clothe': ['পোশাক', 'কাপড়', 'ملابس'],
     'toy': ['খেলনা', 'লعبة'],
-    'egg': ['ডিম', 'বিডন', 'বিডুন', 'বিটন', 'বিডুন', 'বিটন', 'বিডুন', 'বিটন', 'বিডুন', 'বিটন', 'بيضة'],
+    'egg': ['dim', 'egg', 'ডিম', 'বিডন'],
     'chicken': ['মুরগি', 'মুরগী', 'دجاج'],
     'beef': ['গরুর মাংস', 'গরু', 'لحم بقر'],
     'mutton': ['খাসির মাংস', 'খাসি', 'لحم ضأن'],
     'bread': ['রুটি', 'ব্রেড', 'خبز'],
     'tea': ['চা', 'শাই', 'شاي'],
     'coffee': ['কফি', 'কফী', 'قهوة'],
-    'sugar': ['চিনি', 'চিনী', 'চিনির', 'سكر'],
-    'salt': ['লবণ', 'লবন', 'লবণর', 'ملح'],
+    'sugar': ['চিনি', 'চিনী', 'cini', 'chini', 'sugar'],
+    'salt': ['লবণ', 'লবন', 'lobon', 'solt', 'salt'],
     'flour': ['আটা', 'ময়দা', 'মা ময়দা', 'دقيق', 'طحين'],
     'pulse': ['ডাল', 'ডাউল', 'عدس'],
-    'onion': ['পেঁয়াজ', 'পেয়াজ', 'পেয়াজ', 'পিয়াজ', 'বصل'],
+    'onion': ['পেঁয়াজ', 'পেয়াজ', 'peyaj', 'piyaj'],
     'garlic': ['রসুন', 'থুম', 'ثوم'],
     'ginger': ['আদা', 'জাঞ্জাবিল', 'زنجبيل'],
     'potato': ['আলু', 'আলুর', 'بطاطس', 'بطاطا'],
@@ -294,6 +336,7 @@ export const isPhoneticMatch = (text: string | null | undefined, query: string) 
     'fertilizer': ['সার', 'সারর', 'سمাদ'],
     'mobile': ['মোবাইল', 'ফোন', 'জাওয়াল', 'جوال'],
     'gift': ['উপহার', 'গিফট', 'পিফট', 'هدية'],
+    'habib': ['হাবিব', 'হাবীব', 'habibur', 'habib'],
     'cosmetics': ['প্রসাধন', 'কসমেটিকস', 'কসমেটিক', 'মস্তাহ্বারাত তাজমিল', 'مستحضرات تجميل'],
     'personal care': ['ব্যক্তিগত যত্ন', 'আনায়া শাকশিয়া', 'عناية شخصية']
   };
