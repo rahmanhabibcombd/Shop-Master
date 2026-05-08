@@ -53,37 +53,28 @@ export function useVoiceSearch(onCommand: (text: string) => void, onError?: (err
     let accumulatedText = "";
     let timeoutId: any = null;
 
-    recognitionRef.current.onresult = (event: any) => {
-      let isFinalResult = false;
-      let finalBatch = "";
-      let interimBatch = "";
-      
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          isFinalResult = true;
-          finalBatch += transcript + " ";
-        } else {
-          interimBatch += transcript;
+      recognitionRef.current.onresult = (event: any) => {
+        let isFinalResult = false;
+        let finalBatch = [];
+        
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            isFinalResult = true;
+            finalBatch.push(event.results[i][0].transcript);
+          }
         }
-      }
 
-      const displayFeedback = (accumulatedText + (accumulatedText ? " " : "") + finalBatch + interimBatch).trim();
-      setVoiceFeedback(displayFeedback || (isListeningRef.current ? "Listening..." : null));
-
-      if (isFinalResult && finalBatch.trim()) {
-          accumulatedText += (accumulatedText ? " " : "") + finalBatch.trim();
-          
+        const newText = finalBatch.join(' ').trim();
+        
+        if (newText) {
+          setVoiceFeedback(newText);
           if (timeoutId) clearTimeout(timeoutId);
           timeoutId = setTimeout(() => {
-             if (accumulatedText.trim()) {
-               onCommandRef.current(accumulatedText.trim());
-               accumulatedText = "";
-             }
+             onCommandRef.current(newText);
              setVoiceFeedback(null);
-          }, 1200); 
-      }
-    };
+          }, 1000); 
+        }
+      };
 
     recognitionRef.current.onend = () => {
       if (timeoutId) {

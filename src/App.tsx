@@ -97,7 +97,7 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Papa from 'papaparse';
-// import { Html5QrcodeScanner } from 'html5-qrcode';
+import { CategoryManagement } from './components/CategoryManagement';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
@@ -540,7 +540,7 @@ interface Product {
   price: number;
   cost: number;
   stock: number;
-  unit: 'kg' | 'unit';
+  unit: 'kg' | 'unit' | 'dozen' | 'hali';
   barcode: string;
   expiryDate?: string;
   location?: string;
@@ -3504,6 +3504,7 @@ export default function App() {
               ]},
               { id: 'inventory', label: 'Inventory', items: [
                 { id: 'inventory', icon: Package, label: st('inventory'), roles: ['admin', 'manager', 'assistant_manager'], color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100' },
+                { id: 'category', icon: Tag, label: st('category'), roles: ['admin', 'manager'], color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100' },
                 { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['admin', 'manager'], color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
                 { id: 'supplier', icon: Users, label: st('supplier'), roles: ['admin', 'manager'], color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100' },
                 { id: 'barcode', icon: Barcode, label: st('barcode'), roles: ['admin', 'manager'], color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-100' },
@@ -3668,6 +3669,14 @@ export default function App() {
                 setNotification={setNotification}
                 isOnline={isOnline}
                 settings={shopSettings}
+              />
+            )}
+            {activeTab === 'category' && (
+              <CategoryManagement 
+                categories={categories}
+                addCategory={addCategory}
+                deleteCategory={deleteCategory}
+                updateCategory={updateCategory}
               />
             )}
             {activeTab === 'sales' && (
@@ -4495,17 +4504,16 @@ function Calculator({ settings }: { settings: ShopSettings }) {
   };
 
   const handleVoiceCommand = async (text: string) => {
-    const expression = await parseMathVoiceCommandAI(text);
-    if (!expression) return;
+    // Basic cleanup of transcript for better AI parsing
+    const cleanedText = text.trim();
+    if (!cleanedText) return;
+
+    const expression = await parseMathVoiceCommandAI(cleanedText);
+    if (!expression || expression === "ERROR") return;
     
-    // Instead of building on top, treat the parsed voice command as the primary input.
-    // If it's a simple number/operator, append. If it looks like a complete thought from the AI, replace.
+    // Add the expression directly to the display
     setDisplay(prev => {
         const current = (prev === '0' || prev === 'Error') ? '' : prev;
-        // Basic heuristic: if the AI parsed a complex expression, replace.
-        if (expression.length > 5 || /[\+\-\*\/]/.test(expression)) {
-            return expression;
-        }
         return current + expression;
     });
   };
@@ -7412,11 +7420,7 @@ function POS({
               >
                 <div className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${p.stock > 10 ? 'bg-emerald-500' : p.stock > 0 ? 'bg-amber-500' : 'bg-red-500'}`}></div>
                 <div className="aspect-square bg-gray-50 rounded-xl mb-2 flex items-center justify-center text-gray-300 group-hover:scale-105 transition-transform overflow-hidden relative">
-                   {p.imageUrl ? (
-                     <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" />
-                   ) : (
-                     <Package className="w-6 h-6 opacity-20" />
-                   )}
+                   <Package className="w-6 h-6 opacity-20" />
                    {p.stock <= 5 && p.stock > 0 && (
                      <div className="absolute inset-x-0 bottom-0 bg-red-500/90 py-0.5 text-center">
                         <span className="text-[7px] font-black text-white uppercase tracking-tighter">Low Stock</span>
@@ -7697,7 +7701,7 @@ function Inventory({ products, categories, stockRecords, sales, onViewHistory, s
   isOnline: boolean,
   settings: ShopSettings
 }) {
-  const [productSortBy, setProductSortBy] = useState<string>('name');
+  const [productSortBy, setProductSortBy] = useState<string>('serial');
   const [productSortOrder, setProductSortOrder] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 7;
@@ -7858,9 +7862,16 @@ Return the result as JSON with a "category" field containing exactly one string 
     return () => window.removeEventListener('click', handleClick);
   }, []);
 
-  const filteredCategories = FIXED_CATEGORIES.filter(cat => 
-    isPhoneticMatch(cat, categorySearch)
-  );
+  const addCategory = async (name: string) => {
+    await addDoc(collection(db, 'categories'), { name });
+  };
+  const deleteCategory = async (id: string) => {
+    await deleteDoc(doc(db, 'categories', id));
+  };
+  const updateCategory = async (id: string, name: string) => {
+    await updateDoc(doc(db, 'categories', id), { name });
+  };
+
 
   const salesCount: Record<string, number> = {};
   const lastSaleDate: Record<string, number> = {};
@@ -7892,6 +7903,9 @@ Return the result as JSON with a "category" field containing exactly one string 
   }).sort((a, b) => {
     let cmp = 0;
     switch (productSortBy) {
+      case 'serial':
+        cmp = (a.serialNumber || 0) - (b.serialNumber || 0);
+        break;
       case 'company':
         cmp = (a.company || '').localeCompare(b.company || '');
         break;
@@ -8311,6 +8325,7 @@ Return the result as JSON with a "category" field containing exactly one string 
             onChange={(e) => setProductSortBy(e.target.value)}
             className="px-4 py-4 bg-white border border-gray-100 rounded-2xl text-sm font-bold text-gray-700 shadow-sm focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer appearance-none min-w-[140px]"
           >
+            <option value="serial">Sort: Serial No.</option>
             <option value="name">Sort: Name</option>
             <option value="company">Sort: Company</option>
             <option value="near_expire">Sort: Near Expire</option>
@@ -8456,7 +8471,7 @@ Return the result as JSON with a "category" field containing exactly one string 
                               {/* Standard Image Rendering: Only displays manually uploaded images. 
                                   No automatic fetching from external sources like Wikipedia is implemented. */}
                               {p.imageUrl ? (
-                                <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover group-hover/img:scale-110 transition-transform duration-500" />
+                                <Package className="w-7 h-7 opacity-20" />
                               ) : (
                                 <Package className="w-7 h-7 opacity-20" />
                               )}
@@ -8862,6 +8877,8 @@ Return the result as JSON with a "category" field containing exactly one string 
                     <select name="unit" defaultValue={editingProduct?.unit || 'unit'} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none">
                       <option value="unit">Unit (pcs)</option>
                       <option value="kg">KG</option>
+                      <option value="dozen">Dozen</option>
+                      <option value="hali">Hali</option>
                     </select>
                   </div>
                   <div>

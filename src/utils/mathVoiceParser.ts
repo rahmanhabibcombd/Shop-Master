@@ -17,16 +17,9 @@ export const parseMathVoiceCommandAI = async (rawText: string): Promise<string |
   if (!ai) return null;
 
   const prompt = `
-You are an expert math voice assistant. The user is dictating a mathematical calculation.
-Your ONLY output MUST be the resulting mathematical expression (e.g., 10+20-5*2).
-
-Rules:
-1. Extract numbers and operators ONLY.
-2. Ignore all conversational filler (e.g., "please", "calculate", "how much", language greetings).
-3. If the user repeats numbers, discard the repetition and keep only the intended final expression.
-4. If the user makes a statement (e.g., "10 plus 10"), return "10+10". 
-5. NEVER add filler text or explanations to the output.
-6. Return "ERROR" if no valid math expression can be formed.
+You are an expert math voice assistant for a calculator app.
+The user speaks in Bengali, English, or a mix of both. 
+Your task is to parse the voice transcript into a clean, single mathematical expression (e.g., 500+66700+800+600+300).
 
 Operator Mapping:
 - যোগ, plus, add -> +
@@ -35,12 +28,20 @@ Operator Mapping:
 - ভাগ, divide, করো -> /
 - শতাংশ, percent -> /100*
 
+Rules:
+1. Extract ONLY the intended numbers and operators.
+2. Ignore all conversational filler (e.g., "please", "calculate", "how much").
+3. IF THE USER REPEATS NUMBERS OR PHRASES, ignore the repetition and output the intended calculation once.
+4. Convert Bengali numerals/words to digits (e.g., "১০" -> 10).
+5. Output ONLY the resulting math string. NO filler text/explanations.
+6. Return "ERROR" if no valid math expression can be formed.
+
 Transcript: "${rawText.replace(/"/g, "'")}"
 `;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.0-flash",
       contents: prompt,
       config: {
         temperature: 0,
