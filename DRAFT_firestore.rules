@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 3. Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isMasterAdmin() {
+      return isSignedIn() && request.auth.token.email.lower() == "stratproamz@gmail.com";
+    }
+
+    // A user's shopId is either their own UID (if merchant) or assigned in users collection
+    function getUserShopId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId;
+    }
+
+    // Note: get() is expensive. We should prefer checking shopId in resource.data for LIST queries.
+    function belongsToShop(data) {
+      return isSignedIn() && data.shopId != null && (
+        request.auth.uid == data.shopId || // Merchant
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId == data.shopId)
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Generic Shop Data match
+    match /{collection}/{docId} {
+      allow read: if isMasterAdmin() || (belongsToShop(existing()) && collection in ['products', 'sales', 'customers', 'expenses', 'investments', 'staff_salaries', 'categories', 'users', 'employees', 'stockRecords', 'recycleBin', 'customer_logs', 'due_payments', 'notes', 'daily_closings']);
+      
+      allow create: if isMasterAdmin() || (
+        belongsToShop(incoming()) && 
+        isValidId(docId) &&
+        collection in ['products', 'sales', 'customers', 'expenses', 'investments', 'staff_salaries', 'categories', 'users', 'employees', 'stockRecords', 'recycleBin', 'customer_logs', 'due_payments', 'notes', 'daily_closings']
+      );
+
+      allow update: if isMasterAdmin() || (
+        belongsToShop(existing()) &&
+        incoming().shopId == existing().shopId &&
+        collection in ['products', 'sales', 'customers', 'expenses', 'investments', 'staff_salaries', 'categories', 'users', 'employees', 'stockRecords', 'recycleBin', 'customer_logs', 'due_payments', 'notes', 'daily_closings']
+      );
+
+      allow delete: if isMasterAdmin() || (
+        belongsToShop(existing()) && 
+        collection in ['recycleBin', 'categories', 'products'] // Only certain things can be deleted directly
+      );
+    }
+
+    match /settings/{shopId} {
+      allow read: if isMasterAdmin() || request.auth.uid == shopId || getUserShopId() == shopId;
+      allow write: if isMasterAdmin() || request.auth.uid == shopId || getUserShopId() == shopId;
+    }
+
+    match /shops/{shopId} {
+      allow read: if isMasterAdmin() || request.auth.uid == shopId;
+      allow create: if isVerified() && request.auth.uid == shopId;
+      allow update: if isMasterAdmin() || request.auth.uid == shopId;
+      allow delete: if isMasterAdmin();
+    }
+    
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isMasterAdmin() || getUserShopId() == existing().shopId);
+      allow write: if isMasterAdmin() || (isSignedIn() && request.auth.uid == userId);
+    }
+  }
+}

@@ -6,6 +6,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "shopId": { "type": "string" },
         "name": { "type": "string" },
         "category": { "type": "string" },
         "price": { "type": "number" },

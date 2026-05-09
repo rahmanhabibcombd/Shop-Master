@@ -118,6 +118,7 @@ import {
   deleteDoc,
   onSnapshot,
   query,
+  where,
   orderBy,
   limit,
   OperationType,
@@ -155,6 +156,7 @@ interface AppUser {
   password: string;
   role: UserRole;
   displayName: string;
+  shopId: string;
 }
 
 interface ShopSettings {
@@ -902,7 +904,7 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-const moveToRecycleBin = async (entityType: RecycleItem['entityType'], originalId: string, data: any) => {
+const moveToRecycleBin = async (entityType: RecycleItem['entityType'], originalId: string, data: any, shopId: string) => {
   try {
     const deletedAt = new Date();
     const expiresAt = new Date();
@@ -915,7 +917,8 @@ const moveToRecycleBin = async (entityType: RecycleItem['entityType'], originalI
       data,
       deletedAt,
       expiresAt,
-      deletedBy: auth.currentUser?.uid || 'unknown'
+      deletedBy: auth.currentUser?.uid || 'unknown',
+      shopId
     };
     
     await addDoc(collection(db, 'recycleBin'), recycleItem);
@@ -2429,6 +2432,7 @@ export default function App() {
           const { paymentData, customerId, amount } = item.data;
           await addDoc(collection(db, 'due_payments'), {
             ...paymentData,
+            shopId: user?.shopId,
             timestamp: serverTimestamp()
           });
           await updateDoc(doc(db, 'customers', customerId), {
@@ -2508,7 +2512,8 @@ export default function App() {
           uid: firebaseUser.uid,
           email: firebaseUser.email || '',
           displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-          role: isMaster ? 'admin' : 'sales_team' // Default role if not found
+          role: isMaster ? 'admin' : 'sales_team',
+          shopId: firebaseUser.uid // Default shopId for merchants
         };
         setUser(userData);
       } else {
@@ -2546,18 +2551,24 @@ export default function App() {
   const handleOnboardingComplete = async (formData: any) => {
     try {
       setLoading(true);
+      if (!user || !user.shopId) throw new Error("User not authenticated");
+
       // Save to global shops collection for master admin
-      const shopRef = doc(collection(db, 'shops'));
+      // We use the shopId (merchant uid) as the document ID for the shop
+      const shopRef = doc(db, 'shops', user.shopId);
       await setDoc(shopRef, {
         ...formData,
-        ownerEmail: user?.email,
-        ownerUid: user?.uid
+        shopId: user.shopId,
+        ownerEmail: user.email,
+        ownerUid: user.uid,
+        createdAt: serverTimestamp()
       });
 
-      // Update current shop settings
-      const settingsRef = doc(db, 'settings', 'shop');
+      // Update current shop settings - isolated by shopId
+      const settingsRef = doc(db, 'settings', user.shopId);
       await setDoc(settingsRef, {
         ...shopSettings,
+        shopId: user.shopId,
         name: formData.name,
         address: formData.address,
         phone: formData.phone,
@@ -2706,86 +2717,100 @@ export default function App() {
   }, [shopSettings]);
 
   useEffect(() => {
-    // We sync these even without auth to allow the login screen to function
-    // Security is handled by allowing public read in firestore.rules
-    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      setAppUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser)));
-    }, (err) => console.error("Users sync error", err));
+    // These require the user to be logged in to determine the shopId
+    if (!user || !user.shopId) {
+      setAppUsers([]);
+      setShopSettings({
+        name: 'Bismillah Store',
+        address: 'Your Shop Address',
+        phone: '',
+        receiptWidth: '58mm',
+        receiptFooter: "Thank you for shopping with us!\nPowered by ShopMaster",
+        waGatewayType: 'manual',
+        autoSendWhatsApp: false,
+        aiWhatsAppEnabled: false,
+        waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.",
+        waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}} টাকা।",
+        printLanguage: 'bn',
+        systemLanguage: 'bn',
+        currencySymbol: 'TK',
+      });
+      return;
+    }
 
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'shop'), (snapshot) => {
+    const currentShopId = user.shopId;
+
+    // Sync settings for this specific shop
+    const unsubSettings = onSnapshot(doc(db, 'settings', currentShopId), (snapshot) => {
       if (snapshot.exists()) {
         setShopSettings(snapshot.data() as ShopSettings);
       }
     }, (err) => console.error("Settings sync error", err));
 
-    return () => {
-      unsubUsers();
-      unsubSettings();
-    };
-  }, []);
+    // Sync users for this specific shop
+    const unsubUsers = onSnapshot(query(collection(db, 'users'), where('shopId', '==', currentShopId)), (snapshot) => {
+      setAppUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser)));
+    }, (err) => console.error("Users sync error", err));
 
-  // Real-time Data Sync (Private/App-related)
-  useEffect(() => {
-    // We need the app user state to be ready
-    if (!user) return;
-
-    const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+    const unsubProducts = onSnapshot(query(collection(db, 'products'), where('shopId', '==', currentShopId)), (snapshot) => {
       setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
     }, (err) => console.error("Products sync error", err));
 
-    const unsubSales = onSnapshot(query(collection(db, 'sales'), orderBy('timestamp', 'desc'), limit(100)), (snapshot) => {
+    const unsubSales = onSnapshot(query(collection(db, 'sales'), where('shopId', '==', currentShopId), orderBy('timestamp', 'desc'), limit(100)), (snapshot) => {
       setSales(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Sale)));
     }, (err) => console.error("Sales sync error", err));
 
-    const unsubStock = onSnapshot(collection(db, 'stockRecords'), (snapshot) => {
+    const unsubStock = onSnapshot(query(collection(db, 'stockRecords'), where('shopId', '==', currentShopId)), (snapshot) => {
       setStockRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StockRecord)));
     }, (err) => console.error("Stock records sync error", err));
 
-    const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
+    const unsubCustomers = onSnapshot(query(collection(db, 'customers'), where('shopId', '==', currentShopId)), (snapshot) => {
       setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer)));
     }, (err) => console.error("Customers sync error", err));
 
-    const unsubCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
+    const unsubCategories = onSnapshot(query(collection(db, 'categories'), where('shopId', '==', currentShopId)), (snapshot) => {
       setCategories(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category)));
     }, (err) => console.error("Categories sync error", err));
 
-    const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => {
+    const unsubExpenses = onSnapshot(query(collection(db, 'expenses'), where('shopId', '==', currentShopId)), (snapshot) => {
       setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense)));
     }, (err) => console.error("Expenses sync error", err));
 
-    const unsubInvestments = onSnapshot(collection(db, 'investments'), (snapshot) => {
+    const unsubInvestments = onSnapshot(query(collection(db, 'investments'), where('shopId', '==', currentShopId)), (snapshot) => {
       setInvestments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Investment)));
     }, (err) => console.error("Investments sync error", err));
 
-    const unsubStaffSalaries = onSnapshot(collection(db, 'staff_salaries'), (snapshot) => {
+    const unsubStaffSalaries = onSnapshot(query(collection(db, 'staff_salaries'), where('shopId', '==', currentShopId)), (snapshot) => {
       setStaffSalaries(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StaffSalary)));
     }, (err) => console.error("Staff salaries sync error", err));
 
-    const unsubDailyClosings = onSnapshot(collection(db, 'daily_closings'), (snapshot) => {
+    const unsubDailyClosings = onSnapshot(query(collection(db, 'daily_closings'), where('shopId', '==', currentShopId)), (snapshot) => {
       setDailyClosings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DailyClosing)));
     }, (err) => console.error("Daily closing sync error", err));
 
-    const unsubEmployees = onSnapshot(collection(db, 'employees'), (snapshot) => {
+    const unsubEmployees = onSnapshot(query(collection(db, 'employees'), where('shopId', '==', currentShopId)), (snapshot) => {
       setEmployees(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Employee)));
     }, (err) => console.error("Employees sync error", err));
 
-    const unsubRecycleBin = onSnapshot(collection(db, 'recycleBin'), (snapshot) => {
+    const unsubRecycleBin = onSnapshot(query(collection(db, 'recycleBin'), where('shopId', '==', currentShopId)), (snapshot) => {
       setRecycleBin(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RecycleItem)));
     }, (err) => console.error("Recycle bin sync error", err));
 
-    const unsubCustomerLogs = onSnapshot(collection(db, 'customer_logs'), (snapshot) => {
+    const unsubCustomerLogs = onSnapshot(query(collection(db, 'customer_logs'), where('shopId', '==', currentShopId)), (snapshot) => {
       setCustomerLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CustomerLog)));
     }, (err) => console.error("Customer logs sync error", err));
 
-    const unsubDuePayments = onSnapshot(collection(db, 'due_payments'), (snapshot) => {
+    const unsubDuePayments = onSnapshot(query(collection(db, 'due_payments'), where('shopId', '==', currentShopId)), (snapshot) => {
       setDuePayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DuePayment)));
     }, (err) => console.error("Due payments sync error", err));
 
-    const unsubNotes = onSnapshot(query(collection(db, 'notes'), orderBy('timestamp', 'desc')), (snapshot) => {
+    const unsubNotes = onSnapshot(query(collection(db, 'notes'), where('shopId', '==', currentShopId), orderBy('timestamp', 'desc')), (snapshot) => {
       setNotes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Note)));
     }, (err) => console.error("Notes sync error", err));
 
     return () => {
+      unsubSettings();
+      unsubUsers();
       unsubProducts();
       unsubSales();
       unsubStock();
@@ -2805,9 +2830,11 @@ export default function App() {
 
   const handleAddNote = async (text: string, color: string) => {
     try {
+      if (!user || !user.shopId) return;
       await addDoc(collection(db, 'notes'), {
         text,
         color,
+        shopId: user.shopId,
         timestamp: serverTimestamp()
       });
     } catch (error) {
@@ -2849,7 +2876,13 @@ export default function App() {
     const foundUser = appUsers.find(u => u.username === username && u.password === password);
 
     if (foundUser) {
-      const userData = { uid: foundUser.id, email: `${foundUser.username}@shop.com`, displayName: foundUser.displayName, role: foundUser.role };
+      const userData = { 
+        uid: foundUser.id, 
+        email: `${foundUser.username}@shop.com`, 
+        displayName: foundUser.displayName, 
+        role: foundUser.role,
+        shopId: foundUser.shopId
+      };
       setUser(userData);
       localStorage.setItem('shopmaster_user', JSON.stringify(userData));
     } else {
@@ -2878,7 +2911,8 @@ export default function App() {
         uid: googleUser.uid, 
         email: googleUser.email || '', 
         displayName: googleUser.displayName || googleUser.email?.split('@')[0] || 'Google User', 
-        role 
+        role,
+        shopId: googleUser.uid
       };
       
       setUser(userData);
@@ -3056,6 +3090,7 @@ export default function App() {
       }
 
       const saleData: any = {
+        shopId: user.shopId,
         customerName: selectedCustomer?.name || checkoutData.walkInName || 'Walk-in Customer',
         customerPhone: selectedCustomer?.phone || checkoutData.walkInPhone || '',
         items: cart.map(item => ({
@@ -3127,6 +3162,7 @@ export default function App() {
           const prevDue = selectedCustomer?.currentDue || 0;
           const remainingDue = prevDue - overpayment;
           await addDoc(collection(db, 'due_payments'), {
+            shopId: user.shopId,
             customerId: checkoutData.customerId,
             amount: overpayment,
             previousDue: prevDue,
@@ -3351,7 +3387,8 @@ export default function App() {
 
   const handleSaveSettings = async (newSettings: ShopSettings) => {
     try {
-      await setDoc(doc(db, 'settings', 'shop'), newSettings);
+      if (!user || !user.shopId) throw new Error("No shopId found");
+      await setDoc(doc(db, 'settings', user.shopId), { ...newSettings, shopId: user.shopId });
       setNotification({ message: 'Settings updated successfully', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings');
@@ -3367,7 +3404,7 @@ export default function App() {
     }
 
     try {
-      await addDoc(collection(db, 'users'), newUser);
+      await addDoc(collection(db, 'users'), { ...newUser, shopId: user.shopId });
       setNotification({ message: 'User added successfully', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'users');
@@ -3389,7 +3426,7 @@ export default function App() {
 
   const handleAddEmployee = async (newEmployee: Omit<Employee, 'id'>) => {
     try {
-      await addDoc(collection(db, 'employees'), newEmployee);
+      await addDoc(collection(db, 'employees'), { ...newEmployee, shopId: user.shopId });
       setNotification({ message: 'Employee added successfully', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'employees');
@@ -3400,6 +3437,7 @@ export default function App() {
     try {
       const docRef = await addDoc(collection(db, 'customers'), {
         ...newCustomer,
+        shopId: user.shopId,
         serialNumber: Date.now()
       });
       return docRef.id;
@@ -3433,7 +3471,7 @@ export default function App() {
 
   const handleAddExpense = async (newExpense: Omit<Expense, 'id'>) => {
     try {
-      await addDoc(collection(db, 'expenses'), newExpense);
+      await addDoc(collection(db, 'expenses'), { ...newExpense, shopId: user.shopId });
       setNotification({ message: 'Expense added successfully', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'expenses');
@@ -3442,7 +3480,7 @@ export default function App() {
 
   const handleAddInvestment = async (newInvestment: Omit<Investment, 'id'>) => {
     try {
-      await addDoc(collection(db, 'investments'), newInvestment);
+      await addDoc(collection(db, 'investments'), { ...newInvestment, shopId: user.shopId });
       setNotification({ message: 'Investment added successfully', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'investments');
@@ -3451,7 +3489,7 @@ export default function App() {
 
   const handleAddStaffSalary = async (newSalary: Omit<StaffSalary, 'id'>) => {
     try {
-      await addDoc(collection(db, 'staff_salaries'), newSalary);
+      await addDoc(collection(db, 'staff_salaries'), { ...newSalary, shopId: user.shopId });
       setNotification({ message: 'Salary payment recorded', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'staff_salaries');
@@ -8238,7 +8276,8 @@ Return the result as JSON with a "category" field containing exactly one string 
   }, []);
 
   const addCategory = async (name: string) => {
-    await addDoc(collection(db, 'categories'), { name });
+    if (!user || !user.shopId) return;
+    await addDoc(collection(db, 'categories'), { name, shopId: user.shopId });
   };
   const deleteCategory = async (id: string) => {
     await deleteDoc(doc(db, 'categories', id));
@@ -8559,6 +8598,7 @@ Return the result as JSON with a "category" field containing exactly one string 
         const maxSerial = products.reduce((max, p) => Math.max(max, p.serialNumber || 0), 0);
         const newProduct = {
           ...productData,
+          shopId: user.shopId,
           serialNumber: maxSerial + 1
         };
         await addDoc(collection(db, 'products'), newProduct);
@@ -8582,6 +8622,7 @@ Return the result as JSON with a "category" field containing exactly one string 
         if (!data || data.quantity <= 0) continue;
 
         const stockRecord = {
+          shopId: user.shopId,
           productId: product.id,
           quantity: data.quantity,
           type: 'add' as const,
@@ -10919,6 +10960,7 @@ function Customers({
         setNotification({ message: 'Customer updated successfully', type: 'success' });
         
         await addDoc(collection(db, 'customer_logs'), {
+          shopId: user.shopId,
           customerId: editingCustomer.id,
           type: 'profile_edit',
           oldData: editingCustomer,
@@ -10930,6 +10972,7 @@ function Customers({
       } else {
         await addDoc(collection(db, 'customers'), {
           ...customerData,
+          shopId: user.shopId,
           serialNumber: Date.now()
         });
         setNotification({ message: 'Customer added successfully', type: 'success' });
@@ -11890,10 +11933,11 @@ function DailyClosingView({ sales, expenses, dailyClosings, duePayments, setting
     e.preventDefault();
     
     // Explicitly generate a unique ID for the closing
-    const closingId = `closing-${format(new Date(), 'yyyyMMdd')}-${Date.now()}`;
+    const closingId = `closing-${user?.shopId}-${format(new Date(), 'yyyyMMdd')}-${Date.now()}`;
     
     const closingData: any = {
       id: closingId,
+      shopId: user?.shopId,
       date: today,
       totalSales,
       cashSales,
