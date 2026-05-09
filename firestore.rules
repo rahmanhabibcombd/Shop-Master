@@ -41,7 +41,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        (request.auth.token.email == "stratproamz@gmail.com" ||
+        (request.auth.token.email.lower() == "stratproamz@gmail.com" ||
          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
     }
@@ -240,6 +240,12 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if isValidNote(request.resource.data);
       allow delete: if true;
+    }
+
+    match /shops/{shopId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
     }
   }
 }

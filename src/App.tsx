@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { ShopOnboarding } from './components/ShopOnboarding';
 import { useVoiceSearch } from './hooks/useVoiceSearch';
 import { standardizeBn, toPhonetic, parseVoiceCommandQuantity, isPhoneticMatch, parseNewProductVoiceCommand, formatToBnDate } from './utils/voiceUtils';
 import { parseMathVoiceCommandAI } from './utils/mathVoiceParser';
@@ -99,7 +100,6 @@ import autoTable from 'jspdf-autotable';
 import Papa from 'papaparse';
 import { CategoryManagement } from './components/CategoryManagement';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { 
   db, 
@@ -409,7 +409,15 @@ const SYSTEM_TRANSLATIONS = {
     actions: 'Actions',
     cashReceived: 'Cash Received',
     retailSale: 'Retail Sale',
-    expenses: 'Expenses'
+    expenses: 'Expenses',
+    merchantLogin: 'Merchant Access',
+    staffLogin: 'Staff Access',
+    username: 'Username',
+    password: 'Password',
+    signIn: 'Sign In',
+    googleSignIn: 'Sign in with Google',
+    loginTitle: 'Business Management Suite',
+    loginSubtitle: 'Secure access to your store operations',
   },
   bn: {
 
@@ -469,7 +477,15 @@ const SYSTEM_TRANSLATIONS = {
     actions: 'অ্যাকশন',
     cashReceived: 'নগদ গ্রহণ',
     retailSale: 'নগদ বিক্রি',
-    expenses: 'খরচ'
+    expenses: 'খরচ',
+    merchantLogin: 'মার্শেন্ট এক্সেস',
+    staffLogin: 'স্টাফ লগইন',
+    username: 'ইউজারনাম',
+    password: 'পাসওয়ার্ড',
+    signIn: 'লগইন করুন',
+    googleSignIn: 'গুগল দিয়ে লগইন',
+    loginTitle: 'বিজনেস ম্যানেজমেন্ট স্যুট',
+    loginSubtitle: 'আপনার দোকানের কার্যক্রম সুরক্ষিতভাবে পরিচালনা করুন',
   },
   ar: {
     dashboard: 'لوحة القيادة',
@@ -2281,9 +2297,75 @@ function RecycleBin({ items, onRestore }: { items: RecycleItem[], onRestore: (it
   );
 }
 
+function ShopManagement({ shops }: { shops: any[] }) {
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-end mb-8">
+        <div>
+          <h2 className="text-3xl font-black text-gray-900 uppercase tracking-tight">Merchant Network Console</h2>
+          <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mt-1">Manage and Monitor all business partners</p>
+        </div>
+        <div className="bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100">
+          <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Total Shops</p>
+          <p className="text-xl font-black text-indigo-600 font-mono">{shops.length}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {shops.map((shop, idx) => (
+          <motion.div 
+            key={idx}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: idx * 0.1 }}
+            className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl transition-all group"
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-16 h-16 bg-gray-50 rounded-2xl overflow-hidden flex items-center justify-center border border-gray-100">
+                {shop.logo ? (
+                  <img src={shop.logo} alt="Logo" className="w-full h-full object-contain" />
+                ) : (
+                  <Building2 className="w-8 h-8 text-gray-300" />
+                )}
+              </div>
+              <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-widest">
+                {shop.type}
+              </span>
+            </div>
+            
+            <h3 className="text-lg font-black text-gray-900 mb-1">{shop.name}</h3>
+            <p className="text-gray-500 text-sm mb-4 line-clamp-2 min-h-[40px]">{shop.address}</p>
+            
+            <div className="space-y-2 pt-4 border-t border-gray-50">
+              <div className="flex items-center gap-2 text-gray-400">
+                <Phone className="w-4 h-4" />
+                <span className="text-xs font-bold text-gray-600">{shop.phone}</span>
+              </div>
+              <div className="flex items-center gap-2 text-gray-400">
+                <MapPin className="w-4 h-4" />
+                <span className="text-xs font-bold text-gray-600">{shop.domain || 'No custom domain'}</span>
+              </div>
+            </div>
+            
+            <div className="mt-6 pt-4 border-t border-gray-50 flex items-center justify-between">
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                Registered: {shop.setupDate ? new Date(shop.setupDate).toLocaleDateString() : 'N/A'}
+              </p>
+              <button className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all">
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   console.log("ShopMaster App Initializing...");
   const [user, setUser] = useState<any>(null);
+  const [isOnboarded, setIsOnboarded] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -2299,13 +2381,17 @@ export default function App() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Initial sync check
-    if (navigator.onLine) syncOfflineData();
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
+  }, []);
+
+
+
+  // Initial sync check
+  useEffect(() => {
+    if (navigator.onLine) syncOfflineData();
   }, []);
 
   const syncOfflineData = async () => {
@@ -2395,6 +2481,7 @@ export default function App() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
+  const [loginMode, setLoginMode] = useState<'merchant' | 'staff'>('merchant');
 
   // Auth State Sync
   useEffect(() => {
@@ -2414,7 +2501,17 @@ export default function App() {
         } catch (e) {
           console.error("Error parsing saved user", e);
         }
-      } else if (!firebaseUser) {
+      } else if (firebaseUser) {
+        // If no saved user but firebase user exists, derive it
+        const isMaster = firebaseUser.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
+        const userData = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email || '',
+          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+          role: isMaster ? 'admin' : 'sales_team' // Default role if not found
+        };
+        setUser(userData);
+      } else {
         setUser(null);
       }
       setLoading(false);
@@ -2428,8 +2525,56 @@ export default function App() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [shops, setShops] = useState<any[]>([]);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const isMasterAdmin = user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
+
+  useEffect(() => {
+    if (!isMasterAdmin) {
+      setShops([]);
+      return;
+    }
+    
+    const unsubShops = onSnapshot(collection(db, 'shops'), (snapshot) => {
+      setShops(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => console.error("Shops sync error", err));
+
+    return () => unsubShops();
+  }, [user, isMasterAdmin]);
+
+  const handleOnboardingComplete = async (formData: any) => {
+    try {
+      setLoading(true);
+      // Save to global shops collection for master admin
+      const shopRef = doc(collection(db, 'shops'));
+      await setDoc(shopRef, {
+        ...formData,
+        ownerEmail: user?.email,
+        ownerUid: user?.uid
+      });
+
+      // Update current shop settings
+      const settingsRef = doc(db, 'settings', 'shop');
+      await setDoc(settingsRef, {
+        ...shopSettings,
+        name: formData.name,
+        address: formData.address,
+        phone: formData.phone,
+        logoUrl: formData.logo,
+        type: formData.type,
+        domain: formData.domain
+      });
+
+      setIsOnboarded(true);
+      setNotification({ message: 'Shop setup complete!', type: 'success' });
+    } catch (error) {
+      console.error(error);
+      setNotification({ message: 'Failed to save shop settings', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [staffSalaries, setStaffSalaries] = useState<StaffSalary[]>([]);
@@ -2478,6 +2623,21 @@ export default function App() {
     systemLanguage: 'bn',
     currencySymbol: 'TK',
   });
+
+  useEffect(() => {
+    // Master admin doesn't need to onboard
+    if (isMasterAdmin) {
+      setIsOnboarded(true);
+      return;
+    }
+    
+    // If shop name is default, consider not onboarded
+    if (shopSettings.name === 'Bismillah Store' || !shopSettings.name) {
+      setIsOnboarded(false);
+    } else {
+      setIsOnboarded(true);
+    }
+  }, [shopSettings, isMasterAdmin]);
 
   const handleDownloadCustomersCSV = () => {
     const csvData = customers.map(c => ({
@@ -2692,10 +2852,6 @@ export default function App() {
       const userData = { uid: foundUser.id, email: `${foundUser.username}@shop.com`, displayName: foundUser.displayName, role: foundUser.role };
       setUser(userData);
       localStorage.setItem('shopmaster_user', JSON.stringify(userData));
-    } else if (username === 'Admin' && password === 'Admin') {
-      const mockUser = { uid: 'admin-id', email: 'admin@shop.com', displayName: 'Admin', role: 'admin' };
-      setUser(mockUser);
-      localStorage.setItem('shopmaster_user', JSON.stringify(mockUser));
     } else {
       setAuthError("Invalid username or password");
     }
@@ -2712,10 +2868,11 @@ export default function App() {
       const result = await signInWithPopup(auth, googleProvider);
       const googleUser = result.user;
       
-      const isMasterAdmin = googleUser.email === "stratproamz@gmail.com";
+      const isMasterAdmin = googleUser.email?.toLowerCase().trim() === "stratproamz@gmail.com";
       const existingAppUser = appUsers.find(u => u.username.toLowerCase() === googleUser.email?.split('@')[0].toLowerCase());
       
-      const role = isMasterAdmin ? 'admin' : (existingAppUser?.role || 'sales_team');
+      // Merchants logging in via Google who are not registered staff should get 'admin' role by default
+      const role = isMasterAdmin ? 'admin' : (existingAppUser?.role || 'admin');
       
       const userData = { 
         uid: googleUser.uid, 
@@ -3342,6 +3499,12 @@ export default function App() {
     }
   };
 
+  const systemLang = shopSettings.systemLanguage || 'bn';
+  const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
+  const isRtl = systemLang === 'ar';
+  (window as any)._globalCurrencySymbol = shopSettings.currencySymbol;
+  (window as any)._globalLang = systemLang;
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -3355,86 +3518,187 @@ export default function App() {
   }
 
   if (!user) {
+    const isBn = systemLang === 'bn';
+
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 relative overflow-hidden font-sans">
+        {/* Decorative Background Elements */}
+        <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
+          <div className="absolute -top-24 -left-24 w-96 h-96 bg-indigo-100 rounded-full blur-3xl opacity-50 animate-pulse" />
+          <div className="absolute top-1/2 -right-24 w-80 h-80 bg-blue-100 rounded-full blur-3xl opacity-50" />
+          <div className="absolute -bottom-24 left-1/3 w-72 h-72 bg-purple-100 rounded-full blur-3xl opacity-30" />
+        </div>
+
         <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-md w-full bg-white p-10 rounded-3xl shadow-2xl text-center"
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-4xl w-full flex flex-col md:flex-row bg-white/80 backdrop-blur-xl rounded-[2.5rem] shadow-2xl shadow-indigo-100 border border-white relative z-10 overflow-hidden mx-4"
         >
-          <div className="w-20 h-20 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
-            <Building2 className="w-10 h-10 text-indigo-600" />
-          </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">{shopSettings.name}</h1>
-          <p className="text-gray-500 mb-8">Admin Login</p>
-          
-          <form onSubmit={handleAuth} className="space-y-4 text-left">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-              <input 
-                type="text" 
-                required 
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                placeholder="Admin"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-              />
+          {/* Left Side: Branding & Info */}
+          <div className="flex-1 bg-indigo-600 p-8 md:p-12 text-white flex flex-col justify-between relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-20 -mt-20 blur-2xl" />
+            
+            <div className="relative z-20">
+              <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mb-10 shadow-lg border border-white/30">
+                <Building2 className="w-8 h-8 text-white" />
+              </div>
+              <h1 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight leading-tight">
+                {st('loginTitle')}
+              </h1>
+              <p className="text-indigo-100 text-lg opacity-90 max-w-xs font-light">
+                {st('loginSubtitle')}
+              </p>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input 
-                type="password" 
-                required 
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                placeholder="Admin"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
+
+            <div className="relative z-20 mt-12 md:mt-0">
+              <div className="space-y-6">
+                {[
+                  { icon: ShieldCheck, title: isBn ? 'সুরক্ষিত লেনদেন' : 'Secure Transactions' },
+                  { icon: Sparkles, title: isBn ? 'এআই চালিত মেসেজ' : 'AI Powered Messaging' },
+                  { icon: TrendingUp, title: isBn ? 'রিয়েল-টাইম রিপোর্ট' : 'Real-time Analytics' }
+                ].map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-4 group">
+                    <div className="h-10 w-10 bg-white/10 group-hover:bg-white/20 transition-colors rounded-xl flex items-center justify-center border border-white/20">
+                      <item.icon className="h-5 w-5" />
+                    </div>
+                    <span className="font-medium opacity-90">{item.title}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Right Side: Login Form */}
+          <div className="flex-1 p-8 md:p-12 flex flex-col">
+            <div className="mb-10">
+              <div className="flex p-1.5 bg-gray-100 rounded-2xl mb-8 font-semibold text-sm">
+                <button 
+                  onClick={() => setLoginMode('merchant')}
+                  className={`flex-1 py-3 rounded-xl transition-all duration-300 ${loginMode === 'merchant' ? 'bg-white text-indigo-600 shadow-md' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  {st('merchantLogin')}
+                </button>
+                <button 
+                  onClick={() => setLoginMode('staff')}
+                  className={`flex-1 py-3 rounded-xl transition-all duration-300 ${loginMode === 'staff' ? 'bg-white text-indigo-600 shadow-md' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  {st('staffLogin')}
+                </button>
+              </div>
+
+              <AnimatePresence mode="wait">
+                {loginMode === 'merchant' ? (
+                  <motion.div
+                    key="merchant"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-6"
+                  >
+                    <div className="text-center md:text-left mb-8">
+                      <h2 className="text-2xl font-bold text-gray-900 mb-2">{st('merchantLogin')}</h2>
+                      <p className="text-gray-500 text-sm"> লগইন করতে আপনার গুগল একাউন্ট ব্যবহার করুন।</p>
+                    </div>
+
+                    <button 
+                      onClick={handleGoogleLogin}
+                      className="w-full h-14 bg-white border-2 border-gray-100 text-gray-700 rounded-2xl font-bold hover:bg-gray-50 transition-all flex items-center justify-center gap-4 group hover:border-indigo-100 hover:shadow-lg hover:shadow-indigo-50"
+                    >
+                      <div className="w-8 h-8 bg-white shadow-sm rounded-full flex items-center justify-center border border-gray-100">
+                        <svg className="w-5 h-5" viewBox="0 0 24 24">
+                          <path fill="#ea4335" d="M12.48 10.92v3.28h7.84c-.24 1.84-2.21 5.38-7.84 5.38-4.81 0-8.73-3.92-8.73-8.73s3.92-8.73 8.73-8.73c2.72 0 4.53 1.16 5.57 2.16l2.58-2.58C18.91 1.76 15.91 1 12.48 1 6.26 1 1.24 6.02 1.24 12.24s5.02 11.24 11.24 11.24c6.53 0 10.86-4.57 10.86-11.02 0-.74-.08-1.3-.18-1.86h-9.44z"/>
+                        </svg>
+                      </div>
+                      {st('googleSignIn')}
+                    </button>
+                    
+                    <div className="pt-6 border-t border-gray-100 text-center">
+                      <p className="text-gray-400 text-xs leading-relaxed uppercase tracking-widest font-bold">
+                        Secure Access Provided by Firebase
+                      </p>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="staff"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                  >
+                    <div className="text-center md:text-left mb-8">
+                      <h2 className="text-2xl font-bold text-gray-900 mb-2">{st('staffLogin')}</h2>
+                      <p className="text-gray-500 text-sm">আপনার কোম্পানি থেকে দেওয়া ইউজার আইডি দিয়ে লগইন করুন।</p>
+                    </div>
+
+                    <form onSubmit={handleAuth} className="space-y-5">
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-gray-700 ml-1 uppercase tracking-tight">{st('username')}</label>
+                        <div className="relative group">
+                          <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-indigo-600 transition-colors" />
+                          <input 
+                            type="text" 
+                            required 
+                            className="w-full pl-12 pr-4 py-4 rounded-2xl bg-gray-50 border-2 border-transparent focus:border-indigo-600 focus:bg-white transition-all outline-none text-gray-900 font-medium"
+                            placeholder="username"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-gray-700 ml-1 uppercase tracking-tight">{st('password')}</label>
+                        <div className="relative group">
+                          <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-indigo-600 transition-colors" />
+                          <input 
+                            type="password" 
+                            required 
+                            className="w-full pl-12 pr-4 py-4 rounded-2xl bg-gray-50 border-2 border-transparent focus:border-indigo-600 focus:bg-white transition-all outline-none text-gray-900 font-medium"
+                            placeholder="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {authError && (
+                        <motion.div 
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          className="p-4 bg-red-50 text-red-600 text-sm rounded-2xl flex items-center gap-3 font-medium border border-red-100"
+                        >
+                          <AlertCircle className="w-5 h-5 shrink-0" />
+                          {authError}
+                        </motion.div>
+                      )}
+
+                      <button 
+                        type="submit"
+                        className="w-full h-14 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-2 group"
+                      >
+                        {st('signIn')}
+                        <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                      </button>
+                    </form>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
             
-            {authError && (
-              <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center gap-2">
-                <AlertCircle className="w-4 h-4" />
-                {authError}
-              </div>
-            )}
-
-            <button 
-              type="submit"
-              className="w-full py-4 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 mt-4"
-            >
-              Sign In
-            </button>
-
-            <div className="relative my-6 text-center">
-              <span className="bg-white px-4 text-gray-400 text-sm">OR</span>
-              <div className="absolute inset-y-1/2 left-0 right-0 border-t border-gray-100 -z-10"></div>
+            <div className="mt-auto text-center pt-8 border-t border-gray-100">
+              <p className="text-gray-400 text-xs">
+                © {new Date().getFullYear()} {shopSettings.name}. All rights reserved.
+              </p>
             </div>
-
-            <button 
-              type="button"
-              onClick={handleGoogleLogin}
-              className="w-full py-4 bg-white text-gray-700 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50 transition-all flex items-center justify-center gap-2"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-              </svg>
-              Sign in with Google
-            </button>
-          </form>
+          </div>
         </motion.div>
       </div>
     );
   }
 
-  const systemLang = shopSettings.systemLanguage || 'bn';
-  const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
-  const isRtl = systemLang === 'ar';
-  (window as any)._globalCurrencySymbol = shopSettings.currencySymbol;
-  (window as any)._globalLang = systemLang;
+  if (user && isOnboarded === false) {
+    return <ShopOnboarding onComplete={handleOnboardingComplete} />;
+  }
 
   return (
     <ErrorBoundary>
@@ -3498,6 +3762,13 @@ export default function App() {
 
           <nav className="flex-1 px-4 py-6 overflow-y-auto custom-scrollbar space-y-1.5 bg-gray-50/30">
             {[
+              ...(isMasterAdmin ? [{ 
+                id: 'master', 
+                label: 'Master Console', 
+                items: [
+                  { id: 'shops', icon: Shield, label: 'Merchant Network Console', roles: ['admin', 'manager', 'sales_team', 'assistant_manager'], color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100' }
+                ] 
+              }] : []),
               { id: 'core', label: 'Core', items: [
                 { id: 'dashboard', icon: LayoutDashboard, label: st('dashboard'), roles: ['admin', 'manager'], color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
                 { id: 'pos', icon: ShoppingCart, label: st('pos'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'], color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
@@ -3535,7 +3806,7 @@ export default function App() {
             ].map((group) => (
               <div key={group.id} className="space-y-1 mb-6">
                 <h3 className="px-5 text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">{group.label}</h3>
-                {group.items.filter(item => item.roles.includes(user.role)).map((item, idx) => (
+                {group.items.filter(item => (user && item.roles.includes(user.role)) || (item.id === 'shops' && isMasterAdmin)).map((item, idx) => (
                   <motion.button
                     key={item.id}
                     initial={{ x: -20, opacity: 0 }}
@@ -3686,6 +3957,7 @@ export default function App() {
                 onDelete={handleDeleteSale}
                 settings={shopSettings}
                 isOnline={isOnline}
+                customers={customers}
               />
             )}
             {activeTab === 'customers' && (
@@ -3771,6 +4043,9 @@ export default function App() {
                 onDeleteSalary={handleDeleteStaffSalary}
                 onSendWhatsAppReminder={handleSendWhatsAppReminder}
               />
+            )}
+            {activeTab === 'shops' && isMasterAdmin && (
+              <ShopManagement shops={shops} />
             )}
             {activeTab === 'settings' && (
               <SettingsPanel 
@@ -7728,8 +8003,108 @@ function Inventory({ products, categories, stockRecords, sales, onViewHistory, s
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [isBulkStockModalOpen, setIsBulkStockModalOpen] = useState(false);
   const [bulkStockData, setBulkStockData] = useState<Record<string, { quantity: number; batchNumber: string; expiryDate: string }>>({});
-  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
-  const [isAiThinking, setIsAiThinking] = useState(false);
+  const handleBulkImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setImportReport(null);
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results: any) => {
+        let report = {
+          total: results.data.length,
+          added: 0,
+          updated: 0,
+          duplicates: 0,
+          totalStock: 0,
+          errors: [] as string[],
+          show: true
+        };
+
+        try {
+          const data = results.data;
+          const productMap = new Map(products.map(p => [p.name.toLowerCase(), p]));
+          const batch = writeBatch(db);
+          let batchCount = 0;
+          const nameSetInCSV = new Set();
+
+          setUploadProgress({ status: 'Processing...', current: 0, total: data.length });
+
+          for (const row of data) {
+            const name = (row.Name || row.name || row['Product Name'] || row['পণ্যের নাম'] || '').trim();
+            if (!name) {
+              report.errors.push("Missing name in a row");
+              continue;
+            }
+
+            if (nameSetInCSV.has(name.toLowerCase())) {
+              report.duplicates++;
+            } else {
+              nameSetInCSV.add(name.toLowerCase());
+            }
+
+            const stockChange = Number(row.Stock || row.stock || row['Initial Stock'] || row['স্টক'] || 0);
+            const existingProduct = productMap.get(name.toLowerCase());
+
+            if (existingProduct) {
+              // Update
+              const newStock = existingProduct.stock + stockChange;
+              batch.update(doc(db, 'products', existingProduct.id), {
+                stock: newStock
+              });
+              report.updated++;
+            } else {
+              // Add
+              const newProductRef = doc(collection(db, 'products'));
+              const productData = {
+                name,
+                category: (row.Category || row.category || row['Catalog'] || row['Catalogue'] || row['বিভাগ'] || 'General').trim(),
+                price: Number(row.Price || row.price || row['Selling Price'] || row['বিক্রয় মূল্য'] || 0),
+                cost: Number(row.Cost || row.cost || row['Buying Price'] || row['ক্রয় মূল্য'] || 0),
+                stock: stockChange,
+                unit: (row.Unit || row.unit || row['একক'] || 'unit').toLowerCase().includes('kg') ? 'kg' : 'unit',
+                barcode: (row.Barcode || row.barcode || row['বারকোড'] || '').trim(),
+                expiryDate: (row['Expiry Date'] || row.expiryDate || row['মেয়াদ'] || '').trim(),
+                location: (row.Location || row.location || row['স্থান'] || '').trim(),
+                company: (row.Company || row.company || row['Company Name'] || row['কোম্পানি'] || '').trim(),
+                department: (row.Department || row.department || '').trim(),
+                warehouse: (row.Warehouse || row.warehouse || '').trim(),
+                serialNumber: products.length + report.added + 1
+              };
+              batch.set(newProductRef, productData);
+              productMap.set(name.toLowerCase(), { id: newProductRef.id, ...productData } as Product);
+              report.added++;
+            }
+            batchCount++;
+            if (batchCount === 500) {
+              await batch.commit();
+              batchCount = 0;
+            }
+          }
+
+          if (batchCount > 0) {
+            await batch.commit();
+          }
+
+          // Calculate final total stock
+          const finalProductsSnapshot = await getDocs(collection(db, 'products'));
+          report.totalStock = finalProductsSnapshot.docs.reduce((acc, doc) => acc + (doc.data().stock || 0), 0);
+          
+          setImportReport({ ...report, total: report.added + report.updated } as any);
+        } catch (error) {
+          console.error(error);
+          setNotification({ message: 'Error during bulk import', type: 'error' });
+        } finally {
+          setIsUploading(false);
+          setUploadProgress(null);
+          if (e.target) e.target.value = '';
+        }
+      }
+    });
+  };
 
   const getAiCategorySuggestion = async (productName: string) => {
     if (!productName || productName.trim().length < 2) {
@@ -8416,9 +8791,13 @@ Return the result as JSON with a "category" field containing exactly one string 
               >
                 <Download className="w-5 h-5" />
               </motion.button>
-              <label className="p-4 bg-gray-50 text-gray-500 rounded-2xl hover:bg-blue-50 hover:text-blue-600 transition-all cursor-pointer shadow-sm flex-1 sm:flex-none flex justify-center" title="Import CSV">
+              <label className="p-4 bg-gray-50 text-gray-500 rounded-2xl hover:bg-blue-50 hover:text-blue-600 transition-all cursor-pointer shadow-sm flex-1 sm:flex-none flex justify-center" title="Import CSV (Destructive)">
                 <Upload className="w-5 h-5" />
                 <input type="file" accept=".csv" onChange={handleUploadCSV} className="hidden" />
+              </label>
+              <label className="p-4 bg-gray-50 text-gray-500 rounded-2xl hover:bg-indigo-50 hover:text-indigo-600 transition-all cursor-pointer shadow-sm flex-1 sm:flex-none flex justify-center" title="Bulk Import/Update">
+                <DatabasePlus className="w-5 h-5" />
+                <input type="file" accept=".csv" onChange={handleBulkImport} className="hidden" />
               </label>
             </div>
           </motion.div>
@@ -8757,23 +9136,31 @@ Return the result as JSON with a "category" field containing exactly one string 
                   {importReport.failed === 0 ? <CheckCircle2 className="w-10 h-10" /> : <AlertCircle className="w-10 h-10" />}
                 </div>
                 
-                <h3 className="text-2xl font-black text-gray-900 mb-2 uppercase tracking-tight">CSV Import Report</h3>
-                <p className="text-gray-500 text-sm font-medium mb-8">Detailed summary of your inventory reset</p>
-
-                <div className="grid grid-cols-3 gap-4 mb-8">
-                  <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total</p>
-                    <p className="text-xl font-black text-gray-900 font-mono">{importReport.total}</p>
+                <h3 className="text-xl font-black text-gray-900 mb-6 uppercase tracking-tight">Import Summary</h3>
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="p-4 bg-gray-50 rounded-2xl">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Added</p>
+                    <p className="text-xl font-black text-gray-900">{importReport.added || importReport.success || 0}</p>
                   </div>
-                  <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
-                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Success</p>
-                    <p className="text-xl font-black text-emerald-600 font-mono">{importReport.success}</p>
+                  <div className="p-4 bg-gray-50 rounded-2xl">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Updated</p>
+                    <p className="text-xl font-black text-gray-900">{importReport.updated || 0}</p>
                   </div>
-                  <div className="p-4 bg-red-50 rounded-2xl border border-red-100">
-                    <p className="text-[10px] font-black text-red-300 uppercase tracking-widest mb-1">Failed</p>
-                    <p className="text-xl font-black text-red-500 font-mono">{importReport.failed}</p>
+                  <div className="p-4 bg-gray-50 rounded-2xl">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Duplicates</p>
+                    <p className="text-xl font-black text-amber-600">{importReport.duplicates || 0}</p>
+                  </div>
+                  <div className="p-4 bg-gray-50 rounded-2xl">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total Stock</p>
+                    <p className="text-xl font-black text-indigo-600">{importReport.totalStock || 0}</p>
                   </div>
                 </div>
+                <button 
+                  onClick={() => setImportReport({ ...importReport, show: false } as any)}
+                  className="w-full py-3 bg-gray-900 text-white font-black rounded-xl uppercase tracking-widest hover:bg-gray-800 transition-all"
+                >
+                  Close
+                </button>
 
                 {importReport.errors.length > 0 && (
                   <div className="text-left mb-8 max-h-32 overflow-y-auto p-4 bg-red-50/50 rounded-2xl border border-red-100/50 space-y-2">
@@ -9161,12 +9548,14 @@ Return the result as JSON with a "category" field containing exactly one string 
   );
 }
 
-function SalesHistory({ sales, onEdit, onDelete, settings, isOnline }: { sales: Sale[], onEdit: (sale: Sale) => void, onDelete: (sale: Sale) => void, settings: ShopSettings, isOnline: boolean }) {
+function SalesHistory({ sales, customers, onEdit, onDelete, settings, isOnline }: { sales: Sale[], customers: Customer[], onEdit: (sale: Sale) => void, onDelete: (sale: Sale) => void, settings: ShopSettings, isOnline: boolean }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [isFilterPaneOpen, setIsFilterPaneOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | 'settled' | 'pending'>('all');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<'all' | 'cash' | 'bkash' | 'nagad' | 'card'>('all');
+  const [segmentFilter, setSegmentFilter] = useState<'all' | 'vip' | 'regular'>('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reportTab, setReportTab] = useState<'logs' | 'product_report' | 'customer_report'>('logs');
@@ -9200,6 +9589,17 @@ function SalesHistory({ sales, onEdit, onDelete, settings, isOnline }: { sales: 
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
       if (saleDate > end) return false;
+    }
+    
+    // Payment Method filter
+    if (paymentMethodFilter !== 'all' && sale.paymentMethod !== paymentMethodFilter) return false;
+
+    // Segment filter
+    if (segmentFilter !== 'all') {
+      const customer = customers.find(c => c.id === sale.customerId);
+      const isVip = customer && customer.totalSpent > 10000;
+      if (segmentFilter === 'vip' && !isVip) return false;
+      if (segmentFilter === 'regular' && isVip) return false;
     }
 
     return true;
@@ -9283,6 +9683,8 @@ function SalesHistory({ sales, onEdit, onDelete, settings, isOnline }: { sales: 
 
   const resetFilters = () => {
     setStatusFilter('all');
+    setPaymentMethodFilter('all');
+    setSegmentFilter('all');
     setStartDate('');
     setEndDate('');
     setSearchTerm('');
@@ -9448,6 +9850,40 @@ function SalesHistory({ sales, onEdit, onDelete, settings, isOnline }: { sales: 
                         className={`flex-1 py-3 px-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${statusFilter === status ? 'bg-white text-violet-600 shadow-md ring-1 ring-black/[0.02]' : 'text-gray-400 hover:text-gray-600'}`}
                       >
                         {status}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pl-1">Payment Method</label>
+                  <div className="flex flex-wrap gap-2">
+                    {(['all', 'cash', 'bkash', 'nagad', 'card'] as const).map(method => (
+                      <button
+                        key={method}
+                        onClick={() => setPaymentMethodFilter(method)}
+                        className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                          paymentMethodFilter === method ? 'bg-violet-600 text-white' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+                        }`}
+                      >
+                        {method}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pl-1">Customer Segment</label>
+                  <div className="flex flex-wrap gap-2">
+                    {(['all', 'vip', 'regular'] as const).map(segment => (
+                      <button
+                        key={segment}
+                        onClick={() => setSegmentFilter(segment)}
+                        className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                          segmentFilter === segment ? 'bg-violet-600 text-white' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+                        }`}
+                      >
+                        {segment}
                       </button>
                     ))}
                   </div>
