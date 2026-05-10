@@ -27,7 +27,7 @@ async function startServer() {
     app.use(express.static(distPath));
     
     // Support SPA routing (redirect all non-file requests to index.html)
-    app.get('*', (req, res) => {
+    app.get('*all', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
