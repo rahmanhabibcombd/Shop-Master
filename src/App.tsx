@@ -112,8 +112,11 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInAnonymously,
+  secondaryAuth,
   collection,
   doc,
+  getDoc,
+  getDocs,
   setDoc,
   addDoc,
   updateDoc,
@@ -988,7 +991,40 @@ const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800;
+        const MAX_HEIGHT = 800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.8)); // compress to JPEG 80% quality
+        } else {
+          resolve(reader.result as string); // fallback
+        }
+      };
+      img.onerror = () => resolve(reader.result as string);
+      img.src = event.target?.result as string;
+    };
     reader.onerror = error => reject(error);
   });
 };
@@ -1920,6 +1956,7 @@ const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
 function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUser, isSaving }: { settings: ShopSettings, onSaveSettings: (s: ShopSettings) => void, users: AppUser[], onAddUser: (u: Omit<AppUser, 'id'>) => void, onDeleteUser: (id: string) => void, isSaving: boolean }) {
   const [activeSubTab, setActiveSubTab] = useState<'shop' | 'users'>('shop');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(settings.logoBase64 || null);
 
   useEffect(() => {
     const handleClick = () => setConfirmDeleteId(null);
@@ -1933,7 +1970,7 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
     const formData = new FormData(form);
     const logoFile = (form.querySelector('input[type="file"]') as HTMLInputElement)?.files?.[0];
     
-    let logoBase64 = settings.logoBase64;
+    let logoBase64 = logoPreview || settings.logoBase64;
     if (logoFile) {
       logoBase64 = await fileToBase64(logoFile);
     }
@@ -2013,8 +2050,8 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2 flex items-center gap-6 p-6 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
                 <div className="w-24 h-24 bg-white rounded-2xl border border-gray-100 flex items-center justify-center overflow-hidden shadow-sm">
-                  {settings.logoBase64 ? (
-                    <img src={settings.logoBase64} alt="Shop Logo" className="w-full h-full object-contain" />
+                  {logoPreview ? (
+                    <img src={logoPreview} alt="Shop Logo" className="w-full h-full object-contain" />
                   ) : (
                     <ImageIcon className="w-8 h-8 text-gray-300" />
                   )}
@@ -2025,6 +2062,13 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
                   <input 
                     type="file" 
                     accept="image/*" 
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const base64 = await fileToBase64(file);
+                        setLogoPreview(base64);
+                      }
+                    }}
                     className="text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
                   />
                 </div>
@@ -2807,6 +2851,23 @@ export default function App() {
 
 
   useEffect(() => {
+    if (shopSettings?.logoBase64) {
+      let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = shopSettings.logoBase64;
+    }
+  }, [shopSettings?.logoBase64]);
+
+  useEffect(() => {
+    document.documentElement.dir = shopSettings?.systemLanguage === 'ar' ? 'rtl' : 'ltr';
+    document.documentElement.lang = shopSettings?.systemLanguage || 'bn';
+  }, [shopSettings?.systemLanguage]);
+
+  useEffect(() => {
     // Sync global window variables for the fC helper
     (window as any)._globalCurrencySymbol = shopSettings.currencySymbol;
     (window as any)._globalLang = shopSettings.systemLanguage;
@@ -2967,26 +3028,41 @@ export default function App() {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setLoading(true);
     
     // Check against appUsers collection
     const foundUser = appUsers.find(u => u.username === username && u.password === password);
 
     if (foundUser) {
-      const userData = { 
-        uid: foundUser.id, 
-        email: `${foundUser.username}@shop.com`, 
-        displayName: foundUser.displayName, 
-        role: foundUser.role,
-        shopId: foundUser.shopId
-      };
-      setUser(userData);
-      localStorage.setItem('shopmaster_user', JSON.stringify(userData));
+      try {
+        const email = `${username}@bismillahstore.local`;
+        await signInWithEmailAndPassword(auth, email, password);
+
+        const userData = { 
+          uid: foundUser.id, 
+          email: email, 
+          displayName: foundUser.displayName, 
+          role: foundUser.role,
+          shopId: foundUser.shopId
+        };
+        setUser(userData);
+        localStorage.setItem('shopmaster_user', JSON.stringify(userData));
+      } catch (authErr: any) {
+         console.warn("Firebase Auth fallback failed for staff:", authErr);
+         // If they were created before secondaryAuth was added, they might not have a firebase account.
+         // We can try to sign them in anonymously as a fallback but that won't work well with Firestore rules.
+         setAuthError("Auth sync failed. Admin needs to recreate this user.");
+      }
     } else {
       setAuthError("Invalid username or password");
     }
+    setLoading(false);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch(e) {}
     setUser(null);
     localStorage.removeItem('shopmaster_user');
   };
@@ -3515,7 +3591,13 @@ export default function App() {
       }
 
       // Update shop-specific settings
-      await setDoc(doc(db, 'settings', user.shopId), { ...newSettings, shopId: user.shopId });
+      const payload: any = { ...newSettings, shopId: user.shopId };
+      Object.keys(payload).forEach(key => {
+        if (payload[key] === undefined) {
+          delete payload[key];
+        }
+      });
+      await setDoc(doc(db, 'settings', user.shopId), payload);
       
       setNotification({ message: 'Settings updated successfully', type: 'success' });
     } catch (error) {
@@ -3535,7 +3617,22 @@ export default function App() {
     }
 
     try {
-      await addDoc(collection(db, 'users'), { ...newUser, shopId: user.shopId });
+      // Create user in authentication
+      const email = `${newUser.username}@bismillahstore.local`;
+      let uid = '';
+      try {
+        const credential = await createUserWithEmailAndPassword(secondaryAuth, email, newUser.password);
+        uid = credential.user.uid;
+      } catch (authErr: any) {
+        if (authErr.code === 'auth/email-already-in-use') {
+           setNotification({ message: 'This username is technically taken in Auth. Use another.', type: 'error' });
+           return;
+        } else {
+           throw authErr;
+        }
+      }
+
+      await setDoc(doc(db, 'users', uid), { ...newUser, shopId: user.shopId });
       setNotification({ message: 'User added successfully', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'users');

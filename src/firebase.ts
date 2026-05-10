@@ -5,6 +5,8 @@ import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+export const secondaryApp = initializeApp(firebaseConfig, "Secondary");
+export const secondaryAuth = getAuth(secondaryApp);
 
 // Using initializeFirestore with experimentalForceLongPolling can help in environments 
 // where standard streams/sockets might be blocked or unstable.
