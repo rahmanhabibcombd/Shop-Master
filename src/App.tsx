@@ -2583,33 +2583,37 @@ export default function App() {
 
   // Auth State Sync
   useEffect(() => {
-    // Try to sign in anonymously if needed, ignore failure as public mode is fine
-    signInAnonymously(auth).catch(() => {
-      // Silent fail
-    });
-
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      const savedUser = localStorage.getItem('shopmaster_user');
-      if (savedUser) {
-        try {
-          const parsedUser = JSON.parse(savedUser);
-          setUser(parsedUser);
-        } catch (e) {
-          console.error("Error parsing saved user", e);
-        }
-      } else if (firebaseUser) {
-        // If no saved user but firebase user exists, derive it
+      if (firebaseUser && !firebaseUser.isAnonymous) {
+        // Authenticated real user
         const isMaster = firebaseUser.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
         const userData = {
           uid: firebaseUser.uid,
           email: firebaseUser.email || '',
           displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
           role: isMaster ? 'admin' : 'sales_team',
-          shopId: firebaseUser.uid // Default shopId for merchants
+          shopId: firebaseUser.uid // Default shopId for merchants based on uid
         };
+        
+        // If we have a saved user, preserve the role/shopId if this non-master admin was logging in as Staff
+        const savedUserStr = localStorage.getItem('shopmaster_user');
+        if (savedUserStr && !isMaster) {
+           try {
+              const savedUser = JSON.parse(savedUserStr);
+              if (savedUser.uid === firebaseUser.uid && savedUser.role) {
+                 userData.role = savedUser.role;
+                 userData.shopId = savedUser.shopId || firebaseUser.uid;
+              }
+           } catch(e) {}
+        }
+        
         setUser(userData);
+        localStorage.setItem('shopmaster_user', JSON.stringify(userData));
       } else {
+        // Logged out or Anonymous
         setUser(null);
+        // Do not clear local storage here to persist session across reloads if internet drops,
+        // BUT if they are explicitly signing out, the logout function handles the clearing.
       }
       setLoading(false);
     });
