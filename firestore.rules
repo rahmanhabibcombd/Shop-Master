@@ -31,7 +31,7 @@ service cloud.firestore {
     function isMasterAdmin() {
       return isSignedIn() && 
              'email' in request.auth.token &&
-             request.auth.token.email.matches('(?i)^\\s*stratproamz@gmail\\.com\\s*$');
+             (request.auth.token.email == 'stratproamz@gmail.com' || request.auth.token.email == 'STRATPROAMZ@gmail.com');
     }
 
     // For merchants, their shopId IS their uid.
