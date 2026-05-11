@@ -17,6 +17,7 @@ import {
   Upload,
   Shield,
   Building2,
+  Database,
   Warehouse as WarehouseIcon,
   Plus, 
   Search, 
@@ -45,6 +46,8 @@ import {
   Calendar,
   Clock,
   ArrowRight,
+  Maximize2,
+  Minimize2,
   Info,
   History as HistoryIcon,
   AlertTriangle,
@@ -2582,6 +2585,32 @@ export default function App() {
     };
   }, []);
 
+  const [isFullScreen, setIsFullScreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullScreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+          if (document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+          }
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
 
 
   // Initial sync check
@@ -4620,7 +4649,36 @@ export default function App() {
           settings={shopSettings}
         />
         <Calculator settings={shopSettings} />
+        
+        {/* Fullscreen Toggle Button */}
+        <motion.button
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={() => {
+            if (!isFullScreen) {
+              document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+              document.exitFullscreen().catch(() => {});
+            }
+          }}
+          className="fixed bottom-24 right-6 p-4 bg-white/80 backdrop-blur-md text-indigo-600 rounded-2xl shadow-xl border border-white/50 z-[100] group"
+          title="Toggle Fullscreen (Esc)"
+        >
+          {isFullScreen ? <Minimize2 className="w-6 h-6" /> : <Maximize2 className="w-6 h-6" />}
+        </motion.button>
+
         <NotificationToast notification={notification} onClose={() => setNotification(null)} />
+        {selectedProductForHistory && (
+          <ProductHistory 
+            product={selectedProductForHistory}
+            sales={sales}
+            stockRecords={stockRecords}
+            onClose={() => setSelectedProductForHistory(null)}
+            onDeleteStockRecord={handleDeleteStockRecord}
+          />
+        )}
       </div>
     </ErrorBoundary>
   );
@@ -8498,14 +8556,21 @@ function Inventory({ products, categories, stockRecords, sales, onViewHistory, s
                 price: Number(row.Price || row.price || row['Selling Price'] || row['বিক্রয় মূল্য'] || 0),
                 cost: Number(row.Cost || row.cost || row['Buying Price'] || row['ক্রয় মূল্য'] || 0),
                 stock: stockChange,
-                unit: (row.Unit || row.unit || row['একক'] || 'unit').toLowerCase().includes('kg') ? 'kg' : 'unit',
+                unit: (() => {
+                  const rawUnit = (row.Unit || row.unit || row['একক'] || 'unit').toLowerCase();
+                  if (rawUnit.includes('kg')) return 'kg';
+                  if (rawUnit.includes('doz')) return 'dozen';
+                  if (rawUnit.includes('hal')) return 'hali';
+                  return 'unit';
+                })(),
                 barcode: (row.Barcode || row.barcode || row['বারকোড'] || '').trim(),
                 expiryDate: (row['Expiry Date'] || row.expiryDate || row['মেয়াদ'] || '').trim(),
                 location: (row.Location || row.location || row['স্থান'] || '').trim(),
                 company: (row.Company || row.company || row['Company Name'] || row['কোম্পানি'] || '').trim(),
                 department: (row.Department || row.department || '').trim(),
                 warehouse: (row.Warehouse || row.warehouse || '').trim(),
-                serialNumber: products.length + report.added + 1
+                serialNumber: products.length + report.added + 1,
+                shopId: user.shopId
               };
               batch.set(newProductRef, productData);
               productMap.set(name.toLowerCase(), { id: newProductRef.id, ...productData } as Product);
@@ -8778,13 +8843,15 @@ Return the result as JSON with a "category" field containing exactly one string 
     try {
       const stockData = {
         productId: addingStockProduct.id,
+        productName: addingStockProduct.name,
         quantity: quantity,
         type: 'add' as const,
         timestamp: new Date(),
         expiryDate: expiryDate || '',
         batchNumber: formData.get('batchNumber') as string || '',
         location: formData.get('location') as string || '',
-        note: formData.get('note') as string || 'Manual stock add'
+        note: formData.get('note') as string || 'Manual stock add',
+        shopId: user.shopId
       };
 
       await addDoc(collection(db, 'stockRecords'), stockData);
@@ -8909,7 +8976,8 @@ Return the result as JSON with a "category" field containing exactly one string 
                     company: (row.Company || row.company || row['Company Name'] || row['কোম্পানি'] || '').trim(),
                     department: (row.Department || row.department || '').trim(),
                     warehouse: (row.Warehouse || row.warehouse || '').trim(),
-                    serialNumber: !isNaN(serialFromCSV) ? serialFromCSV : (report.success + 1)
+                    serialNumber: !isNaN(serialFromCSV) ? serialFromCSV : (report.success + 1),
+                    shopId: user.shopId
                   };
 
                   const newDocRef = doc(collection(db, 'products'));
@@ -8968,7 +9036,7 @@ Return the result as JSON with a "category" field containing exactly one string 
       price: Number(formData.get('price')),
       cost: Number(formData.get('cost') || 0),
       stock: Number(formData.get('stock') || 0),
-      unit: formData.get('unit') as 'kg' | 'unit',
+      unit: formData.get('unit') as string,
       barcode: formData.get('barcode') as string || '',
       department: formData.get('department') as string || '',
       warehouse: formData.get('warehouse') as string || '',
@@ -9236,7 +9304,7 @@ Return the result as JSON with a "category" field containing exactly one string 
                 <input type="file" accept=".csv" onChange={handleUploadCSV} className="hidden" />
               </label>
               <label className="p-4 bg-gray-50 text-gray-500 rounded-2xl hover:bg-indigo-50 hover:text-indigo-600 transition-all cursor-pointer shadow-sm flex-1 sm:flex-none flex justify-center" title="Bulk Import/Update">
-                <DatabasePlus className="w-5 h-5" />
+                <Database className="w-5 h-5" />
                 <input type="file" accept=".csv" onChange={handleBulkImport} className="hidden" />
               </label>
             </div>
@@ -9349,6 +9417,15 @@ Return the result as JSON with a "category" field containing exactly one string 
                         </td>
                         <td className="p-6 text-right">
                           <div className="flex items-center justify-end gap-2 pr-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all translate-x-4 md:translate-x-0 group-hover:translate-x-0">
+                            <motion.button 
+                              whileHover={{ scale: 1.1, rotate: -5 }}
+                              whileTap={{ scale: 0.9 }}
+                              onClick={() => onViewHistory(p)}
+                              className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl hover:bg-indigo-100 transition-all shadow-sm ring-1 ring-indigo-100/50"
+                              title="View History"
+                            >
+                              <History className="w-5 h-5" />
+                            </motion.button>
                             <motion.button 
                               whileHover={{ scale: 1.1, rotate: -5 }}
                               whileTap={{ scale: 0.9 }}
