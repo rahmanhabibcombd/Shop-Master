@@ -75,7 +75,11 @@ export const parseMathVoiceCommand = (rawText: string): string | null => {
   return cleaned.length > 0 ? cleaned : null;
 };
 
+const phoneticCache = new Map<string, string>();
+
 export const toPhonetic = (str: string) => {
+  if (phoneticCache.has(str)) return phoneticCache.get(str)!;
+  
   let s = str.toLowerCase();
   
   // Custom substitution map
@@ -108,15 +112,19 @@ export const toPhonetic = (str: string) => {
   for (let i = 0; i < s.length; i++) {
     const char = s[i];
     if (charMap[char] !== undefined) mapped += charMap[char];
-    else if (char >= 'a' && char <= 'z') mapped += charMap[char] || char; // fallback if already mapped above or keeps it
+    else if (char >= 'a' && char <= 'z') mapped += char;
     else if (char >= '0' && char <= '9') mapped += char;
     else if (char === ' ') mapped += ' ';
   }
   
   // Remove vowels and common semi-vowels to make matching more fuzzy
   mapped = mapped.replace(/[aeiouhwjy]+/g, ''); 
-  mapped = mapped.replace(/(.)\1+/g, '$1'); 
-  return mapped.trim();
+  mapped = mapped.replace(/(.)\1+/g, '$1').trim();
+  
+  if (phoneticCache.size > 2000) phoneticCache.clear();
+  phoneticCache.set(str, mapped);
+  
+  return mapped;
 };
 
 export const parseVoiceCommandQuantity = (rawText: string) => {

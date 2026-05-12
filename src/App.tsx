@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { ShopOnboarding } from './components/ShopOnboarding';
 import { useVoiceSearch } from './hooks/useVoiceSearch';
 import { standardizeBn, toPhonetic, parseVoiceCommandQuantity, isPhoneticMatch, parseNewProductVoiceCommand, formatToBnDate } from './utils/voiceUtils';
@@ -2603,15 +2603,19 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyUp = (e: KeyboardEvent) => {
-      // Toggle fullscreen on Escape key
-      // Use keyup to avoid repeating triggers and potential conflict with browser's immediate exit logic
+      // Toggle fullscreen on Escape key if not handled by browser or if user intent is clear.
+      // However, Escape is standard for EXIT. To fix the flicker where it re-enters,
+      // we only enter if we weren't just in it and if the user specifically wants it.
       if (e.key === 'Escape') {
-        if (!document.fullscreenElement) {
-          // Enter fullscreen if not already in it
-          document.documentElement.requestFullscreen().catch((err) => {
-            console.warn("Fullscreen request failed:", err);
-          });
-        }
+        const isCurrentlyFull = !!document.fullscreenElement;
+        // If we are NOT in fullscreen, maybe we just exited (browser default).
+        // If we want Esc to toggle BOTH ways, we'd need to prevent browser default, 
+        // but Esc is protected. So we'll skip the re-enter logic on Escape keyup
+        // because it causes the "exit then immediately re-enter" loop.
+        // Instead, we'll let Escape strictly be EXIT, and the button/MasterAdmin choice can handle ENTER.
+        /* if (!isCurrentlyFull) {
+           document.documentElement.requestFullscreen().catch(() => {});
+        } */
       }
     };
     window.addEventListener('keyup', handleKeyUp);
@@ -5245,11 +5249,14 @@ function Calculator({ settings }: { settings: ShopSettings }) {
   const [display, setDisplay] = useState('0');
   const [isOpen, setIsOpen] = useState(false);
   const [lastEquation, setLastEquation] = useState<string | null>(null);
+  const [isAiThinking, setIsAiThinking] = useState(false);
 
   const handleAction = (val: string) => {
     if (val === 'C') {
       setDisplay('0');
       setLastEquation(null);
+    } else if (val === 'del') {
+      setDisplay(prev => prev.length > 1 ? prev.slice(0, -1) : '0');
     } else if (val === '=') {
       if (display === '0' || display === 'Error') return;
       try {
@@ -5261,7 +5268,11 @@ function Calculator({ settings }: { settings: ShopSettings }) {
         setDisplay('Error');
       }
     } else {
-      setDisplay(prev => (prev === '0' || prev === 'Error') ? val : prev + val);
+      setDisplay(prev => {
+        if (prev === 'Error') return val;
+        if (prev === '0' && !['+', '-', '*', '/', '.', '(', ')'].includes(val)) return val;
+        return prev + val;
+      });
     }
   };
 
@@ -5270,14 +5281,39 @@ function Calculator({ settings }: { settings: ShopSettings }) {
     const cleanedText = text.trim();
     if (!cleanedText) return;
 
-    const expression = await parseMathVoiceCommandAI(cleanedText);
-    if (!expression || expression === "ERROR") return;
-    
-    // Add the expression directly to the display
-    setDisplay(prev => {
-        const current = (prev === '0' || prev === 'Error') ? '' : prev;
-        return current + expression;
-    });
+    try {
+      setIsAiThinking(true);
+      const expression = await parseMathVoiceCommandAI(cleanedText);
+      if (!expression || expression === "ERROR") return;
+      
+      // Add the expression directly to the display
+      setDisplay(prev => {
+          let current = (prev === '0' || prev === 'Error') ? '' : prev;
+          
+          // Remove trailing operator if expression starts with one
+          const lastChar = current.slice(-1);
+          const firstChar = expression[0];
+          
+          const isLastOp = ['+', '-', '*', '/'].includes(lastChar);
+          const isFirstOp = ['+', '-', '*', '/'].includes(firstChar);
+          
+          if (isLastOp && isFirstOp) {
+             return current.slice(0, -1) + expression;
+          }
+
+          // Smart Append: If current ends in digit and expression starts with digit, add '+'
+          const isLastDigit = /[0-9]/.test(lastChar);
+          const isFirstDigit = /[0-9]/.test(firstChar);
+          
+          if (isLastDigit && isFirstDigit && current.length > 0) {
+             return current + '+' + expression;
+          }
+          
+          return current + expression;
+      });
+    } finally {
+      setIsAiThinking(false);
+    }
   };
 
   const voiceLang = settings.systemLanguage === 'ar' ? 'ar-SA' : (settings.systemLanguage === 'bn' ? 'bn-BD' : 'en-US');
@@ -5296,90 +5332,122 @@ function Calculator({ settings }: { settings: ShopSettings }) {
     <>
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-24 right-8 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-50 group"
+        className="fixed bottom-24 right-8 w-16 h-16 bg-gradient-to-br from-indigo-600 to-purple-700 text-white rounded-2xl shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-50 group hover:rotate-3 shadow-indigo-200/50"
+        title="Calculator"
+        id="calc-open-trigger"
       >
-        <CalculatorIcon className="w-6 h-6 group-hover:rotate-12 transition-transform" />
+        <CalculatorIcon className="w-8 h-8 group-hover:scale-110 transition-transform" />
       </button>
 
       <AnimatePresence>
         {isOpen && (
           <motion.div 
-            initial={{ opacity: 0, y: 20, scale: 0.9, x: 20 }}
+            initial={{ opacity: 0, y: 50, scale: 0.9, x: 20 }}
             animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
-            exit={{ opacity: 0, y: 20, scale: 0.9, x: 20 }}
-            className="fixed bottom-40 right-8 w-72 bg-white rounded-[2.5rem] shadow-2xl border border-indigo-100 p-6 z-50 overflow-hidden"
+            exit={{ opacity: 0, y: 50, scale: 0.9, x: 20 }}
+            className="fixed bottom-44 right-8 w-[92vw] sm:w-[480px] bg-white rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] border border-white/20 p-8 z-50 overflow-hidden backdrop-blur-xl"
           >
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
+            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
             
-            <div className="flex justify-between items-center mb-5">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 shadow-inner">
-                  <CalculatorIcon className="w-4 h-4" />
+            <div className="flex justify-between items-center mb-8">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shadow-inner">
+                  <CalculatorIcon className="w-6 h-6" />
                 </div>
-                <h3 className="font-black text-gray-900 text-xs tracking-widest uppercase">Calculator</h3>
+                <div>
+                  <h3 className="font-black text-gray-900 text-sm tracking-widest uppercase">Smart Calculator</h3>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">Voice Enabled • {voiceLang}</p>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-3">
                 <button 
                   onClick={toggleVoiceSearch}
-                  title="Voice Command"
-                  className={`p-2 rounded-xl transition-all shadow-sm ${isListening ? 'bg-red-50 text-red-500 animate-pulse ring-2 ring-red-100' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 active:scale-90'}`}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all ${isListening ? 'bg-red-500 text-white animate-pulse shadow-lg shadow-red-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                 >
                   {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  {isListening ? 'STOP' : 'VOICE'}
                 </button>
-                <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all text-gray-400 active:scale-90">
-                  <X className="w-4 h-4" />
+                <button 
+                  onClick={() => setIsOpen(false)} 
+                  className="p-3 hover:bg-gray-100 rounded-2xl transition-all text-gray-400 active:scale-90"
+                >
+                  <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
             {voiceFeedback && (
-              <div className="mb-2 px-3 py-1.5 bg-indigo-50/50 text-[10px] font-black text-indigo-600 rounded-xl border border-indigo-100 animate-pulse flex items-center gap-2">
-                <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-ping"></span>
-                {voiceFeedback}...
+              <div className="mb-4 px-4 py-3 bg-indigo-50/80 backdrop-blur-sm text-xs font-bold text-indigo-600 rounded-2xl border border-indigo-100/50 animate-in slide-in-from-top-2 flex items-center gap-3">
+                <div className="flex gap-1">
+                  {[1, 2, 3].map(i => (
+                    <motion.span 
+                      key={i}
+                      animate={{ height: [4, 12, 4] }}
+                      transition={{ repeat: Infinity, duration: 0.6, delay: i * 0.1 }}
+                      className="w-1 bg-indigo-600 rounded-full"
+                    />
+                  ))}
+                </div>
+                <span className="truncate italic">"{voiceFeedback}"</span>
               </div>
             )}
 
-            <div className="bg-gray-50/80 p-5 rounded-[1.5rem] mb-4 text-right shadow-inner border border-gray-100 min-h-[90px] flex flex-col justify-end overflow-hidden group">
+            {isAiThinking && (
+              <div className="mb-4 px-4 py-3 bg-purple-50/80 backdrop-blur-sm text-xs font-bold text-purple-600 rounded-2xl border border-purple-100/50 animate-pulse flex items-center gap-3">
+                <Sparkles className="w-4 h-4 text-purple-600" />
+                <span className="tracking-tight Uppercase">AI is extracting numbers...</span>
+              </div>
+            )}
+
+            <div className="bg-gray-900 p-8 rounded-[2rem] mb-8 text-right shadow-2xl flex flex-col justify-end overflow-hidden group min-h-[200px] relative">
+              <div className="absolute top-4 left-4">
+                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
+              </div>
               {lastEquation && (
-                <div className="text-[10px] text-gray-400 font-mono font-bold mb-1 opacity-60 group-hover:opacity-100 transition-opacity">{lastEquation} =</div>
+                <div className="text-xs text-indigo-300/50 font-mono font-bold mb-2 opacity-60 group-hover:opacity-100 transition-opacity break-all tracking-wider">{lastEquation} =</div>
               )}
-              <p className={`text-2xl font-mono font-black text-gray-900 truncate tracking-tighter ${display === 'Error' ? 'text-red-500' : ''}`}>
+              <p className={`font-mono font-black text-white break-all tracking-tighter transition-all duration-300 ${
+                display.length > 200 ? 'text-[9px] leading-[1.1]' : 
+                display.length > 120 ? 'text-[11px] leading-tight' : 
+                display.length > 60 ? 'text-sm leading-tight' : 
+                display.length > 30 ? 'text-xl' : 
+                display.length > 15 ? 'text-3xl' : 'text-6xl'
+              } ${display === 'Error' ? 'text-red-400' : ''}`}>
                 {display}
               </p>
             </div>
 
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-4 gap-3 sm:gap-4">
               {[
-                { val: 'C', color: 'bg-rose-50 text-rose-600 hover:bg-rose-100' },
-                { val: '/', color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
-                { val: '*', color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
-                { val: 'del', icon: <X className="w-4 h-4"/>, color: 'bg-orange-50 text-orange-600 hover:bg-orange-100' },
+                { val: 'C', color: 'bg-rose-50 text-rose-600 hover:bg-rose-100 border-rose-100' },
+                { val: 'del', icon: <Delete className="w-6 h-6" />, color: 'bg-orange-50 text-orange-600 hover:bg-orange-100 border-orange-100' },
+                { val: '(', color: 'bg-indigo-50/50 text-indigo-600' },
+                { val: ')', color: 'bg-indigo-50/50 text-indigo-600' },
                 
-                { val: '7' }, { val: '8' }, { val: '9' }, { val: '-', color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
+                { val: '7' }, { val: '8' }, { val: '9' }, { val: '/', color: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100' },
                 
-                { val: '4' }, { val: '5' }, { val: '6' }, { val: '+', color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
+                { val: '4' }, { val: '5' }, { val: '6' }, { val: '*', color: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100' },
                 
-                { val: '1' }, { val: '2' }, { val: '3' }, 
-                { val: '=', color: 'row-span-2 bg-gradient-to-br from-indigo-600 to-purple-600 text-white hover:shadow-lg hover:shadow-indigo-200 active:scale-95' },
+                { val: '1' }, { val: '2' }, { val: '3' }, { val: '-', color: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100' },
                 
-                { val: '0', color: 'col-span-2' }, { val: '.' }
+                { val: '0', color: 'col-span-2' }, { val: '.' }, { val: '+', color: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100' },
+                
+                { val: '=', color: 'col-span-4 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white hover:shadow-xl hover:shadow-indigo-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] transition-all h-20 sm:h-24 mt-2' },
               ].map((btn, i) => (
                 <button
                   key={i}
-                  onClick={() => {
-                    if (btn.val === 'del') {
-                      setDisplay(prev => prev.length > 1 ? prev.slice(0, -1) : '0');
-                    } else {
-                      handleAction(btn.val)
-                    }
-                  }}
-                  className={`p-4 rounded-2xl font-black text-sm transition-all active:scale-90 shadow-sm border border-transparent ${
-                    btn.color || 'bg-white border-gray-100 text-gray-900 hover:bg-gray-50'
-                  }`}
+                  onClick={() => handleAction(btn.val)}
+                  className={`h-16 sm:h-20 rounded-3xl font-black text-xl transition-all active:scale-90 shadow-sm border border-transparent flex items-center justify-center ${
+                    btn.color || 'bg-gray-50 border-gray-100 text-gray-900 hover:bg-white hover:shadow-md'
+                  } ${btn.val === '0' ? 'col-span-2' : ''} ${btn.val === '=' ? 'col-span-4' : ''}`}
                 >
                   {btn.icon || btn.val}
                 </button>
               ))}
+            </div>
+            
+            <div className="mt-8 flex justify-center">
+               <div className="h-1.5 w-16 bg-gray-100 rounded-full"></div>
             </div>
           </motion.div>
         )}
@@ -7871,16 +7939,29 @@ function POS({
   isCheckingOut: boolean
 }) {
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [categoryFilter, setCategoryFilter] = useState('');
   const theme = PAGE_THEMES.pos;
   const systemLang = settings.systemLanguage || 'bn';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
 
-  const filteredProducts = products.filter(p => 
-    (isPhoneticMatch(p.name, searchTerm) || 
-     (p.barcode && p.barcode.toLowerCase().includes(searchTerm.toLowerCase()))) && 
-    (categoryFilter === '' || p.category === categoryFilter)
-  );
+  const filteredProducts = useMemo(() => {
+    const term = deferredSearchTerm.trim().toLowerCase();
+    if (!term && !categoryFilter) return products;
+    
+    return products.filter(p => {
+       if (categoryFilter !== '' && p.category !== categoryFilter) return false;
+       if (!term) return true;
+       
+       const name = p.name.toLowerCase();
+       const barcode = (p.barcode || '').toLowerCase();
+       
+       if (name.includes(term) || barcode.includes(term)) return true;
+       if (isPhoneticMatch(p.name, term)) return true;
+       
+       return false;
+    });
+  }, [products, deferredSearchTerm, categoryFilter]);
 
   const handleVoiceCommand = async (rawText: string) => {
     setSearchTerm('');
@@ -8492,10 +8573,13 @@ function Inventory({ products, categories, stockRecords, sales, onViewHistory, s
     show: boolean;
   } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [categorySearch, setCategorySearch] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [isBulkStockModalOpen, setIsBulkStockModalOpen] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [isAiThinking, setIsAiThinking] = useState(false);
   const [bulkStockData, setBulkStockData] = useState<Record<string, { quantity: number; batchNumber: string; expiryDate: string }>>({});
   const handleBulkImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -8745,81 +8829,103 @@ Return the result as JSON with a "category" field containing exactly one string 
   // Actually, line 8449 had it defined. Let's see if we can remove it from Inventory body.
 
 
-  const salesCount: Record<string, number> = {};
-  const lastSaleDate: Record<string, number> = {};
-
-  sales.forEach(sale => {
-    const saleTime = sale.timestamp ? (sale.timestamp as any).toMillis?.() || new Date(sale.timestamp).getTime() || 0 : Date.now();
-    sale.items.forEach(item => {
-      salesCount[item.productId] = (salesCount[item.productId] || 0) + (item.quantity || 1);
-      if (saleTime > (lastSaleDate[item.productId] || 0)) {
-        lastSaleDate[item.productId] = saleTime;
-      }
+  const salesCount: Record<string, number> = useMemo(() => {
+    const counts: Record<string, number> = {};
+    sales.forEach(sale => {
+      sale.items.forEach(item => {
+        counts[item.productId] = (counts[item.productId] || 0) + (item.quantity || 1);
+      });
     });
-  });
+    return counts;
+  }, [sales]);
+
+  const lastSaleDate: Record<string, number> = useMemo(() => {
+    const dates: Record<string, number> = {};
+    sales.forEach(sale => {
+      const saleTime = sale.timestamp ? (sale.timestamp as any).toMillis?.() || new Date(sale.timestamp).getTime() || 0 : 0;
+      sale.items.forEach(item => {
+        if (saleTime > (dates[item.productId] || 0)) {
+          dates[item.productId] = saleTime;
+        }
+      });
+    });
+    return dates;
+  }, [sales]);
 
   const now = new Date();
 
-  const filteredProducts = products.filter(p => 
-    isPhoneticMatch(p.name, searchTerm) || 
-    (p.barcode && p.barcode.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (p.serialNumber && p.serialNumber.toString().includes(searchTerm)) ||
-    isPhoneticMatch(p.category, searchTerm) ||
-    (p.company && isPhoneticMatch(p.company, searchTerm))
-  ).filter(p => {
-    if (productSortBy === 'expired_filter') {
-      if (!p.expiryDate) return false;
-      return new Date(p.expiryDate) < now;
-    }
-    return true;
-  }).sort((a, b) => {
-    let cmp = 0;
-    switch (productSortBy) {
-      case 'serial':
-        cmp = (a.serialNumber || 0) - (b.serialNumber || 0);
-        break;
-      case 'company':
-        cmp = (a.company || '').localeCompare(b.company || '');
-        break;
-      case 'near_expire':
-        const aDate = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
-        const bDate = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
-        cmp = aDate - bDate;
-        break;
-      case 'price':
-      case 'low_price':
-      case 'high_price':
-        cmp = a.price - b.price;
-        break;
-      case 'stock':
-        cmp = a.stock - b.stock;
-        break;
-      case 'long_time_no_sell':
-        const aLast = lastSaleDate[a.id] || 0;
-        const bLast = lastSaleDate[b.id] || 0;
-        cmp = aLast - bLast; 
-        break;
-      case 'trending':
-        const aCount = salesCount[a.id] || 0;
-        const bCount = salesCount[b.id] || 0;
-        cmp = aCount - bCount; 
-        break;
-      case 'expired_filter':
-      case 'name':
-      default:
-        cmp = a.name.localeCompare(b.name);
-        break;
-    }
-    return productSortOrder === 'asc' ? cmp : -cmp;
-  });
+  const sortedProducts = useMemo(() => {
+    const term = deferredSearchTerm.trim().toLowerCase();
+    
+    const filtered = (term || categorySearch || productSortBy === 'expired_filter') 
+      ? products.filter(p => {
+          // Priority 1: Exact matches or barcode (fast)
+          const name = p.name.toLowerCase();
+          const cat = p.category.toLowerCase();
+          const comp = (p.company || '').toLowerCase();
+          const barcode = (p.barcode || '').toLowerCase();
+          const serial = (p.serialNumber || '').toString();
+
+          if (name.includes(term) || barcode.includes(term) || serial.includes(term)) return true;
+          if (cat.includes(term) || comp.includes(term)) return true;
+
+          // Priority 2: Phonetic matches (heavier)
+          if (isPhoneticMatch(p.name, term)) return true;
+          if (isPhoneticMatch(p.category, term)) return true;
+          if (p.company && isPhoneticMatch(p.company, term)) return true;
+
+          return false;
+        }).filter(p => {
+          if (productSortBy === 'expired_filter') {
+            if (!p.expiryDate) return false;
+            return new Date(p.expiryDate) < now;
+          }
+          return true;
+        })
+      : products;
+
+    return [...filtered].sort((a, b) => {
+      let cmp = 0;
+      switch (productSortBy) {
+        case 'serial':
+          cmp = (a.serialNumber || 0) - (b.serialNumber || 0);
+          break;
+        case 'company':
+          cmp = (a.company || '').localeCompare(b.company || '');
+          break;
+        case 'near_expire':
+          const aDate = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
+          const bDate = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
+          cmp = aDate - bDate;
+          break;
+        case 'price':
+        case 'low_price':
+        case 'high_price':
+          cmp = a.price - b.price;
+          break;
+        case 'stock':
+          cmp = a.stock - b.stock;
+          break;
+        case 'long_time_no_sell':
+          cmp = (lastSaleDate[a.id] || 0) - (lastSaleDate[b.id] || 0);
+          break;
+        case 'trending':
+          cmp = (salesCount[a.id] || 0) - (salesCount[b.id] || 0);
+          break;
+        default:
+          cmp = a.name.localeCompare(b.name);
+      }
+      return productSortOrder === 'asc' ? cmp : -cmp;
+    });
+  }, [products, deferredSearchTerm, categorySearch, productSortBy, productSortOrder, now, lastSaleDate, salesCount]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, categorySearch, productSortBy, productSortOrder]);
+  }, [deferredSearchTerm, categorySearch, productSortBy, productSortOrder]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / itemsPerPage));
+  const totalPages = Math.max(1, Math.ceil(sortedProducts.length / itemsPerPage));
   const validCurrentPage = Math.min(currentPage, totalPages);
-  const paginatedProducts = filteredProducts.slice((validCurrentPage - 1) * itemsPerPage, validCurrentPage * itemsPerPage);
+  const paginatedProducts = sortedProducts.slice((validCurrentPage - 1) * itemsPerPage, validCurrentPage * itemsPerPage);
 
   useEffect(() => {
     if (editingProduct?.imageUrl) {
@@ -9127,10 +9233,10 @@ Return the result as JSON with a "category" field containing exactly one string 
   };
 
   const toggleSelectAll = () => {
-    if (selectedProductIds.length === filteredProducts.length) {
+    if (selectedProductIds.length === sortedProducts.length) {
       setSelectedProductIds([]);
     } else {
-      setSelectedProductIds(filteredProducts.map(p => p.id));
+      setSelectedProductIds(sortedProducts.map(p => p.id));
     }
   };
 
@@ -9470,7 +9576,7 @@ Return the result as JSON with a "category" field containing exactly one string 
                 </tbody>
               </table>
             </div>
-            {filteredProducts.length === 0 && (
+            {sortedProducts.length === 0 && (
               <div className="p-20 text-center flex flex-col items-center justify-center space-y-4">
                 <div className="p-6 bg-gray-50 rounded-full">
                   <Search className="w-12 h-12 text-gray-200" />
@@ -9484,7 +9590,7 @@ Return the result as JSON with a "category" field containing exactly one string 
             {totalPages > 1 && (
               <div className="p-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/30">
                 <div className="text-xs font-bold text-gray-500">
-                  Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredProducts.length)} of {filteredProducts.length} entries
+                  Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, sortedProducts.length)} of {sortedProducts.length} entries
                 </div>
                 <div className="flex items-center gap-2">
                   <button 

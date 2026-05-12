@@ -17,26 +17,34 @@ export const parseMathVoiceCommandAI = async (rawText: string): Promise<string |
   if (!ai) return null;
 
   const prompt = `
-You are an expert math voice assistant for a calculator app.
-The user speaks in Bengali, English, or a mix of both. 
-Your task is to parse the voice transcript into a clean, single mathematical expression (e.g., 500+66700+800+600+300).
+You are a high-speed mathematical expression extractor.
+Input: A voice transcript in Bengali, English, or mixed.
+Output: A valid JavaScript mathematical expression string (e.g., "500+302+112+70").
 
-Operator Mapping:
-- যোগ, plus, add -> +
-- বিয়োগ, minus, subtract, বাদ দাও -> -
-- গুণ, times, multiply, ইনটু -> *
-- ভাগ, divide, করো -> /
-- শতাংশ, percent -> /100*
+CONVERSION RULES (Apply strictly):
+- Numbers: এক->1, দুই->2, তিন->3, চার->4, পাঁচ->5, ছয়->6, সাত->7, আট->8, নয়->9, শূন্য->0
+- Tens: দশ/দশটি->10, কুড়ি->20, ত্রিশ->30, চল্লিশ->40, পঞ্চাশ->50, ৬০->60, ৭০->70, ৮০->80, ৯০->90
+- Hundreds: একশো/একশ->100, দুইশ->200, তিনশো->300, চারশ->400, পাঁচশ->500, ছয়শ->600, সাতশো->700
+- Multipliers: হাজার->1000, লাখ->100000
+- Operators: প্লাস/যোগ/আরও/এন্ড/সাথে/মাইনাস/বিয়োগ/বাদ/ইনটু/গুণ/ভাগ/ডিভাইড -> "+", "-", "*", "/" accordingly.
+- Bengali Digits: ১->1, ২->2, ৩->3, ৪->4, ৫->5, ৬->6, ৭->7, ৮->8, ৯->9, ০->0
 
-Rules:
-1. Extract ONLY the intended numbers and operators.
-2. Ignore all conversational filler (e.g., "please", "calculate", "how much").
-3. IF THE USER REPEATS NUMBERS OR PHRASES, ignore the repetition and output the intended calculation once.
-4. Convert Bengali numerals/words to digits (e.g., "১০" -> 10).
-5. Output ONLY the resulting math string. NO filler text/explanations.
-6. Return "ERROR" if no valid math expression can be formed.
+BEHAVIOR:
+1. Extract every number and operator mentioned in sequence.
+2. If no operator is mentioned between numbers, assume addition (+).
+3. Ignore filler words like "টাকা", "দাও", "করো", "হচ্ছে", "মোট", "হবে", "হলো", "সমান".
+4. Handle long sequences (up to 40+ additions).
+5. If an operator is at the end (e.g. "500 + 200 plus"), ignore the trailing operator.
+6. Only output the math string. No text. 
 
-Transcript: "${rawText.replace(/"/g, "'")}"
+Examples:
+- "৫০০ প্লাস ২শ" -> 500+200
+- "৫০২ প্লাস ৩শ ২ প্লাস ৭০ যোগ" -> 502+302+70
+- "৭০২ প্লাস ৫০২ প্লাস ৩০২ প্লাস ১১২ প্লাস ৪০২ প্লাস ৬০২ প্লাস ৭০ হবে" -> 702+502+302+112+402+602+70
+- "৫০০ যোগ ২০০ মাইনাস ৫০" -> 500+200-50
+- "পাঁচশ দুই প্লাস ছয়শ সাত প্লাস আশি" -> 502+607+80
+
+Transcript: "${rawText}"
 `;
 
   try {
