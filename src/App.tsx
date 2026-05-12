@@ -34,7 +34,9 @@ import {
   TrendingUp, 
   DollarSign, 
   Box, 
+  User,
   User as UserIcon,
+  UserCheck,
   Briefcase,
   AlertCircle,
   CheckCircle2,
@@ -283,7 +285,7 @@ const PRINT_TRANSLATIONS = {
     status: 'অবস্থা',
     closed: 'বন্ধ',
     itemsCount: 'আইটেম সংখ্যা',
-    retailSale: 'Walk-in Customer',
+    retailSale: 'নগদ ক্রেতা (Walk-in)',
     cashSales: 'নগদ বিক্রয়',
     dueSales: 'বাকি বিক্রয়',
     collection: 'বাকি আদায় (Collection)',
@@ -3399,6 +3401,8 @@ export default function App() {
     try {
       const selectedCustomer = customers.find(c => c.id === checkoutData.customerId);
       const paidAmount = checkoutData.paidAmount || 0;
+      const currentLang = shopSettings.systemLanguage || 'bn';
+      const defaultRetailName = currentLang === 'bn' ? 'নগদ ক্রেতা (Walk-in)' : (currentLang === 'ar' ? 'عميل عابر' : 'Retail Sale (Walk-in)');
       
       // Enforce full payment for walk-in customers
       if (!checkoutData.customerId && paidAmount < finalTotal) {
@@ -3430,7 +3434,7 @@ export default function App() {
 
       const saleData: any = {
         shopId: user.shopId,
-        customerName: selectedCustomer?.name || checkoutData.walkInName || 'Walk-in Customer',
+        customerName: selectedCustomer?.name || checkoutData.walkInName || defaultRetailName,
         customerPhone: selectedCustomer?.phone || checkoutData.walkInPhone || '',
         items: cart.map(item => ({
           productId: item.id || '',
@@ -4764,8 +4768,10 @@ export default function App() {
           onAdd={handleAddNote} 
           onDelete={handleDeleteNote}
           settings={shopSettings}
+          isRtl={isRtl}
+          isSidebarOpen={isSidebarOpen}
         />
-        <Calculator settings={shopSettings} />
+        <Calculator settings={shopSettings} isRtl={isRtl} isSidebarOpen={isSidebarOpen} />
         
         <NotificationToast notification={notification} onClose={() => setNotification(null)} />
         {selectedProductForHistory && (
@@ -5006,14 +5012,14 @@ function Dashboard({ products, sales, customers, expenses, dailyClosings, settin
             <p className="text-gray-400 font-medium">{st('welcome')}, {user?.email?.split('@')[0]}! {st('businessSnapshot')}.</p>
           </div>
         </div>
-        <div className="flex bg-gray-50/50 p-1.5 rounded-2xl border border-gray-100 shadow-inner self-start md:self-auto">
+        <div className="flex bg-gray-100/50 p-1 rounded-2xl border border-gray-100 overflow-hidden self-start md:self-auto shadow-inner">
           {(['day', 'week', 'month', 'year'] as const).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 ${
+              className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all duration-500 uppercase tracking-widest ${
                 period === p 
-                ? `bg-white text-${theme.primary} shadow-md ring-1 ring-black/5` 
+                ? `bg-white text-${theme.primary} shadow-lg shadow-gray-200 ring-1 ring-black/5 scale-[1.02]` 
                 : 'text-gray-400 hover:text-gray-600 hover:bg-white/50'
               }`}
             >
@@ -5336,7 +5342,7 @@ function ProductHistory({ product, sales, stockRecords, onClose, onDeleteStockRe
   );
 }
 
-function Calculator({ settings }: { settings: ShopSettings }) {
+function Calculator({ settings, isRtl, isSidebarOpen }: { settings: ShopSettings, isRtl: boolean, isSidebarOpen: boolean }) {
   const [display, setDisplay] = useState('0');
   const [isOpen, setIsOpen] = useState(false);
   const [lastEquation, setLastEquation] = useState<string | null>(null);
@@ -5423,7 +5429,7 @@ function Calculator({ settings }: { settings: ShopSettings }) {
     <>
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-24 right-8 w-16 h-16 bg-gradient-to-br from-indigo-600 to-purple-700 text-white rounded-2xl shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-50 group hover:rotate-3 shadow-indigo-200/50"
+        className={`fixed bottom-24 ${isRtl ? (isSidebarOpen && window.innerWidth >= 1024 ? 'right-[312px]' : 'right-8') : (isSidebarOpen && window.innerWidth >= 1024 ? 'left-[312px]' : 'left-8')} w-16 h-16 bg-gradient-to-br from-indigo-600 to-purple-700 text-white rounded-2xl shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-500 z-50 group hover:rotate-3 shadow-indigo-200/50`}
         title="Calculator"
         id="calc-open-trigger"
       >
@@ -5433,10 +5439,10 @@ function Calculator({ settings }: { settings: ShopSettings }) {
       <AnimatePresence>
         {isOpen && (
           <motion.div 
-            initial={{ opacity: 0, y: 50, scale: 0.9, x: 20 }}
+            initial={{ opacity: 0, y: 50, scale: 0.9, x: isRtl ? 20 : -20 }}
             animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
-            exit={{ opacity: 0, y: 50, scale: 0.9, x: 20 }}
-            className="fixed bottom-44 right-8 w-[92vw] sm:w-[480px] bg-white rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] border border-white/20 p-8 z-50 overflow-hidden backdrop-blur-xl"
+            exit={{ opacity: 0, y: 50, scale: 0.9, x: isRtl ? 20 : -20 }}
+            className={`fixed bottom-44 ${isRtl ? (isSidebarOpen && window.innerWidth >= 1024 ? 'right-[312px]' : 'right-8') : (isSidebarOpen && window.innerWidth >= 1024 ? 'left-[312px]' : 'left-8')} w-[92vw] sm:w-[480px] bg-white rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] border border-white/20 p-8 z-50 overflow-hidden backdrop-blur-xl transition-all duration-500`}
           >
             <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
             
@@ -5547,11 +5553,13 @@ function Calculator({ settings }: { settings: ShopSettings }) {
   );
 }
 
-function NoteGlobal({ notes, onAdd, onDelete, settings }: { 
+function NoteGlobal({ notes, onAdd, onDelete, settings, isRtl, isSidebarOpen }: { 
   notes: Note[], 
   onAdd: (text: string, color: string) => void,
   onDelete: (id: string) => void,
-  settings: ShopSettings
+  settings: ShopSettings,
+  isRtl: boolean,
+  isSidebarOpen: boolean
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [newNote, setNewNote] = useState('');
@@ -5573,7 +5581,7 @@ function NoteGlobal({ notes, onAdd, onDelete, settings }: {
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.9 }}
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-40 right-8 w-14 h-14 bg-emerald-600 text-white rounded-full shadow-2xl flex items-center justify-center transition-all z-50 overflow-hidden"
+        className={`fixed bottom-44 ${isRtl ? (isSidebarOpen && window.innerWidth >= 1024 ? 'right-[312px]' : 'right-8') : (isSidebarOpen && window.innerWidth >= 1024 ? 'left-[312px]' : 'left-8')} w-14 h-14 bg-emerald-600 text-white rounded-full shadow-2xl flex items-center justify-center transition-all duration-500 z-50 overflow-hidden`}
         title="Quick Notes"
       >
         <StickyNote className="w-6 h-6" />
@@ -5587,10 +5595,10 @@ function NoteGlobal({ notes, onAdd, onDelete, settings }: {
       <AnimatePresence>
         {isOpen && (
           <motion.div 
-            initial={{ opacity: 0, y: 20, scale: 0.9, x: 20 }}
+            initial={{ opacity: 0, y: 20, scale: 0.9, x: isRtl ? 20 : -20 }}
             animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
-            exit={{ opacity: 0, y: 20, scale: 0.9, x: 20 }}
-            className="fixed bottom-56 right-8 w-80 sm:w-96 bg-white rounded-3xl shadow-2xl border border-gray-100 flex flex-col z-50 overflow-hidden max-h-[500px]"
+            exit={{ opacity: 0, y: 20, scale: 0.9, x: isRtl ? 20 : -20 }}
+            className={`fixed bottom-60 ${isRtl ? (isSidebarOpen && window.innerWidth >= 1024 ? 'right-[312px]' : 'right-8') : (isSidebarOpen && window.innerWidth >= 1024 ? 'left-[312px]' : 'left-8')} w-80 sm:w-96 bg-white rounded-3xl shadow-2xl border border-gray-100 flex flex-col z-50 overflow-hidden max-h-[500px] transition-all duration-500`}
           >
             <div className="p-4 bg-emerald-600 text-white flex justify-between items-center">
               <div className="flex items-center gap-2">
@@ -8032,6 +8040,7 @@ function POS({
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const theme = PAGE_THEMES.pos;
   const systemLang = settings.systemLanguage || 'bn';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
@@ -8218,12 +8227,25 @@ function POS({
         
         <div className="flex-1 w-full flex flex-col lg:flex-row items-stretch lg:items-center gap-3 xl:gap-8 lg:px-2">
           {/* Customer Selection Group */}
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 bg-gray-50/80 p-1 rounded-2xl border border-gray-100 shadow-sm transition-all hover:bg-white hover:border-emerald-100 min-w-0 lg:max-w-[400px]">
-            <div className="relative group w-full sm:w-48">
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 bg-white p-1 rounded-2xl border-2 border-gray-100 shadow-sm transition-all hover:border-emerald-200 min-w-0 lg:max-w-[420px] group/customer">
+            <div className="relative group w-full sm:w-60 shrink-0">
+              <div className="absolute left-2.5 top-1/2 -translate-y-1/2 z-10 flex items-center gap-1.5 pointer-events-none">
+                {!checkoutData.customerId ? (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 rounded-lg ring-1 ring-gray-200 transition-all group-focus-within/customer:bg-emerald-50 group-focus-within/customer:ring-emerald-200">
+                    <User className="w-3.5 h-3.5 text-gray-400 group-focus-within/customer:text-emerald-500" />
+                    <span className="text-[9px] font-black text-gray-500 uppercase tracking-wider group-focus-within/customer:text-emerald-700">Walk-in</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500 rounded-lg ring-1 ring-emerald-400 shadow-lg shadow-emerald-500/20">
+                    <UserCheck className="w-3.5 h-3.5 text-white" />
+                    <span className="text-[9px] font-black text-white uppercase tracking-wider">Client</span>
+                  </div>
+                )}
+              </div>
               <input 
                 type="text" 
-                placeholder={checkoutData.customerId ? customers.find(c => c.id === checkoutData.customerId)?.name : "Search customer..."}
-                className="w-full bg-white border border-gray-100 rounded-xl px-3 py-2 text-[10px] font-black focus:ring-2 focus:ring-emerald-500 shadow-sm outline-none text-gray-700 transition-all placeholder:text-gray-300 h-9" 
+                placeholder={checkoutData.customerId ? customers.find(c => c.id === checkoutData.customerId)?.name : "Enter guest name or search..."}
+                className={`w-full bg-transparent border-none rounded-xl pl-[88px] pr-4 py-2.5 text-[11px] font-black focus:ring-0 shadow-none outline-none text-gray-800 transition-all placeholder:text-gray-300 h-11`} 
                 value={checkoutData.walkInName || ''}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -8231,7 +8253,6 @@ function POS({
                   if (val.length > 1) {
                     const matched = customers.some(c => c.name.toLowerCase().includes(val.toLowerCase()) || (c.phone && c.phone.includes(val)));
                     if (!matched && val.length > 5) {
-                      // Trigger AI search logic after some delay or on specific condition
                     }
                   }
                 }}
@@ -8261,11 +8282,11 @@ function POS({
               )}
             </div>
             
-            <div className="flex gap-2 flex-1 min-w-0">
+            <div className="flex gap-2 flex-1 min-w-0 pr-2">
               <input 
                 type="text" 
-                placeholder="Mobile" 
-                className="flex-1 min-w-0 bg-white border border-gray-100 rounded-xl px-2 py-2 text-[10px] font-black focus:ring-2 focus:ring-emerald-500 shadow-sm outline-none text-gray-700 transition-all placeholder:text-gray-300 h-9" 
+                placeholder="Mobile #" 
+                className="w-full bg-gray-50/50 border border-transparent rounded-xl px-2 py-2 text-[10px] font-black focus:bg-white focus:border-emerald-200 focus:ring-4 focus:ring-emerald-500/5 transition-all placeholder:text-gray-300 h-9 outline-none" 
                 value={checkoutData.walkInPhone || ''}
                 readOnly={!!checkoutData.customerId}
                 onChange={(e) => setCheckoutData({...checkoutData, walkInPhone: e.target.value})}
@@ -8284,12 +8305,12 @@ function POS({
 
           <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 md:gap-3">
             {/* Product Search Group */}
-            <div className="flex-1 flex items-center gap-2 bg-[#ebf5e4]/50 p-1 rounded-2xl md:rounded-[1.5rem] border border-emerald-100/30 shadow-sm hover:shadow-md transition-all group/search">
+            <div className="flex-1 flex items-center gap-2 bg-[#f8faf7] p-1 rounded-2xl md:rounded-[1.5rem] border border-emerald-100/50 shadow-sm hover:shadow-md transition-all group/search">
               <div className="relative flex-1 group">
                 <input 
                   type="text"
-                  placeholder="Search product (phonetic/smart)..."
-                  className="w-full h-10 md:h-12 pl-4 md:pl-6 pr-10 md:pr-12 bg-white/90 border border-emerald-100/50 rounded-xl md:rounded-[1.25rem] text-[11px] md:text-[13px] font-black focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-sm outline-none text-gray-800 placeholder:text-gray-400 group-hover/search:border-emerald-200"
+                  placeholder="Scan barcode or type name..."
+                  className="w-full h-11 md:h-12 pl-4 md:pl-6 pr-10 md:pr-12 bg-white/90 border border-emerald-100/50 rounded-xl md:rounded-[1.25rem] text-[11px] md:text-[13px] font-black focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all shadow-sm outline-none text-gray-800 placeholder:text-gray-400 group-hover/search:border-emerald-200"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -8314,6 +8335,24 @@ function POS({
                   )}
                 </AnimatePresence>
               </div>
+            </div>
+
+            {/* View Toggle */}
+            <div className="flex bg-gray-100 p-1 rounded-xl shrink-0">
+              <button 
+                onClick={() => setViewMode('grid')}
+                className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                title="Grid View"
+              >
+                <Box className="w-4 h-4" />
+              </button>
+              <button 
+                onClick={() => setViewMode('list')}
+                className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                title="List View"
+              >
+                <List className="w-4 h-4" />
+              </button>
             </div>
 
             {/* Category Filter */}
@@ -8344,39 +8383,95 @@ function POS({
           </div>
           
           <div className="flex-1 overflow-y-auto pr-1 md:pr-2 custom-scrollbar">
-            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 md:gap-5 pb-8">
-            {filteredProducts.map((p, idx) => (
-              <motion.button
-                key={p.id}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: Math.min(idx * 0.01, 0.3) }}
-                onClick={() => addToCart(p)}
-                className={`flex flex-col bg-white rounded-[1.5rem] p-2.5 text-left border transition-all duration-300 relative group overflow-hidden border-gray-100 hover:border-emerald-200 hover:shadow-xl hover:shadow-emerald-500/5 hover:-translate-y-1 ${p.stock <= 0 ? 'border-dashed' : ''}`}
-              >
-                <div className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${p.stock > 10 ? 'bg-emerald-500' : p.stock > 0 ? 'bg-amber-500' : 'bg-red-500'}`}></div>
-                <div className="aspect-square bg-gray-50 rounded-xl mb-2 flex items-center justify-center text-gray-300 group-hover:scale-105 transition-transform overflow-hidden relative">
-                   <Package className="w-6 h-6 opacity-20" />
-                   {p.stock <= 5 && p.stock > 0 && (
-                     <div className="absolute inset-x-0 bottom-0 bg-red-500/90 py-0.5 text-center">
-                        <span className="text-[7px] font-black text-white uppercase tracking-tighter">Low Stock</span>
-                     </div>
-                   )}
-                </div>
-                <div className="flex-1">
-                  <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-0.5 truncate">{p.category}</p>
-                  <p className="font-bold text-gray-800 leading-tight group-hover:text-emerald-600 transition-colors text-[10px] sm:text-[11px] line-clamp-2 h-7 mb-1">{p.name}</p>
-                </div>
-                <div className="mt-1 pt-1.5 border-t border-gray-50 flex items-center justify-between">
-                  <p className="text-xs font-black text-emerald-600 font-mono tracking-tight">{settings.currencySymbol}{p.price}</p>
-                  <div className="bg-gray-100 px-1.5 py-0.5 rounded-lg text-[8px] font-black text-gray-500">
-                    S: {p.stock}
-                  </div>
-                </div>
-              </motion.button>
-            ))}
+            {viewMode === 'grid' ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 md:gap-5 pb-8">
+                {filteredProducts.map((p, idx) => (
+                  <motion.button
+                    key={p.id}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: Math.min(idx * 0.01, 0.3) }}
+                    onClick={() => addToCart(p)}
+                    className={`flex flex-col bg-white rounded-[1.75rem] p-3 text-left border transition-all duration-500 relative group overflow-hidden border-gray-100/80 hover:border-emerald-300 hover:shadow-2xl hover:shadow-emerald-500/10 hover:-translate-y-1.5 ${p.stock <= 0 ? 'border-dashed opacity-60' : 'shadow-sm'}`}
+                  >
+                    <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-10">
+                      <div className="bg-emerald-600 text-white px-2 py-0.5 rounded-lg shadow-lg shadow-emerald-500/20 flex items-center gap-1 border border-emerald-400/50">
+                        <span className="text-[10px] font-black tracking-tighter">#{String(idx + 1).padStart(3, '0')}</span>
+                      </div>
+                    </div>
+                    <div className={`absolute top-3.5 right-3.5 w-2 h-2 rounded-full z-10 shadow-sm ${p.stock > 10 ? 'bg-emerald-500' : p.stock > 0 ? 'bg-amber-500' : 'bg-red-500 animate-pulse'}`}></div>
+                    <div className="aspect-square bg-gray-50/50 rounded-2xl mb-3 flex items-center justify-center text-gray-300 group-hover:scale-105 transition-transform duration-500 overflow-hidden relative ring-1 ring-gray-100">
+                       <Package className="w-8 h-8 opacity-10" />
+                       {p.stock <= 5 && p.stock > 0 && (
+                         <div className="absolute inset-x-0 bottom-0 bg-red-500/90 py-1 text-center backdrop-blur-sm">
+                            <span className="text-[8px] font-black text-white uppercase tracking-widest">Low Stock</span>
+                         </div>
+                       )}
+                       {p.stock <= 0 && (
+                         <div className="absolute inset-0 bg-gray-900/40 flex items-center justify-center backdrop-blur-[2px]">
+                            <span className="text-[10px] font-black text-white uppercase tracking-widest rotate-[-15deg] border-2 border-white px-2 py-0.5 rounded-lg">Out of Stock</span>
+                         </div>
+                       )}
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[8px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md uppercase tracking-wider">{p.category}</span>
+                      </div>
+                      <p className="font-black text-gray-900 leading-tight group-hover:text-emerald-700 transition-colors text-xs sm:text-[13px] line-clamp-2 min-h-[32px]">{p.name}</p>
+                    </div>
+                    <div className="mt-2 pt-2.5 border-t border-gray-100 flex items-center justify-between">
+                      <div className="flex flex-col">
+                        <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-0.5">Price</span>
+                        <p className="text-sm font-black text-emerald-600 font-mono tracking-tight">{settings.currencySymbol}{p.price}</p>
+                      </div>
+                      <div className="bg-gray-50 px-2 py-1 rounded-xl text-[9px] font-black text-gray-400 border border-gray-100 group-hover:bg-emerald-50 group-hover:border-emerald-100 group-hover:text-emerald-600 transition-all">
+                        QTY: {p.stock}
+                      </div>
+                    </div>
+                  </motion.button>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-3 pb-8">
+                {filteredProducts.map((p, idx) => (
+                  <motion.button
+                    key={p.id}
+                    initial={{ opacity: 0, x: -15 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: Math.min(idx * 0.01, 0.3) }}
+                    onClick={() => addToCart(p)}
+                    className="w-full flex items-center gap-5 bg-white hover:bg-emerald-50/40 p-4 rounded-3xl border-2 border-gray-50 hover:border-emerald-200 transition-all group shadow-sm hover:shadow-lg hover:shadow-emerald-500/5"
+                  >
+                    <div className="w-16 text-[12px] font-black text-gray-400 tracking-tighter flex flex-col items-center gap-1 shrink-0 px-2 border-r border-gray-100">
+                      <span className="uppercase text-[8px] opacity-40 font-sans tracking-[0.2em]">SL NO</span>
+                      <span className="bg-gray-900 text-white w-full py-1.5 rounded-xl text-center shadow-lg shadow-gray-200">#{String(idx + 1).padStart(3, '0')}</span>
+                    </div>
+                    <div className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center text-gray-300 group-hover:bg-white transition-all shadow-inner relative overflow-hidden">
+                      <Package className="w-6 h-6 opacity-20" />
+                      {p.stock <= 5 && p.stock > 0 && <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-bl-lg"></div>}
+                    </div>
+                    <div className="flex-1 min-w-0 text-left space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{p.category}</span>
+                        {p.barcode && <span className="text-[8px] font-mono text-indigo-400 bg-indigo-50 px-1.5 py-0.5 rounded select-all">ISBN: {p.barcode}</span>}
+                      </div>
+                      <p className="text-[13px] font-black text-gray-900 truncate group-hover:text-emerald-700 transition-colors">{p.name}</p>
+                    </div>
+                    <div className="text-right shrink-0 px-4 border-l border-gray-100">
+                      <p className="text-lg font-black text-emerald-600 font-mono leading-none mb-1">{settings.currencySymbol}{p.price}</p>
+                      <div className={`flex items-center justify-end gap-1.5`}>
+                        <div className={`w-1.5 h-1.5 rounded-full ${p.stock > 10 ? 'bg-emerald-500' : p.stock > 0 ? 'bg-amber-500' : 'bg-red-500'}`}></div>
+                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">In Stock: {p.stock}</span>
+                      </div>
+                    </div>
+                    <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center text-gray-400 group-hover:bg-emerald-600 group-hover:text-white transition-all shadow-sm active:scale-90">
+                      <Plus className="w-5 h-5" />
+                    </div>
+                  </motion.button>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
       </div>
 
       {/* Cart Area */}
@@ -8386,7 +8481,15 @@ function POS({
               <div className={`w-8 h-8 ${theme.bg} text-${theme.primary} rounded-lg flex items-center justify-center font-black shadow-sm text-xs`}>
                 {cart.reduce((sum, item) => sum + item.quantity, 0)}
               </div>
-              <h3 className="font-black text-gray-900 tracking-tight text-sm">Shopping Cart</h3>
+              <div>
+                <h3 className="font-black text-gray-900 tracking-tight text-sm">Shopping Cart</h3>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <div className={`w-1.5 h-1.5 rounded-full ${checkoutData.customerId ? 'bg-emerald-500' : 'bg-amber-500'}`}></div>
+                  <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">
+                    {checkoutData.customerId ? customers.find(c => c.id === checkoutData.customerId)?.name : (checkoutData.walkInName || 'Walk-in Mode')}
+                  </p>
+                </div>
+              </div>
             </div>
             {cart.length > 0 && (
               <button 
@@ -8578,17 +8681,32 @@ function POS({
             </div>
 
             <button 
-              disabled={cart.length === 0 || isCheckingOut}
+              disabled={cart.length === 0 || isCheckingOut || (!checkoutData.customerId && checkoutData.paidAmount < finalTotal)}
               onClick={() => {
                  if (!checkoutData.paidAmount && checkoutData.paidAmount !== 0) {
                     setCheckoutData({...checkoutData, paidAmount: finalTotal});
                  }
-                 setTimeout(() => handleCheckout(), 0);
+                 setTimeout(() => handleCheckout(), 50);
               }}
-              className={`w-full py-4 bg-${theme.primary} text-white rounded-2xl font-black text-[15px] shadow-xl ${theme.shadow} hover:opacity-90 disabled:bg-gray-200 disabled:shadow-none transition-all flex items-center justify-center gap-3 active:scale-[0.98] uppercase tracking-widest mt-2 border-b-4 border-black/10`}
+              className={`w-full py-4 ${!checkoutData.customerId ? 'bg-gray-900 shadow-gray-200' : `bg-${theme.primary} ${theme.shadow}`} text-white rounded-[1.5rem] font-black text-[15px] shadow-xl hover:opacity-90 disabled:bg-gray-200 disabled:shadow-none transition-all flex flex-col items-center justify-center gap-0.5 active:scale-[0.98] mt-2 border-b-4 border-black/10`}
             >
-              {isCheckingOut ? <Loader2 className="w-6 h-6 animate-spin" /> : <Banknote className="w-6 h-6" />}
-              {isCheckingOut ? 'Processing...' : 'Pay Now'}
+              {isCheckingOut ? (
+                <Loader2 className="w-6 h-6 animate-spin" />
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Banknote className="w-5 h-5" />
+                    <span className="uppercase tracking-widest">Pay Now</span>
+                  </div>
+                  <span className="text-[10px] opacity-70 font-black uppercase tracking-widest font-sans flex items-center gap-1.5">
+                    {!checkoutData.customerId ? (
+                      <><User className="w-2.5 h-2.5" /> Walk-in Checkout</>
+                    ) : (
+                      <><UserCheck className="w-2.5 h-2.5" /> Post to {customers.find(c => c.id === checkoutData.customerId)?.name.split(' ')[0]}'s Account</>
+                    )}
+                  </span>
+                </>
+              )}
             </button>
           </div>
         </div>
