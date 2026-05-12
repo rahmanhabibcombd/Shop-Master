@@ -4369,7 +4369,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* Main Content */}
-        <main className="flex-1 p-4 lg:p-8 overflow-x-hidden relative">
+        <main className={`flex-1 transition-all duration-300 ${activeTab === 'pos' ? 'p-0 sm:p-2 lg:p-3' : 'p-4 lg:p-8'} overflow-x-hidden relative`}>
           <AnimatePresence>
             {!isSidebarOpen && (
               <motion.button 
@@ -8213,15 +8213,15 @@ function POS({
       exit={{ opacity: 0, y: -20 }}
       className="h-[calc(100vh-2.5rem)] lg:h-[calc(100vh-5rem)] flex flex-col gap-3 md:gap-4 p-2 md:p-0"
     >
-      <header className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-white p-4 md:p-5 rounded-[1.5rem] md:rounded-[2rem] shadow-sm border border-gray-100 relative overflow-hidden shrink-0">
+      <header className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 bg-white p-3 md:p-4 rounded-[1.5rem] md:rounded-[2rem] shadow-sm border border-gray-100 relative shrink-0">
         <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${theme.gradient} shadow-sm`}></div>
-        <div className="flex items-center gap-4 shrink-0">
-          <div className={`w-11 h-11 ${theme.bg} text-${theme.primary} rounded-2xl flex items-center justify-center shadow-inner`}>
-            <ShoppingCart className="w-5 h-5" />
+        <div className="flex items-center gap-3 shrink-0">
+          <div className={`w-9 h-9 ${theme.bg} text-${theme.primary} rounded-xl flex items-center justify-center shadow-inner`}>
+            <ShoppingCart className="w-4 h-4" />
           </div>
           <div>
-            <h2 className="text-xl font-black text-gray-900 tracking-tight leading-none">Point of Sale</h2>
-            <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest mt-1">New Order Entry</p>
+            <h2 className="text-lg font-black text-gray-900 tracking-tight leading-none">Point of Sale</h2>
+            <p className="text-[8px] text-gray-400 font-black uppercase tracking-widest mt-0.5 opacity-70">Entry Desk</p>
           </div>
         </div>
         
@@ -8370,10 +8370,10 @@ function POS({
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col lg:flex-row gap-5 min-h-0 overflow-hidden lg:overflow-visible">
+      <div className="flex-1 flex flex-col lg:flex-row gap-5 min-h-0 overflow-hidden lg:h-[calc(100vh-200px)]">
         {/* Products Area */}
-        <div className="flex-1 flex flex-col min-h-0 bg-white rounded-[2rem] md:rounded-[2.5rem] p-4 md:p-6 shadow-sm border border-gray-100 lg:overflow-hidden">
-          <div className="flex items-center justify-between mb-4 md:mb-6">
+        <div className="flex-1 flex flex-col min-h-0 bg-white rounded-[2rem] md:rounded-[2.5rem] p-4 md:p-6 shadow-sm border border-gray-100 overflow-hidden">
+          <div className="flex items-center justify-between mb-4 md:mb-6 shrink-0">
             <h2 className="text-xl md:text-2xl font-black text-gray-800 tracking-tight flex items-center gap-3">
               {st('products')}
               <span className="text-[10px] bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full border border-emerald-100 font-black uppercase tracking-widest leading-none">
@@ -8382,7 +8382,7 @@ function POS({
             </h2>
           </div>
           
-          <div className="flex-1 overflow-y-auto pr-1 md:pr-2 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto pr-1 md:pr-2 custom-scrollbar pb-6">
             {viewMode === 'grid' ? (
               <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 md:gap-5 pb-8">
                 {filteredProducts.map((p, idx) => (
@@ -8475,7 +8475,7 @@ function POS({
       </div>
 
       {/* Cart Area */}
-        <div id="cart-panel" className="w-full lg:w-[380px] bg-white rounded-[2rem] shadow-xl border border-gray-100 flex flex-col overflow-hidden relative lg:shrink-0 h-[600px] lg:h-full">
+        <div id="cart-panel" className="w-full lg:w-[400px] bg-white rounded-[2rem] shadow-xl border border-gray-100 flex flex-col overflow-hidden relative lg:shrink-0 h-[600px] lg:h-full min-h-0">
           <div className="p-4 border-b border-gray-50 flex items-center justify-between bg-gray-50/20 shrink-0">
             <div className="flex items-center gap-2.5">
               <div className={`w-8 h-8 ${theme.bg} text-${theme.primary} rounded-lg flex items-center justify-center font-black shadow-sm text-xs`}>
@@ -8596,37 +8596,32 @@ function POS({
             )}
           </div>
 
-          <div className="p-5 bg-gray-50 border-t border-gray-100 space-y-3.5 shrink-0 relative z-10 rounded-b-[2rem]">
-            <div className="space-y-2.5">
-              <div className="flex justify-between items-center text-gray-400 font-bold text-[10px] uppercase tracking-widest px-2">
+          <div className="p-3 md:p-4 bg-gray-50 border-t border-gray-100 space-y-2.5 shrink-0 relative z-10 rounded-b-[2rem]">
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-gray-400 font-bold text-[9px] uppercase tracking-widest px-1">
                 <span>Subtotal</span>
                 <span className="font-mono font-black text-gray-600">{fC(cartTotal)}</span>
               </div>
-              <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-gray-100 shadow-sm">
-                <span className="text-gray-500 font-bold text-[10px] ml-1 uppercase tracking-tight">Discount</span>
-                <div className="flex items-center gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex justify-between items-center bg-white p-2 rounded-xl border border-gray-100 shadow-sm">
+                  <span className="text-[8px] font-bold text-gray-400 uppercase ml-1">Disc</span>
                   <input 
                     type="number"
                     value={discount}
                     onChange={(e) => setDiscount(Number(e.target.value))}
-                    className="w-16 text-right font-black text-red-500 bg-transparent outline-none text-xs"
+                    className="w-12 text-right font-black text-red-500 bg-transparent outline-none text-[10px]"
                     placeholder="0"
                   />
-                  <span className="text-gray-400 font-bold text-[10px] mr-1">{settings.currencySymbol}</span>
                 </div>
-              </div>
-
-              <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-gray-100 shadow-sm">
-                <span className="text-gray-500 font-bold text-[10px] ml-1 uppercase tracking-tight">Tax (VAT) %</span>
-                <div className="flex items-center gap-2">
+                <div className="flex justify-between items-center bg-white p-2 rounded-xl border border-gray-100 shadow-sm">
+                  <span className="text-[8px] font-bold text-gray-400 uppercase ml-1">Tax%</span>
                   <input 
                     type="number"
                     value={taxRate || 0}
                     onChange={(e) => setTaxRate?.(Number(e.target.value))}
-                    className="w-16 text-right font-black text-rose-500 bg-transparent outline-none text-xs"
+                    className="w-12 text-right font-black text-rose-500 bg-transparent outline-none text-[10px]"
                     placeholder="0"
                   />
-                  <span className="text-gray-400 font-bold text-[10px] mr-1">%</span>
                 </div>
               </div>
               
@@ -8635,24 +8630,22 @@ function POS({
                   <button
                     key={method}
                     onClick={() => setCheckoutData({...checkoutData, paymentMethod: method})}
-                    className={`flex-1 py-2 px-1 rounded-lg flex items-center justify-center gap-1.5 transition-all text-[8.5px] font-black uppercase tracking-wider ${checkoutData.paymentMethod === method ? `bg-${theme.primary} text-white shadow-md transform scale-[1.02]` : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
+                    className={`flex-1 py-1.5 px-0.5 rounded-lg flex items-center justify-center gap-1 transition-all text-[8px] font-black uppercase tracking-wider ${checkoutData.paymentMethod === method ? `bg-${theme.primary} text-white shadow-md transform scale-[1.02]` : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
                   >
                     {method === 'cash' ? <Banknote className="w-3 h-3" /> : method === 'card' ? <CreditCard className="w-3 h-3" /> : <Smartphone className="w-3 h-3" />}
-                    <span className="hidden sm:inline">{method}</span>
+                    <span className="hidden lg:inline">{method}</span>
                   </button>
                 ))}
               </div>
 
-              <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-gray-100 shadow-sm group">
-                 <span className="text-[8.5px] ml-1 font-black text-gray-400 uppercase tracking-widest leading-tight">Paid Amount</span>
+              <div className="flex items-center justify-between bg-white p-2 rounded-xl border border-gray-100 shadow-sm group">
+                 <span className="text-[8px] ml-1 font-black text-gray-400 uppercase tracking-widest leading-tight">Paid</span>
                  <div className="flex items-center gap-1 group-focus-within:text-emerald-500 transition-colors mr-1">
-                   {(!checkoutData.customerId || checkoutData.customerId === '') && (checkoutData.paidAmount < finalTotal) && (
-                     <div className="absolute -top-6 right-0 bg-red-500 text-white text-[8px] px-2 py-1 rounded-md font-bold animate-bounce shadow-lg"> Full payment required for Walk-in </div>
-                   )}
-                   <span className="text-gray-300 font-bold text-[10px]">{settings.currencySymbol}</span>
+                   {/* Full payment required alert */}
+                   <span className="text-gray-300 font-bold text-[9px]">{settings.currencySymbol}</span>
                    <input 
                       type="number"
-                      className={`w-16 text-right font-black ${(!checkoutData.customerId && checkoutData.paidAmount < finalTotal) ? 'text-red-500 animate-pulse' : 'text-gray-900'} text-sm bg-transparent outline-none transition-all placeholder-gray-300`}
+                      className={`w-20 text-right font-black ${(!checkoutData.customerId && checkoutData.paidAmount < finalTotal) ? 'text-red-500 animate-pulse' : 'text-gray-900'} text-xs bg-transparent outline-none transition-all placeholder-gray-300`}
                       value={checkoutData.paidAmount}
                       onChange={(e) => setCheckoutData({...checkoutData, paidAmount: Number(e.target.value)})}
                       onFocus={(e) => e.target.select()}
@@ -8674,9 +8667,9 @@ function POS({
                 </div>
               )}
 
-              <div className="flex justify-between items-center pt-2 border-t border-gray-100 px-2 mt-1">
-                <span className="text-gray-900 font-black text-xs uppercase tracking-tight">Total Payable</span>
-                <span className={`text-[22px] font-black text-${theme.primary} tracking-tighter font-mono`}>{fC(finalTotal)}</span>
+              <div className="flex justify-between items-center pt-1.5 border-t border-gray-100 px-1 mt-0.5">
+                <span className="text-gray-900 font-black text-[10px] uppercase tracking-tight">Total</span>
+                <span className={`text-[20px] font-black text-${theme.primary} tracking-tighter font-mono`}>{fC(finalTotal)}</span>
               </div>
             </div>
 
@@ -8688,21 +8681,21 @@ function POS({
                  }
                  setTimeout(() => handleCheckout(), 50);
               }}
-              className={`w-full py-4 ${!checkoutData.customerId ? 'bg-gray-900 shadow-gray-200' : `bg-${theme.primary} ${theme.shadow}`} text-white rounded-[1.5rem] font-black text-[15px] shadow-xl hover:opacity-90 disabled:bg-gray-200 disabled:shadow-none transition-all flex flex-col items-center justify-center gap-0.5 active:scale-[0.98] mt-2 border-b-4 border-black/10`}
+              className={`w-full py-3.5 ${!checkoutData.customerId ? 'bg-gray-900 shadow-gray-200' : `bg-${theme.primary} ${theme.shadow}`} text-white rounded-[1.25rem] font-black text-[14px] shadow-xl hover:opacity-90 disabled:bg-gray-200 disabled:shadow-none transition-all flex flex-col items-center justify-center gap-0.5 active:scale-[0.98] mt-1 border-b-4 border-black/10`}
             >
               {isCheckingOut ? (
-                <Loader2 className="w-6 h-6 animate-spin" />
+                <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 <>
-                  <div className="flex items-center gap-2">
-                    <Banknote className="w-5 h-5" />
-                    <span className="uppercase tracking-widest">Pay Now</span>
+                  <div className="flex items-center gap-1.5">
+                    <Banknote className="w-4 h-4" />
+                    <span className="uppercase tracking-widest">{systemLang === 'bn' ? 'টাকা নিন' : 'Pay Now'}</span>
                   </div>
-                  <span className="text-[10px] opacity-70 font-black uppercase tracking-widest font-sans flex items-center gap-1.5">
+                  <span className="text-[9px] opacity-70 font-black uppercase tracking-widest font-sans flex items-center gap-1">
                     {!checkoutData.customerId ? (
-                      <><User className="w-2.5 h-2.5" /> Walk-in Checkout</>
+                      <><User className="w-2 h-2" /> Walk-in</>
                     ) : (
-                      <><UserCheck className="w-2.5 h-2.5" /> Post to {customers.find(c => c.id === checkoutData.customerId)?.name.split(' ')[0]}'s Account</>
+                      <><UserCheck className="w-2 h-2" /> {customers.find(c => c.id === checkoutData.customerId)?.name.split(' ')[0]}</>
                     )}
                   </span>
                 </>
