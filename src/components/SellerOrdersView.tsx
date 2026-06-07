@@ -18,13 +18,50 @@ import { db, doc, updateDoc } from '../firebase';
 
 interface SellerOrdersViewProps {
   orders: any[];
+  products?: any[];
   lang: 'en' | 'bn' | 'ar';
   onLoadToPOS: (order: any) => void;
 }
 
-export function SellerOrdersView({ orders, lang, onLoadToPOS }: SellerOrdersViewProps) {
+export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS }: SellerOrdersViewProps) {
   const isBn = lang === 'bn';
   const [editingOrder, setEditingOrder] = useState<any | null>(null);
+  const [selectedProductToAdd, setSelectedProductToAdd] = useState<string>('');
+
+  const handleAddProductToOrder = (productId: string) => {
+    if (!editingOrder || !products || !productId) return;
+    const prod = products.find(p => p.id === productId);
+    if (!prod) return;
+
+    // Check if product is already in the order
+    const existing = editingOrder.items?.find((item: any) => item.productId === productId);
+    let updatedItems;
+    if (existing) {
+      updatedItems = editingOrder.items.map((item: any) => 
+        item.productId === productId ? { ...item, quantity: item.quantity + 1 } : item
+      );
+    } else {
+      updatedItems = [
+        ...(editingOrder.items || []),
+        {
+          productId: prod.id,
+          productName: prod.name,
+          quantity: 1,
+          price: prod.price,
+          unit: prod.unit || 'unit',
+          imageUrl: prod.imageUrl || ''
+        }
+      ];
+    }
+
+    const total = updatedItems.reduce((sum: number, item: any) => sum + (item.price * item.quantity), 0);
+    setEditingOrder({
+      ...editingOrder,
+      items: updatedItems,
+      totalAmount: total
+    });
+    setSelectedProductToAdd(''); // reset selection
+  };
 
   const handleUpdateStatus = async (orderId: string, status: 'approved' | 'cancelled') => {
     try {
@@ -156,28 +193,39 @@ export function SellerOrdersView({ orders, lang, onLoadToPOS }: SellerOrdersView
                       </div>
 
                       {/* Items details display list */}
-                      <div className="mt-3 pl-14">
-                        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-none mb-1.5">{isBn ? "আইটেমস" : "Items list"}</p>
-                        <div className="space-y-1">
-                          {order.items?.map((item: any, i: number) => (
-                            <p key={i} className="text-xs font-bold text-gray-700">
-                              🛒 {item.productName} — <span className="font-mono">{item.price} TK × {item.quantity} {item.unit || 'unit'}</span>
-                            </p>
+                      {order.items && order.items.length > 0 && (
+                        <div className="mt-3 bg-gray-50/50 p-3 rounded-2xl border border-gray-100 space-y-1.5 max-w-sm">
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">
+                            {isBn ? "প্রোডাক্টের বিবরণ" : "Order Products"}
+                          </p>
+                          {order.items.map((item: any, idx: number) => (
+                            <div key={idx} className="flex justify-between items-center text-xs text-gray-700">
+                              <span className="font-bold truncate max-w-[200px]">
+                                {item.productName} <span className="text-[10px] text-gray-400">({item.quantity} × {item.price} TK)</span>
+                              </span>
+                              <span className="font-black text-gray-900 shrink-0 ml-2">{item.price * item.quantity} TK</span>
+                            </div>
                           ))}
                         </div>
-                        {order.notes && (
-                          <p className="text-xs text-indigo-500 font-semibold italic mt-2 bg-indigo-50/40 px-3 py-1.5 rounded-xl border border-indigo-100/30 inline-block">
-                            * Note: {order.notes}
-                          </p>
-                        )}
-                      </div>
+                      )}
                     </div>
 
                     {/* Order Value & Operation Controls */}
                     <div className="flex flex-col items-start md:items-end justify-between gap-4 shrink-0 min-w-[200px]">
-                      <div className="text-left md:text-right">
-                        <p className="text-xs font-black text-gray-400 uppercase tracking-wider">{isBn ? "ক্রয়মূল্য বা বিল" : "Net Bill Amount"}</p>
-                        <h4 className="text-xl font-black text-indigo-600 mt-1">{order.totalAmount} TK</h4>
+                      <div className="text-left md:text-right space-y-1">
+                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                          {isBn ? "স্ট্যাটাস" : "Status"}
+                        </p>
+                        <p className="text-xs font-bold text-gray-700">
+                          {order.status === 'pending' 
+                            ? (isBn ? "অপেক্ষমান (Pending)" : "Pending Acceptance")
+                            : (order.invoiceNumber || 'N/A')}
+                        </p>
+                        
+                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">{isBn ? "মোট বিল" : "Total Amount"}</p>
+                        <h4 className="text-lg font-black text-indigo-600">
+                           {order.totalAmount} TK
+                        </h4>
                       </div>
 
                       <div className="flex flex-wrap gap-2 pt-2 w-full md:justify-end">
@@ -245,31 +293,9 @@ export function SellerOrdersView({ orders, lang, onLoadToPOS }: SellerOrdersView
                     <p className="text-gray-400 text-xs py-4 text-center font-semibold">No items left in this order request.</p>
                   ) : (
                     editingOrder.items.map((item: any) => (
-                      <div key={item.productId} className="flex items-center justify-between gap-3 text-xs bg-gray-50/50 p-3 rounded-xl border border-gray-100">
-                        <div className="min-w-0 flex-1">
-                          <h4 className="font-bold text-gray-900 truncate">{item.productName}</h4>
-                          <p className="text-[10px] font-bold text-gray-400 mt-1">
-                            {item.price} TK × {item.quantity} = {item.price * item.quantity} TK
-                          </p>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button 
-                            type="button"
-                            onClick={() => handleModifyQuantity(item.productId, -1)}
-                            className="p-1 bg-white hover:bg-gray-100 rounded text-gray-500 border border-gray-200 transition-colors"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <span className="font-black text-gray-800 text-xs w-5 text-center">{item.quantity}</span>
-                          <button 
-                            type="button"
-                            onClick={() => handleModifyQuantity(item.productId, 1)}
-                            className="p-1 bg-white hover:bg-gray-100 rounded text-gray-500 border border-gray-200 transition-colors"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-
+                      <div key={item.productId} className="flex flex-col gap-2.5 bg-gray-50/50 p-3 rounded-xl border border-gray-100">
+                        <div className="flex items-center justify-between text-xs">
+                          <h4 className="font-bold text-gray-900 truncate flex-1" title={item.productName}>{item.productName}</h4>
                           <button 
                             type="button"
                             onClick={() => handleRemoveItem(item.productId)}
@@ -279,10 +305,91 @@ export function SellerOrdersView({ orders, lang, onLoadToPOS }: SellerOrdersView
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
+
+                        {/* Price and Quantity Editing */}
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-gray-400 font-bold">{isBn ? "মূল্য:" : "Price:"}</span>
+                            <div className="flex items-center gap-1">
+                              <input 
+                                type="number"
+                                className="w-20 px-2 py-1 text-center font-black text-gray-850 bg-white border border-gray-200 rounded-lg outline-none focus:border-indigo-500"
+                                value={item.price}
+                                onChange={(e) => {
+                                  const newPrice = parseFloat(e.target.value) || 0;
+                                  const updatedItems = editingOrder.items.map((it: any) => {
+                                    if (it.productId === item.productId) {
+                                      return { ...it, price: newPrice };
+                                    }
+                                    return it;
+                                  });
+                                  const total = updatedItems.reduce((sum: number, it: any) => sum + (it.price * it.quantity), 0);
+                                  setEditingOrder({
+                                    ...editingOrder,
+                                    items: updatedItems,
+                                    totalAmount: total
+                                  });
+                                }}
+                              />
+                              <span className="text-gray-400 font-bold">TK</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button 
+                              type="button"
+                              onClick={() => handleModifyQuantity(item.productId, -1)}
+                              className="p-1 bg-white hover:bg-gray-100 rounded-lg text-gray-500 border border-gray-200 transition-colors"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="font-black text-gray-800 text-xs w-6 text-center">{item.quantity}</span>
+                            <button 
+                              type="button"
+                              onClick={() => handleModifyQuantity(item.productId, 1)}
+                              className="p-1 bg-white hover:bg-gray-100 rounded-lg text-gray-500 border border-gray-200 transition-colors"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     ))
                   )}
                 </div>
+
+                {/* SELECT AND ADD A NEW PRODUCT TO BASKET */}
+                {products && products.length > 0 && (
+                  <div className="border-t border-gray-100 pt-4 space-y-2">
+                    <label className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                      {isBn ? "নতুন প্রোডাক্ট যোগ করুন" : "Add Product to Basket"}
+                    </label>
+                    <div className="flex gap-2">
+                      <select
+                        value={selectedProductToAdd}
+                        onChange={(e) => setSelectedProductToAdd(e.target.value)}
+                        className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 text-xs font-semibold rounded-xl outline-none focus:border-indigo-500 text-gray-805"
+                      >
+                        <option value="">
+                          {isBn ? "--- প্রোডাক্ট সিলেক্ট করুন ---" : "--- Select Product ---"}
+                        </option>
+                        {products.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.price} TK)
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => handleAddProductToOrder(selectedProductToAdd)}
+                        disabled={!selectedProductToAdd}
+                        className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white disabled:bg-gray-50 disabled:text-gray-300 font-bold text-xs rounded-xl transition-all shrink-0"
+                      >
+                        {isBn ? "যোগ" : "Add"}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-4 pt-4 border-t border-gray-50">
                   <div className="flex justify-between items-center text-sm font-black text-gray-900">
@@ -320,6 +427,11 @@ export function SellerOrdersView({ orders, lang, onLoadToPOS }: SellerOrdersView
                         <div>
                           <p className="font-black text-gray-800">#{pastOrder.orderNumber}</p>
                           <p className="text-[10px] text-gray-400 mt-1 font-semibold">{pastOrder.customerName}</p>
+                          {pastOrder.invoiceNumber && (
+                            <p className="text-[9.5px] font-bold text-indigo-650 mt-0.5 font-mono">
+                              {isBn ? "চালান নং:" : "Inv No:"} {pastOrder.invoiceNumber}
+                            </p>
+                          )}
                         </div>
                         <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${pastOrder.status === 'approved' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
                           {pastOrder.status === 'approved' ? (isBn ? 'সম্পন্ন' : 'Completed') : (isBn ? 'বাতিল' : 'Cancelled')}

@@ -21,10 +21,11 @@ import {
   MapPin, 
   Sparkles,
   SearchCode,
-  AlertCircle
+  AlertCircle,
+  Hash
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db, collection, addDoc, getDocs, query, where, doc, getDoc, onSnapshot } from '../firebase';
+import { db, collection, addDoc, getDocs, query, where, doc, getDoc, onSnapshot, handleFirestoreError, OperationType } from '../firebase';
 import ReactBarcode from 'react-barcode';
 
 interface CustomerPortalProps {
@@ -35,12 +36,37 @@ interface CustomerPortalProps {
 export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
   const isBn = lang === 'bn';
 
+  const toBengaliNumber = (num: number | string | undefined | null): string => {
+    if (num === undefined || num === null) return '';
+    const bengaliDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+    return num.toString().replace(/\d/g, (digit) => bengaliDigits[parseInt(digit)]);
+  };
+
+  const toArabicNumber = (num: number | string | undefined | null): string => {
+    if (num === undefined || num === null) return '';
+    const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    return num.toString().replace(/\d/g, (digit) => arabicDigits[parseInt(digit)]);
+  };
+
+  const formatVal = (val: number | string | undefined | null): string => {
+    if (val === undefined || val === null || val === 'NaN') return '0';
+    const num = Number(val);
+    const formatted = isNaN(num) 
+      ? '0' 
+      : num.toLocaleString(lang === 'bn' ? 'bn-BD' : lang === 'ar' ? 'ar-EG' : 'en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    if (lang === 'bn') return toBengaliNumber(formatted);
+    if (lang === 'ar') return toArabicNumber(formatted);
+    return formatted;
+  };
+
   // UI Stages: 'shop_selection' | 'customer_login' | 'dashboard'
   const [stage, setStage] = useState<'shop_selection' | 'customer_login' | 'dashboard'>('shop_selection');
   
   // Lists fetched from DB
   const [shops, setShops] = useState<any[]>([]);
   const [selectedShop, setSelectedShop] = useState<any>(null);
+
+  const currencySuffix = selectedShop?.currencySymbol ? ' ' + selectedShop.currencySymbol : (lang === 'bn' ? ' ৳' : ' TK');
   const [searchShopQuery, setSearchShopQuery] = useState('');
   
   // Auth Form
@@ -50,8 +76,8 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
   const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Active User View Tabs: 'shop' | 'invoice_tracker' | 'orders'
-  const [activeTab, setActiveTab] = useState<'shop' | 'invoice_tracker' | 'orders'>('shop');
+  // Active User View Tabs: 'shop' | 'order_cart' | 'invoice_tracker' | 'orders'
+  const [activeTab, setActiveTab] = useState<'shop' | 'order_cart' | 'invoice_tracker' | 'orders'>('shop');
 
   // Products under selected shop
   const [products, setProducts] = useState<any[]>([]);
@@ -95,11 +121,15 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
     // Load Categories
     const unsubCat = onSnapshot(query(collection(db, 'categories'), where('shopId', '==', selectedShop.id)), (snap) => {
       setCategories(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'categories');
     });
 
     // Load Products
     const unsubProd = onSnapshot(query(collection(db, 'products'), where('shopId', '==', selectedShop.id)), (snap) => {
       setProducts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'products');
     });
 
     return () => {
@@ -120,6 +150,8 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
 
     const unsubOrders = onSnapshot(q, (snap) => {
       setCustomerOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'customer_orders');
     });
 
     return () => unsubOrders();
@@ -150,8 +182,11 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
         setCurrentCustomer({ id: custDoc.id, ...custDoc.data() });
         setStage('dashboard');
       } else {
-        // Customer not found, ask to register
-        setIsNewCustomer(true);
+        // Customer not found, self-registration is disabled
+        setLoginError(isBn 
+          ? "এই মোবাইল নম্বরটি নিবন্ধিত নয়। কাস্টমার অ্যাকাউন্ট তৈরির অনুমতি নেই। এক্সেস পেতে অনুগ্রহ করে মার্চেন্ট বা দোকানদারের সাথে যোগাযোগ করুন।" 
+          : "This mobile number is not registered. Self-registration is disabled. Please contact the merchant to be added as a customer for access."
+        );
       }
     } catch (err) {
       console.error(err);
@@ -215,7 +250,7 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
     setCart(prev => prev.filter(item => item.product.id !== productId));
   };
 
-  const cartTotal = cart.reduce((tot, item) => tot + (item.product.price * item.quantity), 0);
+  const cartTotal = cart.reduce((tot, item) => tot + ((Number(item.product.price) || 0) * item.quantity), 0);
 
   const handlePlaceOrder = async () => {
     if (cart.length === 0 || !currentCustomer || !selectedShop) return;
@@ -254,6 +289,17 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
     }
   };
 
+  const cleanInvoiceSearchKey = (input: string): string => {
+    let clean = input.trim();
+    // Strip common EN/BN prefixes (case-insensitive)
+    const prefixRegex = /^(view\s*receipt\s*:?|receipt\s*no\.?\s*:?|receipt\s*:?|invoice\s*no\.?\s*:?|inv\s*no\.?\s*:?|invoice\s*:?|inv\s*:?|নং\s*:?|ইনভয়েস\s*নং\s*:?|চালান\s*নং\s*:?|ইনভয়েস\s*:?|চালান\s*রশিদ\s*দেখুন|রশিদ\s*দেখুন|রশিদ\s*:?)/i;
+    clean = clean.replace(prefixRegex, '');
+    // Strip any emojis, brackets, colons, or other symbols except letters, numbers, spaces, Bengali characters, and hyphens (crucial for invoice ranges like SL-WR-)
+    clean = clean.replace(/[^\w\s\u0980-\u09FF\-]/gi, '');
+    // Final trim of leading/trailing whitespaces, underscores or hyphens
+    return clean.trim().replace(/^[\-\s_]+|[\-\s_]+$/g, '');
+  };
+
   const lookupInvoice = async () => {
     if (!invoiceSearchId.trim() || !selectedShop) return;
     setSearchingInvoice(true);
@@ -261,29 +307,88 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
     setLookupSale(null);
 
     try {
-      // Find invoice matches inside sales collection of selectedShop where standard fields (id, or invoice ID) matches.
-      const q = query(
-        collection(db, 'sales'),
-        where('shopId', '==', selectedShop.id)
-      );
-      const querySnapshot = await getDocs(q);
-      
-      const searchKey = invoiceSearchId.trim().toLowerCase();
-      const matchedSaleDoc = querySnapshot.docs.find(docSnapshot => {
-        const id = docSnapshot.id.toLowerCase();
-        const data = docSnapshot.data();
-        const customerPhoneSpec = (data.customerPhone || '').toLowerCase();
-        return id === searchKey || id.endsWith(searchKey) || id.includes(searchKey);
-      });
+      const searchKey = cleanInvoiceSearchKey(invoiceSearchId);
+      if (!searchKey) {
+        setLookupError(isBn ? "অনুগ্রহ করে একটি সঠিক ইনভয়েস নম্বর লিখুন।" : "Please enter a valid invoice number.");
+        return;
+      }
 
-      if (matchedSaleDoc) {
-        setLookupSale({ id: matchedSaleDoc.id, ...matchedSaleDoc.data() });
+      // Secure direct fetch of a single document by its precise document ID
+      let docRef = doc(db, 'sales', searchKey);
+      let docSnap = await getDoc(docRef);
+
+      // Try uppercase fall-back if exact key does not exist
+      if (!docSnap.exists()) {
+        const upperKey = searchKey.toUpperCase();
+        if (upperKey !== searchKey) {
+          const upperDocRef = doc(db, 'sales', upperKey);
+          docSnap = await getDoc(upperDocRef);
+        }
+      }
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.shopId?.toString().trim().toLowerCase() === selectedShop.id?.toString().trim().toLowerCase()) {
+          setLookupSale({ id: docSnap.id, ...data });
+        } else {
+          setLookupError(isBn ? "দুঃখিত, এই ইনভয়েস নম্বরটি পাওয়া যায়নি।" : "Sorry, this invoice number was not found.");
+        }
       } else {
         setLookupError(isBn ? "দুঃখিত, এই ইনভয়েস নম্বরটি পাওয়া যায়নি।" : "Sorry, this invoice number was not found.");
       }
     } catch (err) {
       console.error(err);
-      setLookupError("Error fetching invoice.");
+      const msg = err instanceof Error ? err.message : String(err);
+      setLookupError(isBn ? `ইনভয়েস লোড করতে সমস্যা হয়েছে: ${msg}` : `Error fetching invoice: ${msg}`);
+    } finally {
+      setSearchingInvoice(false);
+    }
+  };
+
+  const handleViewInvoiceDirect = async (invoiceId: string) => {
+    if (!selectedShop) return;
+    // Set search field properly cleaned
+    const cleanedId = cleanInvoiceSearchKey(invoiceId);
+    setInvoiceSearchId(cleanedId || invoiceId);
+    setActiveTab('invoice_tracker');
+    setSearchingInvoice(true);
+    setLookupError(null);
+    setLookupSale(null);
+
+    try {
+      const searchKey = cleanedId;
+      if (!searchKey) {
+        setLookupError(isBn ? "অনুগ্রহ করে একটি সঠিক ইনভয়েস নম্বর লিখুন।" : "Please enter a valid invoice number.");
+        return;
+      }
+
+      // Secure direct fetch of a single document by its precise document ID
+      let docRef = doc(db, 'sales', searchKey);
+      let docSnap = await getDoc(docRef);
+
+      // Try uppercase fall-back if exact key does not exist
+      if (!docSnap.exists()) {
+        const upperKey = searchKey.toUpperCase();
+        if (upperKey !== searchKey) {
+          const upperDocRef = doc(db, 'sales', upperKey);
+          docSnap = await getDoc(upperDocRef);
+        }
+      }
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.shopId?.toString().trim().toLowerCase() === selectedShop.id?.toString().trim().toLowerCase()) {
+          setLookupSale({ id: docSnap.id, ...data });
+        } else {
+          setLookupError(isBn ? "দুঃখিত, এই ইনভয়েস নম্বরটি পাওয়া যায়নি।" : "Sorry, this invoice number was not found.");
+        }
+      } else {
+        setLookupError(isBn ? "দুঃখিত, এই ইনভয়েস নম্বরটি পাওয়া যায়নি।" : "Sorry, this invoice number was not found.");
+      }
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setLookupError(isBn ? `ইনভয়েস লোড করতে সমস্যা হয়েছে: ${msg}` : `Error fetching invoice: ${msg}`);
     } finally {
       setSearchingInvoice(false);
     }
@@ -298,28 +403,13 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
 
   const filteredShops = shops.filter(s => {
     const q = searchShopQuery.trim().toLowerCase();
-    if (!q) return true; // Show all shops if empty
+    if (q.length < 6) return false;
 
     const codeMatch = s.shopCode?.toString().trim().toLowerCase() === q;
     const idMatch = s.id?.toString().trim().toLowerCase() === q;
     const shopIdMatch = s.shopId?.toString().trim().toLowerCase() === q;
 
-    // If query is exactly 6 characters, restrict strictly to exact match of shopCode or ID
-    if (q.length === 6) {
-      return codeMatch || idMatch || shopIdMatch;
-    }
-
-    // Direct check in case the merchant typed a longer/shorter exact shop ID
-    if (idMatch || shopIdMatch || codeMatch) {
-      return true;
-    }
-
-    // Otherwise, standard general soft match
-    const matchesName = s.name?.toLowerCase().includes(q);
-    const matchesAddress = s.address?.toLowerCase().includes(q);
-    const matchesCode = s.shopCode?.toString().toLowerCase().includes(q);
-
-    return matchesName || matchesAddress || matchesCode;
+    return codeMatch || idMatch || shopIdMatch;
   });
 
   return (
@@ -377,6 +467,20 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
         )}
       </header>
 
+      {/* Marquee Notice Banner */}
+      <div id="notice-marquee-banner" className="bg-amber-50 border-b border-amber-100 text-amber-800 text-xs font-bold py-2.5 px-4 shadow-inner overflow-hidden select-none">
+        <div className="max-w-7xl mx-auto flex items-center gap-3">
+          <span className="bg-amber-600 text-white text-[10px] uppercase font-black px-2 py-0.5 rounded shrink-0 animate-pulse">
+            {isBn ? "সতর্কবার্তা" : "Warning Notice"}
+          </span>
+          <marquee className="flex-1 font-bold text-xs" scrollamount="4" behavior="scroll" direction="left">
+            {isBn 
+              ? "পণ্যের দাম বাজার অনুযায়ী কম-বেশি হতে পারে এবং সব প্রোডাক্টের পর্যাপ্ত স্টক সবসময় নাও থাকতে পারে। দোকানদার চাইলে যেকোনো নির্দিষ্ট প্রোডাক্টের দাম পরিবর্তন করতে পারবেন, অথবা প্রোডাক্ট স্টক না থাকলে অর্ডারটি বাতিল (ক্যানসেল) করতে পারবেন।"
+              : "Product prices are subject to change and stock availability may vary. The merchant reserves the right to adjust prices or cancel items/orders if they are unavailable."}
+          </marquee>
+        </div>
+      </div>
+
       {/* Main Container */}
       <main className="flex-1 w-full max-w-7xl mx-auto p-4 md:p-6 lg:p-8 flex flex-col">
         
@@ -392,8 +496,8 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
               </h2>
               <p className="text-gray-500 mt-2.5 text-sm md:text-base">
                 {isBn 
-                  ? "যে দোকান থেকে সার্ভিস বা কেনাকাটা করতে চান, সেটি লিস্ট থেকে বেছে নিন।" 
-                  : "Select the specific corporate branch to start ordering or tracking products."}
+                  ? "যে দোকান থেকে সার্ভিস বা কেনাকাটা করতে চান, তার ৬ ডিজিটের শপ কোডটি লিখুন।" 
+                  : "Enter the 6-digit shop code of the partner branch to load their services."}
               </p>
             </div>
 
@@ -402,8 +506,9 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
               <input 
                 type="text"
-                placeholder={isBn ? "দোকানের নাম, ঠিকানা, বা শপ কোড লিখুন..." : "Search shop name, address, or code..."}
-                className="w-full pl-12 pr-4 py-4 rounded-2xl bg-white border border-gray-200 outline-none text-gray-900 shadow-sm focus:border-indigo-500 transition-colors font-medium text-sm"
+                maxLength={6}
+                placeholder={isBn ? "৬ ডিজিটের শপ কোড লিখুন (যেমন: ১২৩৪৫৬)..." : "Enter 6-digit shop code (e.g. 123456)..."}
+                className="w-full pl-12 pr-4 py-4 rounded-2xl bg-white border border-gray-200 outline-none text-gray-900 shadow-sm focus:border-indigo-500 transition-colors font-medium text-sm tracking-widest text-center"
                 value={searchShopQuery}
                 onChange={(e) => setSearchShopQuery(e.target.value)}
               />
@@ -411,9 +516,30 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
 
             {/* Shop List */}
             <div className="space-y-4">
-              {filteredShops.length === 0 ? (
-                <div className="p-8 text-center bg-white border border-gray-100 rounded-3xl shadow-sm text-gray-400 font-medium">
-                  {isBn ? "কোনো দোকান পাওয়া যায়নি।" : "No stores matching search found."}
+              {searchShopQuery.trim().length === 0 ? (
+                <div className="p-10 text-center bg-white border border-gray-100 rounded-3xl shadow-sm text-gray-400 font-semibold space-y-3 flex flex-col items-center animate-fade-in">
+                  <Hash className="w-8 h-8 text-indigo-400 animate-pulse" />
+                  <span className="text-sm">
+                    {isBn ? "অগ্রসর হতে দয়া করে ৬ ডিজিটের শপ কোডটি ইনপুট করুন।" : "Please enter the 6-digit shop code to view the merchant."}
+                  </span>
+                </div>
+              ) : searchShopQuery.trim().length < 6 ? (
+                <div className="p-10 text-center bg-white border border-gray-100 rounded-3xl shadow-sm text-amber-500 font-semibold space-y-3 flex flex-col items-center animate-fade-in">
+                  <div className="px-3 py-1 bg-amber-50 rounded-full text-xs font-black text-amber-600 font-mono animate-pulse">
+                    {searchShopQuery.trim().length} / 6
+                  </div>
+                  <span className="text-sm">
+                    {isBn ? "শপ কোড অবশ্যই ৬ ডিজিটের হতে হবে।" : "Shop code must be exactly 6 digits long."}
+                  </span>
+                </div>
+              ) : filteredShops.length === 0 ? (
+                <div className="p-10 text-center bg-white border border-gray-100 rounded-3xl shadow-sm text-rose-500 font-semibold space-y-3 flex flex-col items-center animate-fade-in">
+                  <AlertCircle className="w-8 h-8 text-rose-400" />
+                  <span className="text-sm leading-relaxed">
+                    {isBn 
+                      ? `"${searchShopQuery}" কোডের কোনো দোকান পাওয়া যায়নি। অনুগ্রহ করে সঠিক কোডটি পুনরায় চেক করুন।` 
+                      : `No store found for code "${searchShopQuery}". Please double check and try again.`}
+                  </span>
                 </div>
               ) : (
                 filteredShops.map((shop) => (
@@ -601,173 +727,211 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
             </div>
 
             {/* Dashboard Navigation Tabs */}
-            <div className="flex gap-2 p-1 bg-gray-200/60 rounded-2xl max-w-md w-full font-bold text-sm shadow-inner mt-2">
+            <div className="flex flex-wrap md:flex-nowrap gap-2 p-1 bg-gray-200/60 rounded-2xl max-w-xl w-full font-bold text-sm shadow-inner mt-2">
               {[
                 { id: 'shop', label: isBn ? 'অর্ডার করুন' : 'Shop / Order', icon: ShoppingBag },
+                { id: 'order_cart', label: isBn ? 'অর্ডার কার্ট' : 'Order Cart', icon: ShoppingCart },
                 { id: 'invoice_tracker', label: isBn ? 'ইনভয়েস ট্র্যাক' : 'Track Invoice', icon: Receipt },
                 { id: 'orders', label: isBn ? 'অর্ডার ইতিহাস' : 'Order History', icon: History }
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex-1 py-3 px-2 rounded-xl flex items-center justify-center gap-2 transition-all ${activeTab === tab.id ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  <tab.icon className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{tab.label}</span>
-                </button>
-              ))}
+              ].map(tab => {
+                const isActive = activeTab === tab.id;
+                const isCart = tab.id === 'order_cart';
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`flex-1 py-3 px-2 rounded-xl flex items-center justify-center gap-1.5 transition-all relative ${isActive ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-750'}`}
+                  >
+                    <tab.icon className="w-4 h-4 shrink-0" />
+                    <span className="truncate text-xs md:text-sm">{tab.label}</span>
+                    {isCart && cart.length > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-rose-550 text-white font-black text-[9px] w-4.5 h-4.5 flex items-center justify-center rounded-full border border-white animate-pulse">
+                        {cart.length}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
             {/* TAB CONTENT: PRODUCT SHOP / ONLINE ORDERING */}
             {activeTab === 'shop' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                
-                {/* Product Catalog Column */}
-                <div className="lg:col-span-2 space-y-6">
-                  
-                  {/* Shop filters & search */}
-                  <div className="flex flex-col md:flex-row md:items-center gap-4 bg-white p-4 rounded-3xl border border-gray-100 shadow-sm">
-                    {/* Catalog search */}
-                    <div className="relative flex-1">
-                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 w-4.5 h-4.5" />
-                      <input 
-                        type="text"
-                        placeholder={isBn ? "প্রোডাক্টের নাম খুঁজুন..." : "Filter catalog..."}
-                        className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-gray-50 border border-gray-100 shadow-inner text-sm text-gray-900 outline-none focus:border-indigo-500 font-medium"
-                        value={searchProductQuery}
-                        onChange={(e) => setSearchProductQuery(e.target.value)}
-                      />
-                    </div>
-
-                    {/* Category Selector */}
-                    <div className="flex gap-1.5 overflow-x-auto custom-scrollbar whitespace-nowrap pb-1.5 md:pb-0">
-                      <button
-                        onClick={() => setSelectedCategory('all')}
-                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${selectedCategory === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                      >
-                        {isBn ? "সব ক্যাটাগরি" : "All Products"}
-                      </button>
-                      {categories.map(cat => (
-                        <button
-                          key={cat.id}
-                          onClick={() => setSelectedCategory(cat.name)}
-                          className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${selectedCategory === cat.name ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                        >
-                          {cat.name}
-                        </button>
-                      ))}
-                    </div>
+              <div className="space-y-6 animate-fade-in">
+                {/* Shop filters & search */}
+                <div className="bg-white p-5 rounded-3xl border border-gray-105/90 shadow-sm">
+                  {/* Catalog search */}
+                  <div className="relative w-full">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 w-4.5 h-4.5" />
+                    <input 
+                      type="text"
+                      placeholder={isBn ? "প্রোডাক্টের নাম খুঁজুন..." : "Filter catalog..."}
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-gray-50 border border-gray-100 shadow-inner text-sm text-gray-905 outline-none focus:border-indigo-505 font-medium"
+                      value={searchProductQuery}
+                      onChange={(e) => setSearchProductQuery(e.target.value)}
+                    />
                   </div>
-
-                  {/* Product Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {filteredProducts.length === 0 ? (
-                      <div className="p-12 text-center bg-white border border-gray-100 rounded-3xl shadow-sm text-gray-400 font-semibold sm:col-span-2 text-sm">
-                        {isBn ? "কোনো প্রোডাক্ট পাওয়া যায়নি।" : "No matches found in store catalogs."}
-                      </div>
-                    ) : (
-                      filteredProducts.map(prod => (
-                        <div 
-                          key={prod.id}
-                          className="p-4 bg-white border border-gray-100 hover:border-indigo-100 rounded-3xl shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-4"
-                        >
-                          <div className="flex items-start gap-3">
-                            {/* Product Thumbnail with standard referrer policy */}
-                            <div className="w-16 h-16 bg-gray-50 border border-gray-100 rounded-2xl overflow-hidden shrink-0 flex items-center justify-center">
-                              {prod.imageUrl ? (
-                                <img 
-                                  src={prod.imageUrl} 
-                                  alt={prod.name} 
-                                  className="w-full h-full object-cover" 
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                <ShoppingBag className="w-6 h-6 text-gray-400" />
-                              )}
-                            </div>
-                            <div className="min-w-0">
-                              <span className="text-[10px] font-black text-indigo-500 uppercase tracking-wide px-1.5 py-0.5 bg-indigo-50/50 rounded-md">
-                                {prod.category}
-                              </span>
-                              <h3 className="font-bold text-gray-900 mt-1 truncate" title={prod.name}>{prod.name}</h3>
-                              <p className="text-sm font-black text-gray-500 mt-0.5">
-                                {prod.price} <span className="text-xs font-semibold">TK / {prod.unit || 'unit'}</span>
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between border-t border-gray-50 pt-3 mt-auto">
-                            {/* HIDE ACTUAL NUMERICAL STOCK COUNT as requested! */}
-                            <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-md ${prod.stock > 0 ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"}`}>
-                              {prod.stock > 0 
-                                ? (isBn ? "স্টকে উপলব্ধ" : "In Stock") 
-                                : (isBn ? "স্টকে নেই" : "Out of stock")}
-                            </span>
-
-                            <button
-                              disabled={prod.stock <= 0}
-                              onClick={() => addToCart(prod)}
-                              className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white disabled:bg-gray-100 disabled:text-gray-400 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>{isBn ? "যোগ করুন" : "Add"}</span>
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
                 </div>
 
-                {/* Shopping Cart Drawer / Summary Panel */}
-                <div className="space-y-6">
-                  <div className="p-6 bg-white border border-gray-100 rounded-3xl shadow-sm flex flex-col gap-6 sticky top-24">
-                    <div className="flex items-center justify-between border-b border-gray-50 pb-4">
-                      <div className="flex items-center gap-2">
-                        <ShoppingCart className="w-5 h-5 text-indigo-500" />
-                        <h3 className="font-black text-gray-900 text-base">{isBn ? "অর্ডার কার্ট" : "My Basket"}</h3>
+                {/* Info block if items added */}
+                {cart.length > 0 && (
+                  <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-indigo-600/10 text-indigo-600 rounded-xl">
+                        <ShoppingCart className="w-5 h-5 animate-bounce" />
                       </div>
-                      <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                        {cart.length} {isBn ? "আইটেম" : "items"}
-                      </span>
+                      <div>
+                        <p className="text-sm font-black text-indigo-950">
+                          {isBn ? `${cart.length} টি প্রোডাক্ট কার্টে যোগ করা হয়েছে!` : `${cart.length} items added to your cart!`}
+                        </p>
+                        <p className="text-xs text-indigo-600 font-extrabold mt-0.5">
+                          {isBn ? "অর্ডার সম্পন্ন করতে অর্ডার কার্ট পেইজে যান" : "Navigate to Order Cart to submit request."}
+                        </p>
+                      </div>
                     </div>
+                    <button
+                      onClick={() => setActiveTab('order_cart')}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl transition-all shadow-md shadow-indigo-150 inline-flex items-center gap-1.5 shrink-0"
+                    >
+                      <span>{isBn ? "কার্ট পেইজে যান" : "Go to Cart"}</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
 
-                    {/* Item list in basket */}
-                    {cart.length === 0 ? (
-                      <div className="py-12 text-center text-gray-400 font-medium flex flex-col items-center justify-center gap-3">
-                        <ShoppingBag className="w-10 h-10 text-gray-200" />
-                        <p className="text-sm">{isBn ? "অর্ডার করতে প্রোডাক্ট যোগ করুন।" : "Cart is currently empty."}</p>
+                {/* Product Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredProducts.length === 0 ? (
+                    <div className="p-12 text-center bg-white border border-gray-102 rounded-3xl shadow-sm text-gray-400 font-semibold lg:col-span-3 text-sm">
+                      {isBn ? "কোনো প্রোডাক্ট পাওয়া যায়নি।" : "No matches found in store catalogs."}
+                    </div>
+                  ) : (
+                    filteredProducts.map(prod => (
+                      <div 
+                        key={prod.id}
+                        className="p-5 bg-white border border-gray-100 hover:border-indigo-100 rounded-3xl shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-4"
+                      >
+                        <div className="flex items-start gap-4">
+                          {/* Product Thumbnail with standard referrer policy */}
+                          <div className="w-18 h-18 bg-gray-50 border border-gray-100 rounded-2xl overflow-hidden shrink-0 flex items-center justify-center">
+                            {prod.imageUrl ? (
+                              <img 
+                                src={prod.imageUrl} 
+                                alt={prod.name} 
+                                className="w-full h-full object-cover" 
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <ShoppingBag className="w-8 h-8 text-gray-200" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[10px] font-black text-indigo-500 uppercase tracking-wide px-2 py-0.5 bg-indigo-50/50 rounded-md">
+                              {prod.category}
+                            </span>
+                            <h3 className="font-bold text-gray-900 mt-1.5 text-base truncate" title={prod.name}>{prod.name}</h3>
+                            <p className="text-base font-black text-indigo-600 mt-1">
+                              {prod.price} <span className="text-xs font-semibold text-gray-400">TK / {prod.unit || 'unit'}</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-gray-50 pt-3.5 mt-auto">
+                          <button
+                            onClick={() => addToCart(prod)}
+                            className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 hover:shadow-sm"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>{isBn ? "যোগ করুন" : "Add"}</span>
+                          </button>
+                        </div>
                       </div>
-                    ) : (
-                      <div className="flex flex-col gap-4 max-h-64 overflow-y-auto pr-1">
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB CONTENT: ORDER CART */}
+            {activeTab === 'order_cart' && (
+              <div className="max-w-2xl mx-auto w-full animate-fade-in">
+                <div className="p-6 md:p-8 bg-white border border-gray-100 rounded-[2rem] shadow-sm flex flex-col gap-6">
+                  <div className="flex items-center justify-between border-b border-gray-50 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-indigo-55/75 text-indigo-600 rounded-xl flex items-center justify-center">
+                        <ShoppingCart className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-black text-gray-950 text-lg leading-none">{isBn ? "অর্ডার কার্ট" : "Order Cart"}</h3>
+                        <p className="text-xs text-gray-400 font-bold mt-1.5">{isBn ? "কার্টের বিবরণ চেক করে আপনার অর্ডারটি প্লেস করুন" : "Review your added products and place request"}</p>
+                      </div>
+                    </div>
+                    <span className="text-xs font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">
+                      {cart.length} {isBn ? "টি প্রোডাক্ট" : "items"}
+                    </span>
+                  </div>
+
+                  {/* Item list in basket */}
+                  {cart.length === 0 ? (
+                    <div className="py-20 text-center text-gray-400 font-medium flex flex-col items-center justify-center gap-4">
+                      <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center text-gray-300 animate-pulse">
+                        <ShoppingBag className="w-8 h-8" />
+                      </div>
+                      <div>
+                        <p className="text-base font-bold text-gray-800">{isBn ? "কার্ট একদম খালি!" : "Your cart is empty!"}</p>
+                        <p className="text-xs text-gray-400 mt-1">{isBn ? "অর্ডার করুন পেইজ থেকে প্রোডাক্ট আপনার কার্টে যোগ করুন।" : "Go back to Shop / Order to pick the products you need."}</p>
+                      </div>
+                      <button
+                        onClick={() => setActiveTab('shop')}
+                        className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all mt-2"
+                      >
+                        {isBn ? "প্রোডাক্ট যোগ করুন" : "Add some items"}
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-col gap-4 divide-y divide-gray-50 max-h-96 overflow-y-auto pr-1">
                         {cart.map(item => (
-                          <div key={item.product.id} className="flex items-center justify-between gap-3 text-sm">
-                            <div className="min-w-0 flex-1">
-                              <h4 className="font-bold text-gray-900 truncate">{item.product.name}</h4>
-                              <p className="text-xs font-bold text-gray-400 mt-0.5">
-                                {item.product.price} TK × {item.quantity} = {item.product.price * item.quantity} TK
-                              </p>
+                          <div key={item.product.id} className="pt-3.5 first:pt-0 flex items-center justify-between gap-4 text-sm">
+                            <div className="min-w-0 flex-1 flex items-center gap-3">
+                              {/* Thumbnail */}
+                              <div className="w-12 h-12 bg-gray-50 border border-gray-100 rounded-xl overflow-hidden shrink-0 flex items-center justify-center">
+                                {item.product.imageUrl ? (
+                                  <img 
+                                    src={item.product.imageUrl} 
+                                    alt={item.product.name} 
+                                    className="w-full h-full object-cover" 
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <ShoppingBag className="w-5 h-5 text-gray-300" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className="font-bold text-gray-900 truncate" title={item.product.name}>{item.product.name}</h4>
+                                <p className="text-xs font-black text-indigo-600 mt-1">
+                                  {formatVal(item.product.price)}{currencySuffix} × {formatVal(item.quantity)} = {formatVal(item.product.price * item.quantity)}{currencySuffix}
+                                </p>
+                              </div>
                             </div>
 
                             <div className="flex items-center gap-2">
                               <button 
                                 onClick={() => updateCartQuantity(item.product.id, -1)}
-                                className="p-1 hover:bg-gray-100 rounded-md text-gray-500 transition-colors"
+                                className="p-1 px-1.5 bg-gray-50 hover:bg-gray-100 rounded-md text-gray-500 border border-gray-200 transition-colors"
                               >
                                 <Minus className="w-3.5 h-3.5" />
                               </button>
-                              <span className="font-black text-gray-800 text-xs w-5 text-center">{item.quantity}</span>
+                              <span className="font-black text-gray-800 text-xs w-6 text-center">{formatVal(item.quantity)}</span>
                               <button 
                                 onClick={() => updateCartQuantity(item.product.id, 1)}
-                                className="p-1 hover:bg-gray-100 rounded-md text-gray-500 transition-colors"
+                                className="p-1 px-1.5 bg-gray-50 hover:bg-gray-100 rounded-md text-gray-500 border border-gray-200 transition-colors"
                               >
                                 <Plus className="w-3.5 h-3.5" />
                               </button>
                               
                               <button 
                                 onClick={() => removeFromCart(item.product.id)}
-                                className="p-1 hover:bg-rose-50 text-rose-500 hover:text-rose-600 rounded-lg transition-colors ml-1"
+                                className="p-1.5 hover:bg-rose-50 text-rose-500 hover:text-rose-600 rounded-lg transition-colors ml-1"
                                 title="Remove item"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -776,42 +940,65 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
                           </div>
                         ))}
                       </div>
-                    )}
 
-                    {cart.length > 0 && (
-                      <div className="space-y-4 pt-4 border-t border-gray-50">
+                      <div className="space-y-4 pt-6 border-t border-gray-100">
                         {/* Notes input */}
                         <div className="space-y-1.5">
-                          <label className="text-xs font-black text-gray-500 uppercase tracking-widest">{isBn ? "বিশেষ কোনো নির্দেশনা (ঐচ্ছিক)" : "Specific Notes (Optional)"}</label>
+                          <label className="text-xs font-black text-gray-500 uppercase tracking-widest">{isBn ? "विशेष কোনো নির্দেশনা (ঐচ্ছিক)" : "Specific Notes (Optional)"}</label>
                           <textarea 
-                            rows={2}
+                            rows={3}
                             placeholder={isBn ? "যেমন: জলদি ডেলিভারি প্রয়োজন..." : "e.g., Please deliver in morning..."}
-                            className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-xs font-semibold outline-none focus:border-indigo-500 text-gray-800"
+                            className="w-full px-4 py-3 rounded-xl bg-gray-55/40 border border-gray-200 text-xs font-semibold outline-none focus:border-indigo-500 text-gray-800 animate-fade-in"
                             value={orderNotes}
                             onChange={(e) => setOrderNotes(e.target.value)}
                           />
                         </div>
 
+                        {/* Price Details Summary for Enhanced Transparency */}
+                        <div className="bg-gray-50/75 rounded-2xl p-4 space-y-2 border border-gray-100 text-xs font-semibold text-gray-600 animate-fade-in">
+                          <p className="text-gray-400 font-extrabold uppercase tracking-wider text-[10px] mb-2 flex items-center gap-1.5">
+                            <ShoppingCart className="w-3 h-3 text-indigo-500" />
+                            <span>{isBn ? "মূল্যের বিবরণ ও হিসাব" : "Price Details Summary"}</span>
+                          </p>
+                          <div className="space-y-2 divide-y divide-gray-100/50">
+                            {cart.map((item, idx) => {
+                              const unitPrice = Number(item.product.price) || 0;
+                              const linePrice = unitPrice * item.quantity;
+                              return (
+                                <div key={idx} className="flex justify-between items-center gap-2 pt-2 first:pt-0 font-sans">
+                                  <span className="truncate text-gray-700 font-bold">{item.product.name}</span>
+                                  <span className="shrink-0 text-gray-950 font-black">
+                                    {formatVal(unitPrice)}{currencySuffix} × {formatVal(item.quantity)} = {formatVal(linePrice)}{currencySuffix}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="border-t border-dashed border-gray-200 mt-2.5 pt-2.5 flex justify-between items-center font-black text-gray-500 font-sans">
+                            <span>{isBn ? "কার্ট সাবটোটাল" : "Subtotal Value"}</span>
+                            <span>{formatVal(cartTotal)}{currencySuffix}</span>
+                          </div>
+                        </div>
+
                         {/* Order calculation breakdown */}
-                        <div className="flex items-center justify-between text-base font-black text-gray-900 pt-2">
+                        <div className="flex items-center justify-between text-base font-black text-gray-900 pt-3 border-t border-dashed border-gray-100">
                           <span>{isBn ? "মোট বিল" : "Grand Order Value"}</span>
-                          <span>{cartTotal} TK</span>
+                          <span className="text-xl text-indigo-600">{formatVal(cartTotal)}{currencySuffix}</span>
                         </div>
 
                         {/* Submit Button */}
                         <button
                           onClick={handlePlaceOrder}
                           disabled={placingOrder}
-                          className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
+                          className="w-full h-14 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-indigo-150 flex items-center justify-center gap-2 group text-sm"
                         >
-                          <CheckCircle2 className="w-4 h-4" />
+                          <CheckCircle2 className="w-5 h-5" />
                           <span>{placingOrder ? (isBn ? "অর্ডার সাবমিট হচ্ছে..." : "Submitting Order...") : (isBn ? "অর্ডার প্লেস করুন" : "Submit & Request Order")}</span>
                         </button>
                       </div>
-                    )}
-                  </div>
+                    </>
+                  )}
                 </div>
-
               </div>
             )}
 
@@ -829,6 +1016,11 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
                       className="w-full pl-12 pr-4 py-4 rounded-xl bg-gray-50 border border-gray-100 shadow-inner text-gray-950 font-bold outline-none focus:border-indigo-500"
                       value={invoiceSearchId}
                       onChange={(e) => setInvoiceSearchId(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !searchingInvoice && invoiceSearchId.trim()) {
+                          lookupInvoice();
+                        }
+                      }}
                     />
                   </div>
                   <button
@@ -898,74 +1090,97 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
                       <p className="text-gray-400 font-black text-xs uppercase tracking-widest mb-4">{isBn ? "ক্রয়কৃত আইটেমস" : "Itemized Pricing Records"}</p>
                       
                       <div className="divide-y divide-gray-50">
-                        {lookupSale.items?.map((item: any, idx: number) => (
-                          <div key={idx} className="py-3 flex items-center justify-between text-sm">
-                            <div className="min-w-0">
-                              <p className="font-bold text-gray-900 truncate">{item.productName}</p>
-                              <p className="text-xs font-semibold text-gray-400 mt-0.5">
-                                {item.price} TK × {item.quantity} {item.unit || 'unit'}
-                              </p>
+                        {lookupSale.items?.map((item: any, idx: number) => {
+                          const matchedProd = products.find(p => p.id === item.productId);
+                          const originalPrice = Number(item.originalPrice) || Number(matchedProd?.price) || Number(item.price) || 0;
+                          const price = Number(item.price) || originalPrice || 0;
+                          return (
+                            <div key={idx} className="py-3 flex items-center justify-between text-sm">
+                              <div className="min-w-0 font-sans">
+                                <p className="font-bold text-gray-900 truncate">{item.productName}</p>
+                                <p className="text-xs font-semibold text-gray-400 mt-0.5">
+                                  {formatVal(price)}{currencySuffix} × {formatVal(item.quantity)} {item.unit || 'unit'}
+                                </p>
+                              </div>
+                              <span className="font-black text-gray-950 text-right font-mono">
+                                {formatVal(price * item.quantity)}{currencySuffix}
+                              </span>
                             </div>
-                            <span className="font-black text-gray-950 text-right">
-                              {item.price * item.quantity} TK
-                            </span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
 
                     {/* FINANCIAL BILL BREAKDOWN DETAILS - matches user request perfectly! */}
-                    <div className="py-6 space-y-3 bg-gray-50/75 p-5 rounded-2xl mt-4">
+                    {(() => {
+                      const itemsList = lookupSale.items || [];
+                      const calculatedTotal = itemsList.reduce((sum: number, item: any) => {
+                        const matchedProd = products.find(p => p.id === item.productId);
+                        const originalPrice = Number(item.originalPrice) || Number(matchedProd?.price) || Number(item.price) || 0;
+                        const price = Number(item.price) || originalPrice || 0;
+                        return sum + (price * Number(item.quantity || 0));
+                      }, 0) || 0;
+                      const totalAmount = (isNaN(Number(lookupSale.totalAmount)) || Number(lookupSale.totalAmount) === 0) ? calculatedTotal : Number(lookupSale.totalAmount);
+                      const discount = Number(lookupSale.discount) || 0;
+                      const taxAmount = Number(lookupSale.taxAmount) || 0;
+                      const finalAmount = (isNaN(Number(lookupSale.finalAmount)) || Number(lookupSale.finalAmount) === 0) ? (totalAmount - discount + taxAmount) : Number(lookupSale.finalAmount);
+                      const previousBalance = Number(lookupSale.previousBalance) || 0;
+                      const paidAmount = Number(lookupSale.paidAmount) || 0;
+                      const dueAmount = (lookupSale.dueAmount !== undefined && !isNaN(Number(lookupSale.dueAmount))) ? Number(lookupSale.dueAmount) : (finalAmount - paidAmount);
+                      const grandTotalBalance = previousBalance + dueAmount;
                       
-                      {/* Products Subtotal / Total price of product */}
-                      <div className="flex justify-between text-sm text-gray-500 font-bold">
-                        <span>{isBn ? "প্রোডাক্টের সর্বমোট মূল্য" : "Products Cost Subtotal"}</span>
-                        <span>{lookupSale.totalAmount} TK</span>
-                      </div>
+                      return (
+                        <div className="py-6 space-y-3 bg-gray-50/75 p-5 rounded-2xl mt-4 font-sans">
+                          {/* Products Subtotal / Total price of product */}
+                          <div className="flex justify-between text-sm text-gray-500 font-bold">
+                            <span>{isBn ? "প্রোডাক্টের সর্বমোট মূল্য" : "Products Cost Subtotal"}</span>
+                            <span className="font-mono">{formatVal(totalAmount)}{currencySuffix}</span>
+                          </div>
 
-                      {/* Discount amount */}
-                      {lookupSale.discount > 0 && (
-                        <div className="flex justify-between text-sm text-rose-500 font-bold">
-                          <span>{isBn ? "ছাড় বা ডিসকাউন্ট (-)" : "Special Discount (-)"}</span>
-                          <span>{lookupSale.discount} TK</span>
+                          {/* Discount amount */}
+                          {discount > 0 && (
+                            <div className="flex justify-between text-sm text-rose-500 font-bold">
+                              <span>{isBn ? "ছাড় বা ডিসকাউন্ট (-)" : "Special Discount (-)"}</span>
+                              <span className="font-mono">{formatVal(discount)}{currencySuffix}</span>
+                            </div>
+                          )}
+
+                          {/* VAT / Taxes */}
+                          {taxAmount > 0 && (
+                            <div className="flex justify-between text-sm text-gray-500 font-bold">
+                              <span>{isBn ? "ট্যাক্স বা ভ্যাট (+)" : "Applicable Itemized VAT (+)"}</span>
+                              <span className="font-mono">{formatVal(taxAmount)}{currencySuffix}</span>
+                            </div>
+                          )}
+
+                          {/* Current Invoice Total (finalAmount) - "টোটাল বিল কত" */}
+                          <div className="flex justify-between text-sm font-black text-gray-900 border-b border-dashed border-gray-200 pb-3">
+                            <span>{isBn ? "বর্তমান ইনভয়েস বিল" : "Current Invoice Total"}</span>
+                            <span className="font-mono">{formatVal(finalAmount)}{currencySuffix}</span>
+                          </div>
+
+                          {/* Previous customer due - "আগের কত টাকা বাকি" */}
+                          <div className="flex justify-between text-sm text-amber-600 font-bold">
+                            <span>{isBn ? "পূর্বের বাকি বা বকেয়া" : "Previous Outstanding Due"}</span>
+                            <span className="font-mono">{formatVal(previousBalance)}{currencySuffix}</span>
+                          </div>
+
+                          {/* Currently Paid in current transaction - "বর্তমানে কত টাকা দিয়েছে" */}
+                          <div className="flex justify-between text-sm text-emerald-600 font-black">
+                            <span>{isBn ? "বর্তমানে পরিশোধ করা টাকা (-)" : "Amount Paid Current (-)"}</span>
+                            <span className="font-mono">{formatVal(paidAmount)}{currencySuffix}</span>
+                          </div>
+
+                          {/* Grand total outstanding remains - "সব মিলে কত টাকা বাকি" */}
+                          <div className="flex justify-between text-base font-black text-gray-950 pt-2 border-t border-gray-200">
+                            <span>{isBn ? "সব মিলিয়ে মোট বকেয়া (হাল বকেয়া)" : "Final Remaining Balance Due"}</span>
+                            <span className="text-rose-600 font-mono">
+                              {formatVal(grandTotalBalance)}{currencySuffix}
+                            </span>
+                          </div>
                         </div>
-                      )}
-
-                      {/* VAT / Taxes */}
-                      {lookupSale.taxAmount > 0 && (
-                        <div className="flex justify-between text-sm text-gray-500 font-bold">
-                          <span>{isBn ? "ট্যাক্স বা ভ্যাট (+)" : "Applicable Itemized VAT (+)"}</span>
-                          <span>{lookupSale.taxAmount} TK</span>
-                        </div>
-                      )}
-
-                      {/* Current Invoice Total (finalAmount) - "টোটাল বিল কত" */}
-                      <div className="flex justify-between text-sm font-black text-gray-900 border-b border-dashed border-gray-200 pb-3">
-                        <span>{isBn ? "বর্তমান ইনভয়েস বিল" : "Current Invoice Total"}</span>
-                        <span>{lookupSale.finalAmount} TK</span>
-                      </div>
-
-                      {/* Previous customer due - "আগের কত টাকা বাকি" */}
-                      <div className="flex justify-between text-sm text-amber-600 font-bold">
-                        <span>{isBn ? "পূর্বের বাকি বা বকেয়া" : "Previous Outstanding Due"}</span>
-                        <span>{lookupSale.previousBalance || 0} TK</span>
-                      </div>
-
-                      {/* Currently Paid in current transaction - "বর্তমানে কত টাকা দিয়েছে" */}
-                      <div className="flex justify-between text-sm text-emerald-600 font-black">
-                        <span>{isBn ? "বর্তমানে পরিশোধ করা টাকা (-)" : "Amount Paid Current (-)"}</span>
-                        <span>{lookupSale.paidAmount || 0} TK</span>
-                      </div>
-
-                      {/* Grand total outstanding remains - "সব মিলে কত টাকা বাকি" */}
-                      <div className="flex justify-between text-base font-black text-gray-950 pt-2 border-t border-gray-200">
-                        <span>{isBn ? "সব মিলিয়ে মোট বকেয়া (হাল বকেয়া)" : "Final Remaining Balance Due"}</span>
-                        <span className="text-rose-600">
-                          {((lookupSale.previousBalance || 0) + (lookupSale.dueAmount || 0))} TK
-                        </span>
-                      </div>
-
-                    </div>
+                      );
+                    })()}
 
                     {/* Friendly printable note footer */}
                     <div className="text-center pt-6 mt-6 border-t border-dashed border-gray-100 text-xs text-gray-400 font-semibold leading-relaxed">
@@ -994,28 +1209,46 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
                       {customerOrders.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map(order => (
                         <div key={order.id} className="py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className="font-mono font-black text-gray-900 text-sm">#{order.orderNumber}</span>
                               <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${order.status === 'pending' ? 'bg-amber-100 text-amber-700' : order.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
                                 {order.status === 'pending' ? (isBn ? 'পেন্ডিং' : 'Pending') : order.status === 'approved' ? (isBn ? 'অনুমোদিত' : 'Approved') : (isBn ? 'বাতিলকৃত' : 'Cancelled')}
                               </span>
+                              {order.status === 'approved' && (
+                                <span className="text-[10px] font-black uppercase bg-indigo-100 text-indigo-700 px-2.5 py-0.5 rounded-full font-mono">
+                                  {isBn ? `ইনভয়েস নং: ${order.invoiceNumber || 'লোডিং...'}` : `Invoice No: ${order.invoiceNumber || 'Loading...'}`}
+                                </span>
+                              )}
                             </div>
                             <p className="text-xs text-gray-400 font-semibold mt-1">
                               {new Date(order.timestamp).toLocaleString()}
-                            </p>
-                            <p className="text-xs font-bold text-gray-500 mt-2">
-                              {order.items?.map((it: any) => `${it.productName} (${it.quantity}X)`).join(', ')}
                             </p>
                             {order.notes && (
                               <p className="text-xs text-gray-400 italic mt-1.5 bg-gray-50 px-2 py-1 rounded">
                                 * {order.notes}
                               </p>
                             )}
+                            {order.invoiceNumber && (
+                              <div className="mt-2.5">
+                                <button
+                                  onClick={() => handleViewInvoiceDirect(order.invoiceNumber)}
+                                  className="text-[10.5px] font-black text-indigo-600 hover:text-indigo-800 hover:underline bg-indigo-50 hover:bg-indigo-100 rounded border border-indigo-100 px-2.5 py-1 inline-flex items-center gap-1.5 font-mono transition-all"
+                                >
+                                  📄 {isBn ? "চালান রশিদ দেখুন" : "View Receipt"} ({order.invoiceNumber})
+                                </button>
+                              </div>
+                            )}
                           </div>
 
                           <div className="text-left sm:text-right">
                             <p className="text-xs text-gray-400 font-black uppercase tracking-wider">{isBn ? "অর্ডার বিল" : "Order Value"}</p>
-                            <p className="text-lg font-black text-indigo-600 mt-1">{order.totalAmount} TK</p>
+                            {order.status === 'approved' ? (
+                              <p className="text-lg font-black text-indigo-600 mt-1">{order.totalAmount} TK</p>
+                            ) : (
+                              <p className="text-xs font-bold text-amber-600 mt-1 italic">
+                                {isBn ? "কনফার্মেশনের অপেক্ষায়" : "Awaiting Confirmation"}
+                              </p>
+                            )}
                           </div>
                         </div>
                       ))}

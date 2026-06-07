@@ -65,6 +65,9 @@ export const NetworkConsole: React.FC = () => {
       });
       setMerchants(list);
       setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'shops');
+      setLoading(false);
     });
 
     return () => unsub();

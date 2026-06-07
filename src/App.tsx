@@ -65,6 +65,7 @@ import {
   RefreshCw,
   RotateCcw,
   Sparkles,
+  Zap,
   Mic,
   MicOff,
   Barcode,
@@ -484,6 +485,8 @@ const SYSTEM_TRANSLATIONS = {
     totalExpenses: 'Total Expenses',
     loginSubtitleMerchant: 'Use your Google account to access your merchant dashboard.',
     loginSubtitleStaff: 'Use your company provided credentials to access operations.',
+    shopCode: 'Shop Code',
+    shopCodePlaceholder: 'Enter unique shop code',
     fullScreenOn: 'Full Screen On',
     fullScreenOff: 'Leave Full Screen',
     downloadAndroid: 'Download Android App',
@@ -588,6 +591,8 @@ const SYSTEM_TRANSLATIONS = {
     totalExpenses: 'মোট খরচ',
     loginSubtitleMerchant: 'লগইন করতে আপনার গুগল একাউন্ট ব্যবহার করুন।',
     loginSubtitleStaff: 'আপনার কোম্পানি থেকে দেওয়া আইডি দিয়ে লগইন করুন।',
+    shopCode: 'দোকান কোড',
+    shopCodePlaceholder: 'ইউনিক দোকান কোড প্রবেশ করান',
     fullScreenOn: 'ফুল স্ক্রিন করুন',
     fullScreenOff: 'ফুল স্ক্রিন বন্ধ করুন',
     downloadAndroid: 'অ্যান্ড্রয়েড অ্যাপ ডাউনলোড',
@@ -684,6 +689,8 @@ const SYSTEM_TRANSLATIONS = {
     fullScreenOff: 'خروج من ملء الشاشة',
     loginSubtitleMerchant: 'استخدم حساب Google للوصول إلى لوحة تحكم التاجر.',
     loginSubtitleStaff: 'استخدم بيانات الاعتماد المقدمة من شركتك للوصول إلى العمليات.',
+    shopCode: 'رمز المتجر',
+    shopCodePlaceholder: 'أدخل رمز المتجر الفريد',
     downloadAndroid: 'تنزيل تطبيق أندرويد',
     downloadDesktop: 'تنزيل تطبيق سطح المكتب',
   }
@@ -704,6 +711,8 @@ interface Product {
   department?: string;
   warehouse?: string;
   company?: string;
+  brand?: string;
+  damaged?: number;
   imageUrl?: string;
   warranty?: string;
 }
@@ -724,6 +733,22 @@ interface CartItem extends Product {
   quantity: number;
   originalPrice: number;
   discountedPrice: number;
+}
+
+export interface Supplier {
+  id: string;
+  shopId?: string;
+  company: string;
+  brand: string;
+  srName: string;
+  srPhone: string;
+  srVisitDay: string;
+  deliveryName: string;
+  deliveryPhone: string;
+  deliveryVisitDay: string;
+  category: string;
+  status: string;
+  productCount: number;
 }
 
 interface Sale {
@@ -2965,6 +2990,7 @@ export default function App() {
     return null;
   });
   const [loading, setLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -3203,6 +3229,7 @@ export default function App() {
   // Auth Form State
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [loginShopCode, setLoginShopCode] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [loginMode, setLoginMode] = useState<'merchant' | 'staff'>('merchant');
   
@@ -3341,6 +3368,7 @@ export default function App() {
         setUser(null);
         setIsOnboarded(null);
       }
+      setAuthChecked(true);
       setLoading(false);
     });
 
@@ -3352,6 +3380,7 @@ export default function App() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [customerOrders, setCustomerOrders] = useState<any[]>([]);
   const [shops, setShops] = useState<any[]>([]);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
@@ -3372,7 +3401,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isMasterAdmin) {
+    if (!authChecked || !isMasterAdmin) {
       setShops([]);
       return;
     }
@@ -3382,7 +3411,7 @@ export default function App() {
     }, (err) => console.error("Shops sync error", err));
 
     return () => unsubShops();
-  }, [user, isMasterAdmin]);
+  }, [user, isMasterAdmin, authChecked]);
 
   const handleOnboardingComplete = async (formData: any) => {
     try {
@@ -3493,6 +3522,7 @@ export default function App() {
     setSales([]);
     setCustomers([]);
     setCategories([]);
+    setSuppliers([]);
     setCustomerOrders([]);
     setEmployees([]);
     setExpenses([]);
@@ -3708,12 +3738,13 @@ export default function App() {
   useEffect(() => {
     (window as any)._currentShopId = user?.shopId || null;
     
-    if (!user || !user.shopId || (!isMasterAdmin && isOnboarded !== true)) {
+    if (!authChecked || !user || !user.shopId || (!isMasterAdmin && isOnboarded !== true)) {
       setAppUsers([]);
       setProducts([]);
       setSales([]);
       setCustomers([]);
       setCategories([]);
+      setSuppliers([]);
       setCustomerOrders([]);
       setEmployees([]);
       setExpenses([]);
@@ -3789,6 +3820,10 @@ export default function App() {
       setCategories(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category)));
     }, (err) => console.error("Categories sync error", err));
 
+    const unsubSuppliers = onSnapshot(query(collection(db, 'suppliers'), where('shopId', '==', currentShopId)), (snapshot) => {
+      setSuppliers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Supplier)));
+    }, (err) => console.error("Suppliers sync error", err));
+
     const unsubExpenses = onSnapshot(query(collection(db, 'expenses'), where('shopId', '==', currentShopId)), (snapshot) => {
       setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense)));
     }, (err) => console.error("Expenses sync error", err));
@@ -3851,6 +3886,7 @@ export default function App() {
       unsubStock();
       unsubCustomers();
       unsubCategories();
+      unsubSuppliers();
       unsubExpenses();
       unsubInvestments();
       unsubStaffSalaries();
@@ -3863,7 +3899,7 @@ export default function App() {
       unsubCustomerOrders();
       unsubWarrantyRecords();
     };
-  }, [user, isMasterAdmin, isOnboarded]);
+  }, [user, isMasterAdmin, isOnboarded, authChecked]);
 
   const handleAddNote = async (text: string, color: string, extra?: { priority?: string, dueDate?: string }) => {
     try {
@@ -3916,9 +3952,37 @@ export default function App() {
     setLoading(true);
     
     try {
+      // 1. Fetch the shop matching the entered shopCode
+      const shopQuery = query(
+        collection(db, 'shops'),
+        where('shopCode', '==', loginShopCode.trim())
+      );
+      const shopSnapshot = await getDocs(shopQuery);
+      if (shopSnapshot.empty) {
+        setAuthError(st('loginTitle') === 'Business Management Suite' ? "Invalid Shop Code" : "ভুল দোকান কোড");
+        setLoading(false);
+        return;
+      }
+      const foundShop = shopSnapshot.docs[0];
+      const foundShopId = foundShop.id;
+
+      // 2. Log in using username and password
       const email = `${username}@bismillahstore.local`;
-      await signInWithEmailAndPassword(auth, email, password);
-      // Profile will be fetched and user state set by onAuthStateChanged
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const firebaseUser = userCredential.user;
+
+      // 3. Document check for user's shopId matching foundShopId
+      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+      if (!userDoc.exists() || userDoc.data().shopId !== foundShopId) {
+        await signOut(auth);
+        setAuthError(st('loginTitle') === 'Business Management Suite' ? "User does not belong to this shop" : "ব্যবহারকারী এই দোকানের অন্তর্ভুক্ত নয়");
+        setLoading(false);
+        return;
+      }
+
+      setUsername('');
+      setPassword('');
+      setLoginShopCode('');
     } catch (authErr: any) {
       console.warn("Firebase Auth failed for staff:", authErr);
       if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/wrong-password' || authErr.code === 'auth/invalid-credential') {
@@ -4123,7 +4187,8 @@ export default function App() {
     walkInName: '',
     walkInPhone: '',
     paidAmount: 0,
-    paymentMethod: 'cash' as 'cash' | 'due'
+    paymentMethod: 'cash' as 'cash' | 'due',
+    orderId: ''
   });
 
   // Automatic Customer Selection
@@ -4223,6 +4288,17 @@ export default function App() {
         await setDoc(doc(db, 'sales', customId), saleData);
         finalSale = { ...saleData, id: customId } as Sale;
       }
+
+      if (checkoutData.orderId && isOnline) {
+        try {
+          const orderRef = doc(db, 'customer_orders', checkoutData.orderId);
+          await updateDoc(orderRef, {
+            invoiceNumber: finalSale.id
+          });
+        } catch (oErr) {
+          console.error("Failed to link invoice to customer order:", oErr);
+        }
+      }
       
       // Apply new sale effects locally/immediately if needed, but for now we rely on DB sync
       if (isOnline) {
@@ -4269,7 +4345,7 @@ export default function App() {
       setCart([]);
       setDiscount(0);
       setTaxRate(0);
-      setCheckoutData({ customerId: '', walkInName: '', walkInPhone: '', paidAmount: 0, paymentMethod: 'cash' });
+      setCheckoutData({ customerId: '', walkInName: '', walkInPhone: '', paidAmount: 0, paymentMethod: 'cash', orderId: '' });
       setEditingSale(null);
       setShowReceiptModal(true);
 
@@ -4425,7 +4501,8 @@ export default function App() {
       walkInName: !sale.customerId ? (sale.customerName || '') : '',
       walkInPhone: !sale.customerId ? (sale.customerPhone || '') : '',
       paidAmount: sale.paidAmount || 0,
-      paymentMethod: sale.paymentMethod || 'cash'
+      paymentMethod: sale.paymentMethod || 'cash',
+      orderId: ''
     });
     setNotification({ message: `Editing Invoice #${sale.id}`, type: 'info' });
   };
@@ -4463,6 +4540,37 @@ export default function App() {
       setNotification({ message: 'Salary record moved to Recycle Bin', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'staff_salaries');
+    }
+  };
+
+  const handleAddSupplier = async (newSupplier: Omit<Supplier, 'id'>): Promise<string | undefined> => {
+    try {
+      if (!user?.shopId) return;
+      const docRef = await addDoc(collection(db, 'suppliers'), { ...newSupplier, shopId: user.shopId });
+      setNotification({ message: 'Supplier added successfully', type: 'success' });
+      return docRef.id;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'suppliers');
+    }
+  };
+
+  const handleUpdateSupplier = async (id: string, field: string, value: any) => {
+    try {
+      if (!user?.shopId) return;
+      await updateDoc(doc(db, 'suppliers', id), { [field]: value });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'suppliers');
+    }
+  };
+
+  const handleDeleteSupplier = async (id: string, supplier: Supplier) => {
+    try {
+      if (!user?.shopId) return;
+      await moveToRecycleBin('supplier', id, supplier, user.shopId);
+      await deleteDoc(doc(db, 'suppliers', id));
+      setNotification({ message: 'Supplier deleted successfully', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'suppliers');
     }
   };
 
@@ -4647,7 +4755,8 @@ export default function App() {
         walkInName: order.customerName,
         walkInPhone: order.customerPhone,
         paidAmount: order.totalAmount,
-        paymentMethod: 'cash'
+        paymentMethod: 'cash',
+        orderId: order.id
       });
 
       setActiveTab('pos');
@@ -4872,13 +4981,25 @@ export default function App() {
 
               <div className="flex p-1.5 bg-gray-100 rounded-2xl mb-8 font-semibold text-sm">
                 <button 
-                  onClick={() => setLoginMode('merchant')}
+                  onClick={() => {
+                    setLoginMode('merchant');
+                    setAuthError(null);
+                    setUsername('');
+                    setPassword('');
+                    setLoginShopCode('');
+                  }}
                   className={`flex-1 py-3 rounded-xl transition-all duration-300 ${loginMode === 'merchant' ? 'bg-white text-indigo-600 shadow-md' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   {st('merchantLogin')}
                 </button>
                 <button 
-                  onClick={() => setLoginMode('staff')}
+                  onClick={() => {
+                    setLoginMode('staff');
+                    setAuthError(null);
+                    setUsername('');
+                    setPassword('');
+                    setLoginShopCode('');
+                  }}
                   className={`flex-1 py-3 rounded-xl transition-all duration-300 ${loginMode === 'staff' ? 'bg-white text-indigo-600 shadow-md' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   {st('staffLogin')}
@@ -4930,6 +5051,21 @@ export default function App() {
                     </div>
 
                     <form onSubmit={handleAuth} className="space-y-5">
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-gray-700 ml-1 uppercase tracking-tight">{st('shopCode')}</label>
+                        <div className="relative group">
+                          <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-indigo-600 transition-colors" />
+                          <input 
+                            type="text" 
+                            required 
+                            className="w-full pl-12 pr-4 py-4 rounded-2xl bg-gray-50 border-2 border-transparent focus:border-indigo-600 focus:bg-white transition-all outline-none text-gray-900 font-medium"
+                            placeholder={st('shopCodePlaceholder')}
+                            value={loginShopCode}
+                            onChange={(e) => setLoginShopCode(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
                       <div className="space-y-2">
                         <label className="text-sm font-bold text-gray-700 ml-1 uppercase tracking-tight">{st('username')}</label>
                         <div className="relative group">
@@ -5095,7 +5231,7 @@ export default function App() {
               ]},
               { id: 'inventory', label: 'inventory_group', items: [
                 { id: 'inventory', icon: Package, label: st('inventory'), roles: ['admin', 'manager', 'assistant_manager'], color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100' },
-                { id: 'category', icon: Tag, label: st('category'), roles: ['admin', 'manager'], color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100' },
+                // { id: 'category', icon: Tag, label: st('category'), roles: ['admin', 'manager'], color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100' },
                 { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['admin', 'manager'], color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
                 { id: 'supplier', icon: Users, label: st('supplier'), roles: ['admin', 'manager'], color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100' },
                 { id: 'barcode', icon: Barcode, label: st('barcode'), roles: ['admin', 'manager'], color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-100' },
@@ -5249,9 +5385,12 @@ export default function App() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2 px-4 py-2 bg-emerald-100/60 text-emerald-700 rounded-2xl text-xs font-bold ring-1 ring-emerald-200">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                  {systemLang === 'bn' ? 'সিস্টেম অনলাইন' : systemLang === 'ar' ? 'النظام متصل' : 'System Online'}
+                <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-2xl text-xs font-black tracking-wide border border-emerald-200/60 shadow-sm shadow-emerald-50/20 hover:bg-emerald-100/30 transition-all">
+                  <div className="relative flex h-2.5 w-2.5 items-center justify-center">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                  </div>
+                  <span>{systemLang === 'bn' ? 'সিস্টেম অনলাইন' : systemLang === 'ar' ? 'النظام متصل' : 'System Online'}</span>
                 </div>
               </div>
             </div>
@@ -5487,7 +5626,7 @@ export default function App() {
                   setCart([]);
                   setDiscount(0);
                   setTaxRate(0);
-                  setCheckoutData({ customerId: '', paidAmount: 0, paymentMethod: 'cash' });
+                  setCheckoutData({ customerId: '', walkInName: '', walkInPhone: '', paidAmount: 0, paymentMethod: 'cash', orderId: '' });
                 }}
                 settings={dynamicSettings}
                 setNotification={setNotification}
@@ -5520,6 +5659,7 @@ export default function App() {
                 setScannerMode={setScannerMode}
                 setIsScannerOpen={setIsScannerOpen}
                 user={user}
+                suppliers={suppliers}
               />
             )}
             {activeTab === 'category' && (
@@ -5558,6 +5698,7 @@ export default function App() {
             {activeTab === 'customer_orders' && (
               <SellerOrdersView 
                 orders={customerOrders} 
+                products={products}
                 lang={dynamicSettings.systemLanguage || 'bn'} 
                 onLoadToPOS={handleLoadOrderToPOS} 
               />
@@ -5608,6 +5749,10 @@ export default function App() {
               <SupplierPage 
                 products={products}
                 settings={dynamicSettings}
+                suppliers={suppliers}
+                onAddSupplier={handleAddSupplier}
+                onUpdateSupplier={handleUpdateSupplier}
+                onDeleteSupplier={handleDeleteSupplier}
               />
             )}
             {activeTab === 'activation_code' && <ActivationCodePage />}
@@ -8986,74 +9131,27 @@ function LoanManagement({ products, customers, settings }: { products: Product[]
   );
 }
 
-function SupplierPage({ products, settings }: { products: Product[], settings: ShopSettings }) {
+function SupplierPage({ products, settings, suppliers, onAddSupplier, onUpdateSupplier, onDeleteSupplier }: { 
+  products: Product[], 
+  settings: ShopSettings,
+  suppliers: Supplier[],
+  onAddSupplier: (s: Omit<Supplier, 'id'>) => Promise<string | undefined>,
+  onUpdateSupplier: (id: string, field: string, val: any) => void,
+  onDeleteSupplier: (id: string, supplier: Supplier) => void
+}) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState('vendors'); // New state
   const theme = PAGE_THEMES.supplier;
 
-  const suppliers = useMemo(() => {
-    return [
-      {
-        id: 'S1',
-        company: 'Samsung Electronics',
-        brand: 'Samsung',
-        srName: 'Kazi Nazrul',
-        srPhone: '01711223344',
-        category: 'Electronics',
-        status: 'Active',
-        productCount: 124
-      },
-      {
-        id: 'S2',
-        company: 'Xiaomi Global',
-        brand: 'Xiaomi',
-        srName: 'Rahim Khan',
-        srPhone: '01822334455',
-        category: 'Smartphones',
-        status: 'Active',
-        productCount: 450
-      },
-      {
-        id: 'S3',
-        company: 'Sony Corporation',
-        brand: 'Sony',
-        srName: 'Tanvir Hasan',
-        srPhone: '01933445566',
-        category: 'Audio/Visual',
-        status: 'Active',
-        productCount: 82
-      },
-      {
-        id: 'S4',
-        company: 'Apple Inc',
-        brand: 'iPhone',
-        srName: 'Imran Bashar',
-        srPhone: '01644556677',
-        category: 'Premium Mobile',
-        status: 'Blocked',
-        productCount: 22
-      },
-      {
-        id: 'S5',
-        company: 'Oppo Bangladesh',
-        brand: 'Oppo',
-        srName: 'Mahir Faisal',
-        srPhone: '01511223344',
-        category: 'Mobile Devices',
-        status: 'Active',
-        productCount: 95
-      },
-      {
-        id: 'S6',
-        company: 'Walton Hi-Tech',
-        brand: 'Walton',
-        srName: 'Sajib Ali',
-        srPhone: '01311223344',
-        category: 'Home Appliances',
-        status: 'Active',
-        productCount: 310
-      }
-    ];
-  }, []);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
+  const [selectedBrand, setSelectedBrand] = useState<string>('');
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [newBrandId, setNewBrandId] = useState<string | null>(null);
+
+  const updateSupplier = (id: string, field: string, value: string) => {
+    onUpdateSupplier(id, field, value);
+  };
 
   const filtered = suppliers.filter(s => 
     s.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -9082,6 +9180,27 @@ function SupplierPage({ products, settings }: { products: Product[], settings: S
       }
     }
   };
+  
+  const TabButton = ({ name, label, description }: { name: string, label: string, description: string }) => (
+    <div className="relative group/tooltip flex-shrink-0">
+      <button
+        onClick={() => setActiveTab(name)}
+        className={`px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-300 transform hover:scale-[1.03] active:scale-95 cursor-pointer basis-auto ${
+          activeTab === name 
+            ? `bg-${theme.primary} text-white shadow-lg` 
+            : 'bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-700'
+        }`}
+      >
+        {label}
+      </button>
+      {/* Pristine Modern Tooltip */}
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3.5 px-4 py-2.5 bg-slate-950/95 border border-slate-800 backdrop-blur-md text-white text-[9px] font-black uppercase tracking-[0.15em] rounded-2xl shadow-2xl opacity-0 pointer-events-none group-hover/tooltip:opacity-100 group-hover/tooltip:pointer-events-auto transition-all duration-300 transform scale-95 translate-y-2 group-hover/tooltip:scale-100 group-hover/tooltip:translate-y-0 whitespace-nowrap z-50 flex flex-col items-center gap-1 min-w-[220px] text-center">
+        <span className="text-indigo-400 font-black tracking-[0.2em]">{label}</span>
+        <span className="text-[8px] text-slate-300 font-bold normal-case tracking-normal leading-normal">{description}</span>
+        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-950/95" />
+      </div>
+    </div>
+  );
 
   return (
     <motion.div 
@@ -9099,32 +9218,65 @@ function SupplierPage({ products, settings }: { products: Product[], settings: S
             <Building2 className={`w-8 h-8 text-${theme.primary}`} />
           </div>
           <div>
-            <h2 className="text-3xl font-black text-gray-900 uppercase tracking-tight">Supplier Matrix</h2>
+            <h2 className="text-3xl font-black text-gray-900 uppercase tracking-tight">Supplier Management</h2>
             <div className="flex items-center gap-2 mt-2">
               <div className={`w-2 h-2 bg-${theme.primary.split('-')[0]}-500 rounded-full animate-pulse`}></div>
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Global supply chain & vendor relationship terminal</p>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Master vendor & logistics control terminal</p>
             </div>
           </div>
         </div>
 
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className={`flex items-center gap-3 px-8 py-4 bg-${theme.primary} text-white rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl ${theme.shadow} hover:bg-black transition-all`}
-        >
-          <UserPlus className="w-4 h-4" />
-          Onboard Vendor
-        </motion.button>
+        <div className="relative group/tooltip">
+          <motion.button
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={async () => {
+              const newSupplier = {
+                company: 'New Company',
+                brand: 'New Brand',
+                srName: '',
+                srPhone: '',
+                srVisitDay: '',
+                deliveryName: '',
+                deliveryPhone: '',
+                deliveryVisitDay: '',
+                category: 'General',
+                status: 'Active',
+                productCount: 0
+              };
+              const newId = await onAddSupplier(newSupplier);
+              if (newId) {
+                setEditingId(newId);
+              }
+            }}
+            className={`flex items-center gap-3 px-8 py-4 bg-${theme.primary} text-white rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl ${theme.shadow} hover:bg-black transition-all cursor-pointer`}
+          >
+            <UserPlus className="w-4 h-4" />
+            Onboard Vendor
+          </motion.button>
+          {/* Pristine Tooltip Below Header Button */}
+          <div className="absolute top-full right-0 mt-3 px-4 py-2.5 bg-slate-950/95 border border-slate-800 backdrop-blur-md text-white text-[9px] font-black uppercase tracking-[0.15em] rounded-2xl shadow-2xl opacity-0 pointer-events-none group-hover/tooltip:opacity-100 group-hover/tooltip:pointer-events-auto transition-all duration-300 transform scale-95 -translate-y-2 group-hover/tooltip:scale-100 group-hover/tooltip:translate-y-0 whitespace-nowrap z-50 flex flex-col items-end gap-1 min-w-[240px] text-right">
+            <span className="text-emerald-400 font-black tracking-[0.2em]">New Registration</span>
+            <span className="text-[8px] text-slate-300 font-bold normal-case tracking-normal leading-normal">Onboard a new vendor, salesman roster & delivery agent.</span>
+            <div className="absolute bottom-full right-8 border-4 border-transparent border-b-slate-950/95" />
+          </div>
+        </div>
       </motion.header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
-        <div className="lg:col-span-3 space-y-8">
+      <motion.div variants={itemVariants} className="flex gap-4 p-2 bg-white rounded-full border border-gray-100 shadow-sm inline-flex overflow-x-auto lg:overflow-visible max-w-full relative">
+        <TabButton name="vendors" label="Vendor Directory" description="Manage supplier profiles, contact sheets, and active associations." />
+        <TabButton name="salesmen" label="Salesman Schedule" description="Track dedicated representative rosters, visits, and phone contact numbers." />
+        <TabButton name="delivery" label="Delivery Schedule" description="View courier channels, route visit frequencies, and driver logs." />
+        <TabButton name="products" label="Products" description="Browse list of company products, pricing details, and mapping indices." />
+      </motion.div>
+
+      <div className="grid grid-cols-1 gap-8 items-start">
           <motion.div variants={itemVariants} className="bg-white p-4 rounded-[2rem] shadow-sm border border-gray-100 flex flex-col sm:flex-row items-center gap-4 ring-1 ring-black/[0.02]">
             <div className="relative flex-1 group w-full">
               <Search className={`absolute left-6 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5 group-focus-within:text-${theme.primary.split('-')[0]}-500 transition-colors`} />
               <input 
                 type="text"
-                placeholder="Query central vendor registry by company, SR, or brand..."
+                placeholder="Search repository..."
                 className={`w-full pl-16 pr-6 py-5 bg-gray-50/50 border-none rounded-2xl text-base font-bold focus:ring-2 focus:ring-${theme.primary.split('-')[0]}-500 transition-all outline-none`}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -9132,14 +9284,16 @@ function SupplierPage({ products, settings }: { products: Product[], settings: S
             </div>
           </motion.div>
 
-          <motion.div variants={itemVariants} className={`bg-white rounded-[2.5rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.08)] border border-gray-100 overflow-hidden ring-1 ring-black/[0.01]`}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[950px]">
+          {activeTab !== 'products' ? (
+            <motion.div variants={itemVariants} className={`bg-white rounded-[2.5rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.08)] border border-gray-100 overflow-hidden ring-1 ring-black/[0.01]`}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[950px]">
                 <thead>
                   <tr className="bg-gray-50/50">
-                    <th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Company Identity</th>
-                    <th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Support Representative</th>
-                    <th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Portfolio Data</th>
+                    <th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Company & Brand</th>
+                    {activeTab === 'vendors' && <><th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Salesman</th><th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Delivery</th></>}
+                    {activeTab === 'salesmen' && <><th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Salesman Name</th><th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Salesman Phone</th><th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Visit Day</th></>}
+                    {activeTab === 'delivery' && <><th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Delivery Man</th><th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Delivery Phone</th><th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">Delivery Day</th></>}
                     <th className="px-8 py-6 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100 text-center">Status</th>
                   </tr>
                 </thead>
@@ -9157,26 +9311,179 @@ function SupplierPage({ products, settings }: { products: Product[], settings: S
                       >
                         <td className="px-8 py-7">
                           <div className="flex items-center gap-4">
-                             <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center font-black">
+                             <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center font-black shrink-0">
                                 {supplier.company.charAt(0)}
                              </div>
-                             <div className="flex flex-col">
-                               <span className="text-lg font-black text-gray-900 uppercase">{supplier.company}</span>
+                             <div className="flex flex-col flex-1 min-w-0">
+                               {editingId === supplier.id ? (
+                                 <>
+                                   <input defaultValue={supplier.company} onBlur={(e) => updateSupplier(supplier.id, 'company', e.target.value)} placeholder="Company Name" className="text-lg font-black text-gray-900 uppercase w-full outline-none border-b border-indigo-200 bg-white" />
+                                   <textarea defaultValue={supplier.brand} onBlur={(e) => updateSupplier(supplier.id, 'brand', e.target.value)} placeholder="Brands (comma separated)" className="text-[10px] font-black text-gray-400 uppercase tracking-widest w-full outline-none border-b border-indigo-200 bg-white mt-1 px-1 py-1 min-h-[40px] resize-y" />
+                                 </>
+                               ) : (
+                                 <>
+                                   <p className="text-lg font-black text-gray-900 uppercase truncate">{supplier.company}</p>
+                                   <div className="flex flex-wrap gap-1 mt-1 items-center">
+                                     {supplier.brand.split(',').map(b => b.trim()).filter(Boolean).map((b, i) => (
+                                       <span key={i} className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-[9px] font-black uppercase tracking-widest">
+                                         {b}
+                                       </span>
+                                     ))}
+                                     {newBrandId === supplier.id ? (
+                                        <input 
+                                          autoFocus
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              const val = e.currentTarget.value.trim();
+                                              if (val) {
+                                                const currentBrands = supplier.brand.split(',').map(b=>b.trim()).filter(Boolean);
+                                                if (!currentBrands.includes(val)) {
+                                                  updateSupplier(supplier.id, 'brand', currentBrands.concat(val).join(', '));
+                                                }
+                                              }
+                                              setNewBrandId(null);
+                                            } else if (e.key === 'Escape') {
+                                              setNewBrandId(null);
+                                            }
+                                          }}
+                                          onBlur={(e) => {
+                                            const val = e.currentTarget.value.trim();
+                                            if (val) {
+                                              const currentBrands = supplier.brand.split(',').map(b=>b.trim()).filter(Boolean);
+                                              if (!currentBrands.includes(val)) {
+                                                updateSupplier(supplier.id, 'brand', currentBrands.concat(val).join(', '));
+                                              }
+                                            }
+                                            setNewBrandId(null);
+                                          }}
+                                          className="px-2 py-0.5 bg-white border border-indigo-200 text-gray-700 rounded text-[9px] font-black uppercase tracking-widest outline-none w-20"
+                                          placeholder="BRAND..."
+                                        />
+                                     ) : (
+                                       <button 
+                                         onClick={(e) => { e.stopPropagation(); setNewBrandId(supplier.id); }}
+                                         className="px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[9px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-colors flex items-center gap-0.5"
+                                       >
+                                         <Plus className="w-2.5 h-2.5" /> BRAND
+                                       </button>
+                                     )}
+                                   </div>
+                                 </>
+                               )}
                              </div>
                           </div>
                         </td>
-
+                        
+                        {activeTab === 'vendors' && (
+                          <>
+                             <td className="px-8 py-7 text-xs font-semibold text-gray-600">
+                               {editingId === supplier.id ? (
+                                 <>
+                                   <input defaultValue={supplier.srName} onBlur={(e) => updateSupplier(supplier.id, 'srName', e.target.value)} className="border-b border-gray-200 outline-none w-full bg-white px-1 mt-1" placeholder="Salesman Name" />
+                                   <input defaultValue={supplier.srPhone} onBlur={(e) => updateSupplier(supplier.id, 'srPhone', e.target.value)} className="border-b border-gray-200 outline-none w-full text-gray-400 bg-white px-1 mt-1" placeholder="Phone" />
+                                   <select defaultValue={supplier.srVisitDay} onBlur={(e) => updateSupplier(supplier.id, 'srVisitDay', e.target.value)} className="border-b border-gray-200 outline-none w-full font-black text-indigo-600 bg-white px-1 mt-1">
+                                     <option value="">Select Day</option>
+                                     {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => <option key={day} value={day}>{day}</option>)}
+                                   </select>
+                                 </>
+                               ) : (
+                                 <div className="flex flex-col gap-1">
+                                   <p>{supplier.srName || '-'}</p>
+                                   <p className="text-gray-400">{supplier.srPhone || '-'}</p>
+                                   <p className="font-black text-indigo-600">{supplier.srVisitDay || '-'}</p>
+                                 </div>
+                               )}
+                            </td>
+                            <td className="px-8 py-7 text-xs font-semibold text-gray-600">
+                               {editingId === supplier.id ? (
+                                 <>
+                                   <input defaultValue={supplier.deliveryName} onBlur={(e) => updateSupplier(supplier.id, 'deliveryName', e.target.value)} className="border-b border-gray-200 outline-none w-full bg-white px-1 mt-1" placeholder="Delivery Name" />
+                                   <input defaultValue={supplier.deliveryPhone} onBlur={(e) => updateSupplier(supplier.id, 'deliveryPhone', e.target.value)} className="border-b border-gray-200 outline-none w-full text-gray-400 bg-white px-1 mt-1" placeholder="Phone" />
+                                   <select defaultValue={supplier.deliveryVisitDay} onBlur={(e) => updateSupplier(supplier.id, 'deliveryVisitDay', e.target.value)} className="border-b border-gray-200 outline-none w-full font-black text-emerald-600 bg-white px-1 mt-1">
+                                     <option value="">Select Day</option>
+                                     {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => <option key={day} value={day}>{day}</option>)}
+                                   </select>
+                                 </>
+                               ) : (
+                                 <div className="flex flex-col gap-1">
+                                   <p>{supplier.deliveryName || '-'}</p>
+                                   <p className="text-gray-400">{supplier.deliveryPhone || '-'}</p>
+                                   <p className="font-black text-emerald-600">{supplier.deliveryVisitDay || '-'}</p>
+                                 </div>
+                               )}
+                            </td>
+                          </>
+                        )}
+                        {activeTab === 'salesmen' && (
+                          <>
+                            <td className="px-8 py-7">
+                              {editingId === supplier.id ? (
+                                <input defaultValue={supplier.srName} onBlur={(e) => updateSupplier(supplier.id, 'srName', e.target.value)} className="w-full border-b border-indigo-200 outline-none px-1" />
+                              ) : <p>{supplier.srName || '-'}</p>}
+                            </td>
+                            <td className="px-8 py-7">
+                              {editingId === supplier.id ? (
+                                <input defaultValue={supplier.srPhone} onBlur={(e) => updateSupplier(supplier.id, 'srPhone', e.target.value)} className="w-full border-b border-indigo-200 outline-none px-1 text-gray-400" />
+                              ) : <p className="text-gray-400">{supplier.srPhone || '-'}</p>}
+                            </td>
+                            <td className="px-8 py-7">
+                              {editingId === supplier.id ? (
+                                <select defaultValue={supplier.srVisitDay} onBlur={(e) => updateSupplier(supplier.id, 'srVisitDay', e.target.value)} className="w-full border-b border-indigo-200 outline-none font-black text-indigo-600 px-1 bg-white">
+                                 <option value="">Select Day</option>
+                                 {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => <option key={day} value={day}>{day}</option>)}
+                                </select>
+                              ) : <p className="font-black text-indigo-600">{supplier.srVisitDay || '-'}</p>}
+                            </td>
+                          </>
+                        )}
+                        {activeTab === 'delivery' && (
+                          <>
+                            <td className="px-8 py-7">
+                              {editingId === supplier.id ? (
+                                <input defaultValue={supplier.deliveryName} onBlur={(e) => updateSupplier(supplier.id, 'deliveryName', e.target.value)} className="w-full border-b border-emerald-200 outline-none px-1" />
+                              ) : <p>{supplier.deliveryName || '-'}</p>}
+                            </td>
+                            <td className="px-8 py-7">
+                              {editingId === supplier.id ? (
+                                <input defaultValue={supplier.deliveryPhone} onBlur={(e) => updateSupplier(supplier.id, 'deliveryPhone', e.target.value)} className="w-full border-b border-emerald-200 outline-none px-1 text-gray-400" />
+                              ) : <p className="text-gray-400">{supplier.deliveryPhone || '-'}</p>}
+                            </td>
+                            <td className="px-8 py-7">
+                              {editingId === supplier.id ? (
+                                <select defaultValue={supplier.deliveryVisitDay} onBlur={(e) => updateSupplier(supplier.id, 'deliveryVisitDay', e.target.value)} className="w-full border-b border-emerald-200 outline-none font-black text-emerald-600 px-1 bg-white">
+                                 <option value="">Select Day</option>
+                                 {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => <option key={day} value={day}>{day}</option>)}
+                                </select>
+                              ) : <p className="font-black text-emerald-600">{supplier.deliveryVisitDay || '-'}</p>}
+                            </td>
+                          </>
+                        )}
+                        
                         <td className="px-8 py-7 text-center relative">
                            <div className="flex flex-col items-center gap-2">
-                              <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-[0.2em] border transition-all ${
-                                supplier.status === 'Active' 
-                                  ? `bg-${theme.bg.split(' ')[0]} text-${theme.primary} border-${theme.primary.split('-')[0]}-100 shadow-sm` 
-                                  : 'bg-rose-50 text-rose-600 border-rose-100'
-                              }`}>
-                                {supplier.status}
-                              </span>
+                              {editingId === supplier.id ? (
+                                <button 
+                                  onClick={() => setEditingId(null)}
+                                  className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-[0.2em] border transition-all bg-${theme.primary} text-white shadow-lg`}
+                                >
+                                  Save Data
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => setEditingId(supplier.id)}
+                                  className="px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-[0.2em] border transition-all text-gray-500 bg-gray-50 border-gray-200 hover:bg-gray-100 hover:text-gray-900"
+                                >
+                                  Edit Row
+                                </button>
+                              )}
+                              <button 
+                                onClick={() => setSuppliers(prev => prev.filter(s => s.id !== supplier.id))}
+                                className="opacity-0 group-hover:opacity-100 text-[9px] font-black uppercase tracking-[0.1em] text-red-500 hover:text-red-700 transition-all flex items-center gap-1"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Delete
+                              </button>
                            </div>
-                           {/* Active Indicator Bar */}
                            <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-1 h-12 bg-${theme.primary} rounded-l-full transition-all scale-y-0 group-hover:scale-y-100 opacity-60 shadow-[0_0_10px_rgba(0,0,0,0.3)]`}></div>
                         </td>
                       </motion.tr>
@@ -9184,63 +9491,115 @@ function SupplierPage({ products, settings }: { products: Product[], settings: S
                   </AnimatePresence>
                 </tbody>
               </table>
-              {filtered.length === 0 && (
-                <div className="p-24 text-center flex flex-col items-center">
-                  <div className={`w-20 h-20 bg-${theme.bg.split(' ')[0]} rounded-3xl flex items-center justify-center mb-6 ring-1 ring-${theme.primary.split('-')[0]}-100`}>
-                    <Building2 className={`w-8 h-8 text-${theme.primary.split('-')[0]}-200`} />
-                  </div>
-                  <h4 className="text-xl font-black text-gray-900 uppercase">Registry Empty</h4>
-                  <p className="text-gray-400 text-xs font-bold mt-2 uppercase tracking-widest leading-loose text-center max-w-md">No qualified vendors detected in central procurement database matching your search parameters.</p>
-                </div>
-              )}
             </div>
           </motion.div>
-        </div>
-
-        <div className="space-y-8">
-           <motion.div 
-            variants={itemVariants}
-            className="bg-white p-10 rounded-[3rem] shadow-xl border border-gray-100 text-center relative overflow-hidden group"
-           >
-             <div className={`absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r ${theme.gradient}`}></div>
-             <div className={`w-24 h-24 bg-${theme.bg.split(' ')[0]} text-${theme.primary} rounded-[2.5rem] flex items-center justify-center mx-auto mb-8 shadow-inner group-hover:scale-110 transition-transform duration-700`}>
-                <Warehouse className="w-12 h-12" />
-             </div>
-             <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tight">Procurement Ops</h3>
-             <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-3 leading-relaxed">Central nexus for supply chain orchestration and vendor health metrics.</p>
-
-             <div className="mt-10 space-y-4 text-left">
-                <div className={`p-8 bg-gradient-to-br from-${theme.primary.split('-')[0]}-900 to-${theme.primary.split('-')[0]}-800 rounded-[2.5rem] text-white relative overflow-hidden shadow-2xl`}>
-                   <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-[40px]"></div>
-                   <p className="text-[9px] font-black text-white/40 uppercase tracking-[0.3em] mb-4">Stock Health</p>
-                   <div className="flex items-end justify-between mb-4">
-                      <p className="text-3xl font-black text-white font-mono tracking-tighter leading-none">Optimal</p>
-                      <span className={`text-[10px] font-black text-${theme.primary.split('-')[0]}-400 uppercase`}>94% Fill</span>
-                   </div>
-                   <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
-                      <div className={`w-[94%] h-full bg-${theme.primary.split('-')[0]}-400 shadow-[0_0_10px_rgba(0,0,0,0.5)]`}></div>
-                   </div>
-                </div>
-
-                <div className="p-6 bg-gray-50 border border-gray-100 rounded-3xl flex items-center gap-4 group/card hover:bg-white transition-all shadow-sm">
-                   <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-indigo-600">
-                      <Lock className="w-6 h-6" />
-                   </div>
-                   <div>
-                      <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Status</p>
-                     <p className="text-base font-black text-indigo-600 uppercase">Awaits Key</p>
-                  </div>
+          ) : (
+            <motion.div variants={itemVariants} className="space-y-6">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <select 
+                  className="bg-white px-6 py-4 rounded-2xl border border-gray-100 shadow-sm font-black text-gray-700 outline-none flex-1"
+                  value={selectedCompanyId}
+                  onChange={e => {
+                    setSelectedCompanyId(e.target.value);
+                    setSelectedBrand('');
+                  }}
+                >
+                  <option value="">Select Company / Provider</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.company}</option>)}
+                </select>
+                
+                <select 
+                  className="bg-white px-6 py-4 rounded-2xl border border-gray-100 shadow-sm font-black text-gray-700 outline-none flex-1 disabled:opacity-50"
+                  value={selectedBrand}
+                  onChange={e => setSelectedBrand(e.target.value)}
+                  disabled={!selectedCompanyId}
+                >
+                  <option value="">Select Brand</option>
+                  {selectedCompanyId && suppliers.find(s => s.id === selectedCompanyId)?.brand?.split(',').map((b: string) => b.trim()).filter(Boolean).map((b: string, i: number) => (
+                    <option key={i} value={b}>{b}</option>
+                  ))}
+                </select>
               </div>
-           </div>
-           </motion.div>
-        </div>
 
-        {/* Design Accents */}
-        <div className="absolute -bottom-10 -right-10 w-64 h-64 bg-indigo-50 rounded-full blur-[60px] opacity-50"></div>
-        <div className="absolute -top-10 -left-10 w-48 h-48 bg-violet-50 rounded-full blur-[60px] opacity-50"></div>
+              {selectedCompanyId && selectedBrand ? (() => {
+                const companyName = suppliers.find(s => s.id === selectedCompanyId)?.company;
+                const companyProducts = products.filter(p => p.company === companyName && p.brand === selectedBrand);
+                return (
+                  <div className={`bg-white rounded-[2.5rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.08)] border border-gray-100 overflow-hidden ring-1 ring-black/[0.01]`}>
+                    <div className="p-8 border-b border-gray-50 flex items-center justify-between bg-gray-50/30">
+                       <h3 className="text-xl font-black text-gray-900 tracking-tight flex items-center gap-2">
+                         <Box className={`w-6 h-6 text-${theme.primary}`} />
+                         Inventory: {selectedBrand}
+                       </h3>
+                       <span className="px-4 py-1.5 bg-gray-100 text-gray-600 rounded-full text-[10px] font-black uppercase tracking-widest">
+                         {companyProducts.length} Items Match
+                       </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-gray-50/50">
+                            <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100">Product Code & Name</th>
+                            <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-right">Available Stock</th>
+                            <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-right">Damaged/Returned</th>
+                            <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100">Expiry Date</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {companyProducts.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="px-8 py-16 text-center text-gray-400 font-bold uppercase tracking-widest text-xs italic">
+                                No products found for this company and brand.
+                              </td>
+                            </tr>
+                          ) : (
+                            companyProducts.map(p => (
+                              <tr key={p.id} className="group hover:bg-gray-50 transition-colors">
+                                <td className="px-8 py-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center font-black text-gray-500 overflow-hidden shrink-0">
+                                      {p.imageUrl ? <img src={p.imageUrl} className="w-full h-full object-cover" /> : <Tag className="w-4 h-4" />}
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-black text-gray-900 leading-none mb-1">{p.name}</p>
+                                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{p.barcode || p.id}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-8 py-4 text-right">
+                                  <span className={`text-base font-black ${p.stock < 10 ? 'text-red-500' : 'text-gray-900'}`}>{p.stock}</span>
+                                  <span className="text-[10px] font-bold text-gray-400 ml-1">{p.unit}</span>
+                                </td>
+                                <td className="px-8 py-4 text-right">
+                                  <span className="text-base font-black text-rose-500">{p.damaged || 0}</span>
+                                </td>
+                                <td className="px-8 py-4">
+                                  {p.expiryDate ? (
+                                    <span className="text-xs font-bold text-gray-600 border px-3 py-1 rounded-full">{p.expiryDate}</span>
+                                  ) : <span className="text-xs italic text-gray-300">-</span>}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })() : (
+                <div className="bg-gray-50 rounded-3xl p-16 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-200">
+                  <Box className="w-16 h-16 text-gray-300 mb-4" />
+                  <p className="text-gray-500 font-bold text-lg mb-2">Inventory Filter</p>
+                  <p className="text-gray-400 text-sm max-w-md">Please select a preferred Vendor Company and specific target Brand to load live inventory details and evaluate stock conditions (Available, Damaged, Expiry).</p>
+                </div>
+              )}
+            </motion.div>
+          )}
+        
       </div>
     </motion.div>
   );
+
 }
 
 function ActivationCodePage() {
@@ -10815,9 +11174,10 @@ function Inventory(props: {
   setIsSaving: (v: boolean) => void,
   setScannerMode: (mode: 'cart' | 'product') => void,
   setIsScannerOpen: (v: boolean) => void,
-  user: any
+  user: any,
+  suppliers: Supplier[]
 }) {
-  const { products, categories, stockRecords, sales, onViewHistory, setNotification, isOnline, settings, isSaving, setIsSaving, setScannerMode, setIsScannerOpen, user } = props;
+  const { products, categories, stockRecords, sales, onViewHistory, setNotification, isOnline, settings, isSaving, setIsSaving, setScannerMode, setIsScannerOpen, user, suppliers } = props;
   const systemLang = settings.systemLanguage || 'bn';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
   const [productSortBy, setProductSortBy] = useState<string>('serial');
@@ -11264,8 +11624,10 @@ Return the result as JSON with a "category" field containing exactly one string 
       'Expiry Date': p.expiryDate || '',
       'Location': p.location || '',
       'Company': p.company || '',
+      'Brand': p.brand || '',
       'Department': p.department || '',
-      'Warehouse': p.warehouse || ''
+      'Warehouse': p.warehouse || '',
+      'Warranty': p.warranty ? 'Yes' : ''
     }));
     
     // We already have Papa imported at the top
@@ -11351,6 +11713,7 @@ Return the result as JSON with a "category" field containing exactly one string 
                     expiryDate: (row['Expiry Date'] || row.expiryDate || row['মেয়াদ'] || '').trim(),
                     location: (row.Location || row.location || row['স্থান'] || '').trim(),
                     company: (row.Company || row.company || row['Company Name'] || row['কোম্পানি'] || '').trim(),
+                    brand: (row.Brand || row.brand || row['Brand Name'] || row['ব্র্যান্ড'] || '').trim(),
                     department: (row.Department || row.department || '').trim(),
                     warehouse: (row.Warehouse || row.warehouse || '').trim(),
                     serialNumber: !isNaN(serialFromCSV) ? serialFromCSV : (report.success + 1),
@@ -11420,6 +11783,7 @@ Return the result as JSON with a "category" field containing exactly one string 
       expiryDate: formatToBnDate(formData.get('expiryDate') as string || ''),
       location: formData.get('location') as string || '',
       company: formData.get('company') as string || '',
+      brand: formData.get('brand') as string || '',
       imageUrl: finalImageUrl,
       hasWarranty: formData.get('warranty') === 'on'
     };
@@ -12217,7 +12581,27 @@ Return the result as JSON with a "category" field containing exactly one string 
                       </div>
                       <div>
                           <label htmlFor="company-name" className="block text-sm font-semibold text-gray-700 mb-1.5">Company Name</label>
-                          <input type="text" id="company-name" name="company" defaultValue={editingProduct?.company || ''} className="w-full p-4 border border-gray-300 rounded-xl text-base" placeholder="Brand / Mfg"/>
+                          <input list="companies-list" type="text" id="company-name" name="company" defaultValue={editingProduct?.company || ''} className="w-full p-4 border border-gray-300 rounded-xl text-base" placeholder="Brand / Mfg"/>
+                          <datalist id="companies-list">
+                            {(() => {
+                              const suppliersData = suppliers || [];
+                              return [...new Set(suppliersData.map(s => s.company))].map(company => (
+                                <option key={company} value={company} />
+                              ));
+                            })()}
+                          </datalist>
+                      </div>
+                      <div>
+                          <label htmlFor="brand-name" className="block text-sm font-semibold text-gray-700 mb-1.5">Brand</label>
+                          <input list="brands-list" type="text" id="brand-name" name="brand" defaultValue={editingProduct?.brand || ''} className="w-full p-4 border border-gray-300 rounded-xl text-base" placeholder="Product Brand"/>
+                          <datalist id="brands-list">
+                            {(() => {
+                              const suppliersData = suppliers || [];
+                              return [...new Set(suppliersData.flatMap(s => s.brand.split(',').map(b => b.trim()).filter(Boolean)))].map(brand => (
+                                <option key={brand} value={brand} />
+                              ));
+                            })()}
+                          </datalist>
                       </div>
                   </div>
 
