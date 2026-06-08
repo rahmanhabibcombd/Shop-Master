@@ -2094,7 +2094,7 @@ function SettingsPanel({
   const handleShopSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAuthorized) {
-      alert("Only stratproamz@gmail.com is authorized to change or update settings.");
+      alert("Only Master Admin is authorized to change or update settings.");
       return;
     }
     const form = e.target as HTMLFormElement;
@@ -2145,7 +2145,7 @@ function SettingsPanel({
   const handleUserSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAuthorized) {
-      alert("Only stratproamz@gmail.com is authorized to add users.");
+      alert("Only Master Admin is authorized to add users.");
       return;
     }
     const form = e.target as HTMLFormElement;
@@ -2176,7 +2176,7 @@ function SettingsPanel({
         <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200/60 text-amber-950 rounded-2xl shadow-xs">
           <Lock className="w-5 h-5 text-amber-500 shrink-0 animate-pulse" />
           <div className="text-sm">
-            <span className="font-bold">View-Only Mode:</span> This page contains administrative settings. Only <strong className="font-black text-amber-950">stratproamz@gmail.com</strong> is authorized to edit or update these configurations.
+            <span className="font-bold">View-Only Mode:</span> This page contains administrative settings. Only <strong className="font-black text-amber-950">Master Admin</strong> is authorized to edit or update these configurations.
           </div>
         </div>
       )}
@@ -2564,7 +2564,7 @@ function SettingsPanel({
                             ? "bg-red-600 text-white hover:bg-red-700 shadow-lg scale-110" 
                             : "text-gray-400 hover:text-red-600 hover:bg-red-50"
                         } disabled:opacity-30 disabled:cursor-not-allowed`}
-                        title={!isAuthorized ? "Only stratproamz@gmail.com can delete users" : (confirmDeleteId === u.id ? "Click again to confirm" : "Delete User")}
+                        title={!isAuthorized ? "Only Master Admin can delete users" : (confirmDeleteId === u.id ? "Click again to confirm" : "Delete User")}
                       >
                         {confirmDeleteId === u.id ? (
                           <span className="text-[10px] font-bold px-1 animate-pulse">Confirm?</span>
@@ -4912,7 +4912,7 @@ export default function App() {
 
   const handleSaveSettings = async (newSettings: ShopSettings) => {
     if (user?.email !== 'stratproamz@gmail.com') {
-      setNotification({ message: 'Error: Only stratproamz@gmail.com is authorized to change or update settings.', type: 'error' });
+      setNotification({ message: 'Error: Only Master Admin is authorized to change or update settings.', type: 'error' });
       return;
     }
     setIsSavingSettings(true);
@@ -4950,7 +4950,7 @@ export default function App() {
 
   const handleAddUser = async (newUser: Omit<AppUser, 'id'>) => {
     if (user?.email !== 'stratproamz@gmail.com') {
-      setNotification({ message: 'Error: Only stratproamz@gmail.com is authorized to add users.', type: 'error' });
+      setNotification({ message: 'Error: Only Master Admin is authorized to add users.', type: 'error' });
       return;
     }
     if (!user?.shopId) return;
@@ -4986,7 +4986,7 @@ export default function App() {
 
   const handleDeleteUser = async (userId: string) => {
     if (user?.email !== 'stratproamz@gmail.com') {
-      setNotification({ message: 'Error: Only stratproamz@gmail.com is authorized to delete users.', type: 'error' });
+      setNotification({ message: 'Error: Only Master Admin is authorized to delete users.', type: 'error' });
       return;
     }
     try {
