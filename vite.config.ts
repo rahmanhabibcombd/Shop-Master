@@ -3,8 +3,6 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {defineConfig, loadEnv} from 'vite';
-import { VitePWA } from 'vite-plugin-pwa';
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -14,22 +12,6 @@ export default defineConfig(({mode}) => {
     plugins: [
       react(), 
       tailwindcss(),
-      /*VitePWA({
-        registerType: 'autoUpdate',
-        devOptions: {
-          enabled: true
-        },
-        workbox: {
-          maximumFileSizeToCacheInBytes: 5000000
-        },
-        manifest: {
-          name: 'ShopMaster Super Shop',
-          short_name: 'ShopMaster',
-          description: 'Super Shop Management System with AI Intelligence',
-          theme_color: '#ffffff',
-          icons: []
-        }
-      })*/
     ],
     define: {
       // 'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
