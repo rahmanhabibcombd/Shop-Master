@@ -12,7 +12,7 @@ export const secondaryAuth = getAuth(secondaryApp);
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   localCache: memoryLocalCache()
-});
+}, firebaseConfig.firestoreDatabaseId);
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

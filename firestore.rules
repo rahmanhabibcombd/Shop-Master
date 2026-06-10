@@ -26,6 +26,11 @@ service cloud.firestore {
       );
     }
 
+    // 4. Test Match Block
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+    
     // 3. Match Blocks
     
     // Categories Match Block
