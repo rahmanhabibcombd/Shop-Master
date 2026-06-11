@@ -296,11 +296,22 @@ export const PageManagement: React.FC<PageManagementProps> = ({
 
 
   // 4. RELEASE VERSION STATE & DATA
-  const [currentVersion, setCurrentVersion] = useState(localStorage.getItem('pm_version') || 'v4.2.4');
+  const [currentVersion, setCurrentVersion] = useState(localStorage.getItem('pm_version') || 'v4.2.5');
   const [releaseNotes, setReleaseNotes] = useState<ReleaseNote[]>(() => {
     const cached = localStorage.getItem('pm_releases');
     if (cached) return JSON.parse(cached);
     return [
+      {
+        id: 'rel-new-v425',
+        version: 'v4.2.5',
+        date: '2026-06-11',
+        type: 'patch',
+        isPublished: true,
+        changes: [
+          { category: 'new', text: isBn ? 'হোস্টিংগারের ডিফল্ট "server.js" এন্ট্রি ফাইল সাপোর্ট করার জন্য রুট-লেভেল অটোমেটিক ব্রিজ যুক্ত করা হয়েছে।' : 'Created automatic root-level server.js entry bridge for default Hostinger Node.js hPanel support.' },
+          { category: 'fix', text: isBn ? 'হোস্টিংগার ম্যানুয়াল পোর্ট সার্চ ছাড়াই ডাইনামিক পোর্ট বাইন্ডিং নিশ্চিত করা হয়েছে।' : 'Guaranteed dynamic port binding capability to bypass manual hPanel port field requests.' }
+        ]
+      },
       {
         id: 'rel-new-v424',
         version: 'v4.2.4',

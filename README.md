@@ -91,10 +91,11 @@ npm run start
 
 ## 📈 Release History
 
-### 🟢 Version v4.2.4 (2026-06-11) - current
-* **Git Commit Safeguards**: Integrated updated metadata tracking parameters to ensure active working tree modifications are recognized by AI Studio syncing engines.
-* **Workspace Synchronization**: Resolved the persistent "no changes to commit" state blocking subsequent live updates.
-* **Production Pipeline**: Automated and tuned server assets generation speed for direct Hostinger auto-deployments.
+### 🟢 Version v4.2.5 (2026-06-11) - current
+* **Root Entry Bridge**: Integrated a native root-level `server.js` matching standard Hostinger hPanel defaults to seamlessly launch compiled modules.
+* **Variable Bindings**: Eliminated manual port configuration requirements in server environments.
+
+### 🟢 Version v4.2.4 (2026-06-11)
 
 ### 🟢 Version v4.2.3 (2026-06-11)
 * **Git Synchronization**: Refactored static configurations and package variables to make sure uncommitted configurations are picked up dynamically by GitHub Sync UI.
