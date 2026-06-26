@@ -271,6 +271,10 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           prompt: testQuery,
           systemInstruction: `You are the AI Assistant for Bismillah Store Management System. Here to test your custom cognitive brain configuration in real-time.
           
+          # CRITICAL WAKE-WORD PROTOCOL (STRICT MANDATE):
+          - You must ONLY process the request, answer questions, or execute actions IF the user's prompt explicitly starts with or contains "হেই হাবিব", "hey habib", or "hey Habib" (case-insensitive).
+          - If the user DOES NOT mention this exact name/wake-word, you MUST NOT provide any other answer. Instead, STRICTLY reply with: "অনুগ্রহ করে আমাকে সাহায্য করার আগে আমার নাম ধরে ডাকুন, যেমন: 'হেই হাবিব'।"
+
           # SYSTEM CONFIGURATION CURRENT SETTINGS:
           ${personalityBlock}
           ${customGreetingBlock}
@@ -281,7 +285,8 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           # SPEECH SYNONYMS:
           ${customSynonymsString}
           
-          Provide a test response according to your cognitive memories.`
+          Provide a test response according to your cognitive memories.`,
+          tools: [{ googleSearch: {} }]
         })
       });
 
@@ -867,6 +872,10 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           prompt: command,
           systemInstruction: `You are the AI Assistant for Bismillah Store Management System. 
 
+          # CRITICAL WAKE-WORD PROTOCOL (STRICT MANDATE):
+          - You must ONLY process the request, answer questions, or execute actions IF the user's prompt explicitly starts with or contains "হেই হাবিব", "hey habib", or "hey Habib" (case-insensitive).
+          - If the user DOES NOT mention this exact name/wake-word, you MUST NOT execute their command, check any stock, or provide any answer. Instead, STRICTLY reply with: "অনুগ্রহ করে আমাকে সাহায্য করার আগে আমার নাম ধরে ডাকুন, যেমন: 'হেই হাবিব'।" (or in English if the language is English: "Please call me by my name before I can help, e.g., 'Hey Habib'"). DO NOT process the rest of their request.
+
           # CRITICAL LANGUAGE PROTOCOL:
           - CURRENT LANGUAGE SETTING: ${language === 'bn' ? 'BENGALI (বাংলা)' : 'ENGLISH'}.
           - If the setting is 'bn', you MUST ONLY output text in BENGALI script.
@@ -878,6 +887,12 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           ${personalityBlock}
           ${customGreetingBlock}
           
+          # DATABASE RAG CONTEXT (Real-Time System Data):
+          - Total Products in Inventory: ${systemData.items.length}
+          - Total Customers: ${systemData.customers.length}
+          - Today's Revenue: ${todayRevenue} Taka
+          - Low Stock Products (<=5): ${systemData.items.filter((i:any) => i.stock <= 5).slice(0, 5).map((i:any) => i.name).join(', ')}
+
           # COGNITIVE MEMORY SYSTEM (DYNAMICALLY LEARNED FROM MEMORY CORE):
           You have access to the business rules and facts below. Strictly comply with them as if they are hardcoded laws:
           ${customMemoriesString}
@@ -913,7 +928,14 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           
           # FUNCTION USAGE:
           Execute tools when requested/implied and confirm in ${language === 'bn' ? 'বাংলা' : 'English'}.`,
-          tools: [{ functionDeclarations: tools }],
+          tools: [{ functionDeclarations: tools }, { googleSearch: {} }],
+          contents: [
+            ...history.slice(-10).map(h => ({
+              role: h.role === 'assistant' ? 'model' : 'user',
+              parts: [{ text: h.text }]
+            })),
+            { role: 'user', parts: [{ text: command }] }
+          ],
           config: { model: "gemini-3.5-flash" }
         })
       });
@@ -1523,7 +1545,7 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
                    <div className="mt-4 relative">
                       <input 
                         type="text"
-                        placeholder="Say something to AI Assistant..."
+                        placeholder="হেই হাবিব (Hey Habib) বলে শুরু করুন..."
                         value={transcript}
                         onChange={e => setTranscript(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && handleVoiceCommand(transcript)}

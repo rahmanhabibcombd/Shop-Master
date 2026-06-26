@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously } from 'firebase/auth';
-import { initializeFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, onSnapshot, getDocFromServer, increment, serverTimestamp, writeBatch, memoryLocalCache } from 'firebase/firestore';
+import { initializeFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, onSnapshot, getDocFromServer, increment, serverTimestamp, writeBatch, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
@@ -8,26 +8,86 @@ const app = initializeApp(firebaseConfig);
 export const secondaryApp = initializeApp(firebaseConfig, "Secondary");
 export const secondaryAuth = getAuth(secondaryApp);
 
-// Using initializeFirestore with memory cache settings to avoid IDB issues
+// Detect environment to choose safe local cache
+const determineLocalCache = () => {
+  try {
+    if (typeof window === 'undefined') {
+      return memoryLocalCache();
+    }
+    // Sandboxed preview iframes block IndexedDB, which locks Firestore. Fallback to memory local cache.
+    if (window.self !== window.top) {
+      console.log("Firestore detected sandboxed iframe environment. Defensively utilizing memory cache to prevent sandboxed security-context query locks.");
+      return memoryLocalCache();
+    }
+    if (!window.indexedDB) {
+      console.log("Firestore detected missing or blocked IndexedDB. Utilizing memory cache.");
+      return memoryLocalCache();
+    }
+    console.log("Firestore utilizing persistent local cache with multi-tab manager.");
+    return persistentLocalCache({ tabManager: persistentMultipleTabManager() });
+  } catch (err) {
+    console.warn("Firestore was unable to set up persistent cache, fallback to memory cache:", err);
+    return memoryLocalCache();
+  }
+};
+
+// Initialize Firestore with smart adaptive cache
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-  localCache: memoryLocalCache()
+  localCache: determineLocalCache()
 }, (firebaseConfig as any).firestoreDatabaseId);
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
+// Request offline access to try and maintain long-term token availability
+googleProvider.setCustomParameters({
+  prompt: 'consent',
+  access_type: 'offline'
+});
+
 // Add required Google Workspace scopes
 googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
-googleProvider.addScope('https://www.googleapis.com/auth/calendar');
-googleProvider.addScope('https://www.googleapis.com/auth/gmail.send');
 googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
+
+// Calendar Scopes
+googleProvider.addScope('https://www.googleapis.com/auth/calendar');
+
+// Gmail Scopes
+googleProvider.addScope('https://mail.google.com/');
+
+// Meet Scopes
 googleProvider.addScope('https://www.googleapis.com/auth/meetings.space.created');
 
+// Tasks Scopes
+googleProvider.addScope('https://www.googleapis.com/auth/tasks');
+
+// Contacts & Profile Scopes
+googleProvider.addScope('https://www.googleapis.com/auth/contacts');
+
 let cachedAccessToken: string | null = null;
+try {
+  if (typeof window !== 'undefined') {
+    cachedAccessToken = localStorage.getItem('google_cached_access_token');
+  }
+} catch (e) {
+  console.warn("localStorage not accessible", e);
+}
+
 export const getCachedAccessToken = () => cachedAccessToken;
 export const setCachedAccessToken = (token: string | null) => {
   cachedAccessToken = token;
+  try {
+    if (typeof window !== 'undefined') {
+      if (token) {
+        localStorage.setItem('google_cached_access_token', token);
+      } else {
+        localStorage.removeItem('google_cached_access_token');
+      }
+    }
+  } catch (e) {
+    console.warn("localStorage write failed", e);
+  }
 };
 
 // Error handling helper
@@ -96,11 +156,13 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 // Connection test
 async function testConnection() {
+  if (typeof window === 'undefined') return;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn("Firestore connection test info: client is offline (expected during server build/CI sandbox tests).");
+    const errorMsg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    if (errorMsg.includes('offline') || errorMsg.includes('unavailable') || errorMsg.includes('network')) {
+      console.warn("Firestore connection test info: client is offline or service is temporarily unavailable (expected during server build/CI sandbox tests or when offline).");
       console.warn("Please check your Firebase configuration if this message persists in active browser usage.");
     } else {
       console.error("Firestore connection test failed:", error);

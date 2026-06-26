@@ -592,7 +592,7 @@ export function CustomerPortal({ onBack, lang, platformBranding }: CustomerPorta
                   />
                 ) : null}
                 <div 
-                  className="logo-fallback absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-indigo-600 text-white font-black text-xs select-none uppercase tracking-tight"
+                  className="logo-fallback absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-black text-xs select-none uppercase tracking-tight"
                   style={{ display: isValidImageSource(selectedShop.logoUrl || selectedShop.logo || selectedShop.logoBase64) ? 'none' : 'flex' }}
                 >
                   {getShopInitials(selectedShop.name || '')}
@@ -749,7 +749,7 @@ export function CustomerPortal({ onBack, lang, platformBranding }: CustomerPorta
                           />
                         ) : null}
                         <div 
-                          className="logo-fallback absolute inset-0 w-full h-full flex items-center justify-center bg-indigo-50 text-indigo-650 font-black text-base select-none group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300"
+                          className="logo-fallback absolute inset-0 w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-black text-base select-none"
                           style={{ display: isValidImageSource(shop.logo || shop.logoUrl || shop.logoBase64) ? 'none' : 'flex' }}
                         >
                           {getShopInitials(shop.name || '')}
@@ -809,7 +809,7 @@ export function CustomerPortal({ onBack, lang, platformBranding }: CustomerPorta
                       />
                     ) : null}
                     <div 
-                      className="logo-fallback absolute inset-0 w-full h-full flex items-center justify-center bg-indigo-650 text-white font-black text-lg select-none uppercase tracking-tight"
+                      className="logo-fallback absolute inset-0 w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-black text-lg select-none uppercase tracking-tight"
                       style={{ display: isValidImageSource(selectedShop?.logoUrl || selectedShop?.logo || selectedShop?.logoBase64) ? 'none' : 'flex' }}
                     >
                       {getShopInitials(selectedShop?.name || '')}
@@ -937,8 +937,12 @@ export function CustomerPortal({ onBack, lang, platformBranding }: CustomerPorta
               <div className="absolute top-0 right-0 w-80 h-80 bg-white/5 rounded-full blur-3xl -mr-20 -mt-20" />
               
               <div className="relative z-10 flex items-center gap-4">
-                <div className="w-14 h-14 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl flex items-center justify-center">
-                  <User className="w-7 h-7 text-white" />
+                <div className="w-14 h-14 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl flex items-center justify-center overflow-hidden">
+                  {currentCustomer.photoUrl ? (
+                    <img src={currentCustomer.photoUrl} alt="Customer" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-7 h-7 text-white" />
+                  )}
                 </div>
                 <div>
                   <h2 className="text-2xl font-black tracking-tight leading-none">{currentCustomer.name}</h2>

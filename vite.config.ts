@@ -19,9 +19,27 @@ export default defineConfig(({mode}) => {
     build: {
       outDir: 'dist',
       emptyOutDir: true,
-      chunkSizeWarningLimit: 5000,
+      chunkSizeWarningLimit: 2500,
       rollupOptions: {
-        // Let Rollup use its default, highly optimized, memory-efficient bundling
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('recharts') || id.includes('d3')) {
+                return 'vendor-charts';
+              }
+              if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('jspdf-autotable')) {
+                return 'vendor-pdf';
+              }
+              if (id.includes('firebase')) {
+                return 'vendor-firebase';
+              }
+              if (id.includes('html5-qrcode') || id.includes('react-barcode') || id.includes('react-qr-code')) {
+                return 'vendor-codes';
+              }
+              return 'vendor-core';
+            }
+          }
+        }
       }
     },
     resolve: {

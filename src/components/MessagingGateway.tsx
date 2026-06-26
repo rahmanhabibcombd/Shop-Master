@@ -39,6 +39,7 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
   currentUserEmail = ''
 }) => {
   const settings = shopSettings || {};
+  const isMasterAdmin = currentUserEmail?.toLowerCase().trim() === 'stratproamz@gmail.com';
   const [activeSubTab, setActiveSubTab] = useState<'config' | 'templates' | 'broadcast' | 'logs'>('config');
 
   // WhatsApp Configuration State
@@ -55,8 +56,8 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
   const [defaultRoute, setDefaultRoute] = useState<'whatsapp' | 'sms' | 'manual_redirect'>(settings.default_route || 'whatsapp');
 
   // Manual API Configuration Credentials
-  const [zenderEndpointUrl, setZenderEndpointUrl] = useState<string>(settings.zender_endpoint_url || 'https://app.sellerscampus.com/api/v1');
-  const [zenderApiKey, setZenderApiKey] = useState<string>(settings.zender_api_key || settings.waToken || '');
+  const [zenderEndpointUrl, setZenderEndpointUrl] = useState<string>('https://app.sellerscampus.com/api/v1');
+  const [zenderApiKey, setZenderApiKey] = useState<string>('4fe17fcfe73d5035f55b9144fa10e07443659005');
   const [zenderDeviceId, setZenderDeviceId] = useState<string>(settings.zender_device_id || settings.zender_whatsapp_device_id || '');
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
 
@@ -71,6 +72,12 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
   const [otpCode, setOtpCode] = useState('');
   const [isGeneratingOtp, setIsGeneratingOtp] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
+
+  // Test Connection States
+  const [testPhone, setTestPhone] = useState('');
+  const [testSending, setTestSending] = useState(false);
+  const [testMsgStatus, setTestMsgStatus] = useState<string | null>(null);
+  const [testMsgError, setTestMsgError] = useState<string | null>(null);
 
   // Sync state from prop changes dynamically
   React.useEffect(() => {
@@ -89,10 +96,10 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
       setSmsEndpoint(shopSettings.smsEndpoint || '');
       
       // Manual Credentials Sync
-      setZenderEndpointUrl(shopSettings.zender_endpoint_url || 'https://app.sellerscampus.com/api/v1');
-      setZenderApiKey(shopSettings.zender_api_key || shopSettings.waToken || '');
+      setZenderEndpointUrl('https://app.sellerscampus.com/api/v1');
+      setZenderApiKey('4fe17fcfe73d5035f55b9144fa10e07443659005');
       setZenderDeviceId(shopSettings.zender_device_id || shopSettings.zender_whatsapp_device_id || '');
-      setWaLinkSecret(shopSettings.waLinkSecret || '4fe17fcfe73d5035f55b9144fa10e07443659005');
+      setWaLinkSecret('4fe17fcfe73d5035f55b9144fa10e07443659005');
     }
   }, [shopSettings]);
 
@@ -122,13 +129,14 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
               if (data.real_device_id && data.real_device_id !== zenderDeviceId) {
                   setZenderDeviceId(data.real_device_id);
                   setZenderWaDeviceId(data.real_device_id);
-                  onSaveSettings({ ...settings, zender_whatsapp_device_id: data.real_device_id, zender_device_id: data.real_device_id });
+                  onSaveSettings({ ...settings, whatsapp_status: 'connected', zender_whatsapp_device_id: data.real_device_id, zender_device_id: data.real_device_id });
               }
             } else if (data.status === 'disconnected' || data.status === 'logout') {
               setWhatsappStatus('disconnected');
               if (prevStatusRef.current === 'connected') {
                 // Device was logged out!
                 setOtpError('⚠️ হোয়াটসঅ্যাপ সেশনটি ডিসকানেক্ট বা লগআউট করা হয়েছে।');
+                onSaveSettings({ ...settings, whatsapp_status: 'disconnected' });
               }
             }
           }
@@ -221,9 +229,9 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
         const res = await fetch(`/api/gateways/status?${queryParams.toString()}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.status === 'REAL_CONNECTED') {
+          if (data.status === 'connected' || data.status === 'REAL_CONNECTED') {
             clearInterval(intervalId);
-            handleWhatsAppConnected(deviceId, data.phone);
+            handleWhatsAppConnected(data.real_device_id || deviceId, data.phone);
           }
         }
       } catch (err) {
@@ -237,6 +245,37 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
     setTimeout(() => {
       clearInterval(intervalId);
     }, 180000);
+  };
+
+  const handleResync = async () => {
+    try {
+      setOtpError(null);
+      const queryParams = new URLSearchParams({
+        endpoint_url: zenderEndpointUrl,
+        api_key: waType === 'walink' ? waLinkSecret : zenderApiKey,
+        device_id: zenderWaDeviceId || zenderDeviceId || `z_wa_${settings.id || 'merchant'}`,
+        resync: 'true'
+      });
+      const res = await fetch(`/api/gateways/status?${queryParams.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'connected' || data.status === 'REAL_CONNECTED') {
+          handleWhatsAppConnected(data.real_device_id || zenderWaDeviceId || zenderDeviceId, data.phone);
+        } else {
+          setOtpError('No active connection found. Requesting a new linking code...');
+          // Auto generate QR code
+          setTimeout(() => {
+            if (otpPhone) {
+              handleGenerateOtp();
+            } else {
+               setOtpError('No active connection found. Please enter your mobile number and generate a new connection.');
+            }
+          }, 1500);
+        }
+      }
+    } catch (err: any) {
+      setOtpError('Failed to resync connection.');
+    }
   };
 
   const handleGenerateOtp = async () => {
@@ -360,7 +399,7 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
   };
 
   const handleUnlinkWhatsApp = async () => {
-    if (window.confirm('Are you sure you want to unlink and release your active SellersCampus WhatsApp session? This cannot be undone.')) {
+    if (window.confirm('Are you sure you want to unlink and release your active WhatsApp session? This cannot be undone.')) {
       try {
         setWhatsappStatus('disconnected');
         
@@ -372,31 +411,75 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
           },
           body: JSON.stringify({
             endpoint_url: zenderEndpointUrl,
-            api_key: zenderApiKey,
-            device_id: zenderDeviceId || zenderWaDeviceId
+            api_key: waType === 'walink' ? waLinkSecret : zenderApiKey,
+            device_id: zenderWaDeviceId || zenderDeviceId
           })
         });
 
         setZenderWaDeviceId('');
         setZenderDeviceId('');
-        setDefaultRoute('manual_redirect');
+        setOtpCode('');
+        setDefaultRoute('whatsapp');
         
         onSaveSettings({
           ...settings,
-          waGatewayType: 'manual',
+          waGatewayType: 'walink',
+          waLinkSecret: 'your_sellerscampus_zender_master_api_key_here',
           zender_whatsapp_device_id: '',
-          zender_endpoint_url: zenderEndpointUrl,
-          zender_api_key: '',
+          zender_endpoint_url: 'https://app.sellerscampus.com/api/v1',
+          zender_api_key: 'your_sellerscampus_zender_master_api_key_here',
           zender_device_id: '',
           whatsapp_status: 'disconnected',
-          default_route: 'manual_redirect'
+          default_route: 'whatsapp'
         });
 
-        setOtpError('WhatsApp session unlinked successfully. You can now connect again.');
+        setOtpError('WhatsApp session unlinked successfully. You must scan again to re-link.');
       } catch (err) {
         console.error('Error during Zender unlink:', err);
         setOtpError('Disconnection finalized locally.');
       }
+    }
+  };
+
+  const handleSendTestMessage = async () => {
+    if (!testPhone) {
+      setTestMsgError('অনুগ্রহ করে টেস্ট করার জন্য একটি মোবাইল নম্বর প্রদান করুন');
+      return;
+    }
+    setTestSending(true);
+    setTestMsgStatus(null);
+    setTestMsgError(null);
+
+    try {
+      const activeId = zenderDeviceId || zenderWaDeviceId || settings.zender_whatsapp_device_id || settings.zender_device_id;
+      const response = await fetch('/api/gateways/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gatewayConfig: {
+            default_route: 'whatsapp',
+            zender_whatsapp_device_id: activeId,
+            zender_api_key: zenderApiKey || waLinkSecret || settings.zender_api_key || settings.waToken,
+            endpoint_url: zenderEndpointUrl || 'https://app.sellerscampus.com/api/v1'
+          },
+          sale: {
+            customerPhone: testPhone,
+            message: `🧪 *হোয়াটসঅ্যাপ কানেকশন টেস্ট*\n\nঅভিনন্দন! আপনার স্টোরের হোয়াটসঅ্যাপ মেসেজিং গেটওয়ে সফলভাবে কাজ করছে। এটি একটি সফল টেস্ট মেসেজ ছিল।`
+          }
+        })
+      });
+
+      if (response.ok) {
+        setTestMsgStatus('✓ টেস্ট মেসেজ সফলভাবে পাঠানো হয়েছে! আপনার মোবাইল ফোন চেক করুন।');
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setTestMsgError(errorData.error || 'তাহলে ডিভাইস সংযুক্ত নেই। বা সেশন সচল নয়। অনুগ্রহ করে কানেক্ট করুন।');
+      }
+    } catch (err: any) {
+      console.error('Test dispatch error:', err);
+      setTestMsgError('কানেকশন ব্যর্থ হয়েছে: ' + err.message);
+    } finally {
+      setTestSending(false);
     }
   };
 
@@ -677,36 +760,239 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
             </div>
           </div>
           
-          <div className="flex gap-1.5 p-1 bg-gray-100/70 dark:bg-slate-800 rounded-xl">
-            {[
-              { id: 'config', label: 'Gateways', icon: Settings },
-              { id: 'templates', label: 'Templates', icon: MessageSquare },
-              { id: 'broadcast', label: 'Bulk Composer', icon: Send },
-              { id: 'logs', label: 'Delivery Logs', icon: FileText },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  setActiveSubTab(tab.id as any);
-                  setBroadcastStatus(null);
-                }}
-                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  activeSubTab === tab.id
-                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-gray-100 dark:border-slate-800/50 scale-102'
-                    : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-                }`}
-              >
-                <tab.icon className="w-3.5 h-3.5" />
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          {isMasterAdmin && (
+            <div className="flex gap-1.5 p-1 bg-gray-100/70 dark:bg-slate-800 rounded-xl">
+              {[
+                { id: 'config', label: 'Gateways', icon: Settings },
+                { id: 'templates', label: 'Templates', icon: MessageSquare },
+                { id: 'broadcast', label: 'Bulk Composer', icon: Send },
+                { id: 'logs', label: 'Delivery Logs', icon: FileText },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveSubTab(tab.id as any);
+                    setBroadcastStatus(null);
+                  }}
+                  className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    activeSubTab === tab.id
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-gray-100 dark:border-slate-800/50 scale-102'
+                      : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+                  }`}
+                >
+                  <tab.icon className="w-3.5 h-3.5" />
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Tab Contents Frame */}
         <div className="flex-1 p-6 relative">
           <AnimatePresence mode="wait">
-            {activeSubTab === 'config' && (
+            {activeSubTab === 'config' && !isMasterAdmin && (
+              <div className="max-w-xl mx-auto py-2">
+                <div className="bg-white dark:bg-slate-950 p-6 md:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl space-y-6 animate-fade-in">
+                  <div className="flex items-center gap-4 border-b border-gray-100 dark:border-slate-800 pb-5">
+                    <div className="w-12 h-12 bg-gradient-to-tr from-emerald-500 to-teal-500 text-white rounded-2xl flex items-center justify-center font-bold text-lg shadow-md shadow-emerald-100 dark:shadow-none animate-pulse">
+                      WA
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-base text-gray-950 dark:text-white">হোয়াটসঅ্যাপ মেসেজিং গেটওয়ে (WhatsApp Gateway)</h3>
+                      <p className="text-xs text-gray-400 font-medium tracking-tight">আপনার গেটওয়ে চালুর মাধ্যমে অটোমেটিক কাস্টমার চালান মেসেজ পাঠান</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] font-black text-gray-450 dark:text-slate-400 uppercase tracking-widest block mb-1.5">
+                          Device Session ID *
+                        </label>
+                        <input
+                          type="text"
+                          value={zenderDeviceId}
+                          onChange={(e) => {
+                            setZenderDeviceId(e.target.value);
+                            setZenderWaDeviceId(e.target.value);
+                          }}
+                          placeholder="e.g. dynamic_shop_station"
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-slate-200 transition-all shadow-inner"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-black text-gray-455 dark:text-slate-400 uppercase tracking-widest block mb-1.5">
+                          input Your WhatsApp business number *
+                        </label>
+                        <input
+                          type="text"
+                          value={otpPhone}
+                          onChange={(e) => setOtpPhone(e.target.value)}
+                          placeholder="যেমন: 017XXXXXXXX"
+                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-slate-200 transition-all shadow-inner"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-900/60 p-5 rounded-2xl border border-gray-200/60 dark:border-slate-800 space-y-4">
+                      <div className="flex items-center justify-between pb-3 border-b border-gray-200/50 dark:border-slate-800/80">
+                        <span className="text-[10.5px] font-black text-gray-400 uppercase tracking-wider">Device Auth Status</span>
+                        <span className={`text-[9.5px] uppercase font-black px-2.5 py-1 rounded-full border ${
+                          whatsappStatus === 'connected' 
+                            ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 shadow-xs' 
+                            : 'bg-rose-500/10 text-rose-500 border-rose-500/20'
+                        }`}>
+                          {whatsappStatus === 'connected' ? 'Connected / Active' : 'Disconnected'}
+                        </span>
+                      </div>
+
+                      {whatsappStatus === 'connected' ? (
+                        <div className="space-y-3">
+                          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold leading-normal">
+                            ✓ আপনার হোয়াটসঅ্যাপ সফলভাবে সংযুক্ত রয়েছে। এখন স্বয়ংক্রিয়ভাবে ইনভয়েস ডেলিভারি করা হবে।
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleUnlinkWhatsApp}
+                            className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 border border-rose-200/50 dark:border-rose-900/30 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98"
+                          >
+                            ডিসকানেক্ট করুন (Disconnect Session)
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-3.5">
+                          <p className="text-[11px] text-gray-400 leading-normal font-semibold">
+                            সংযোগ চালু করতে আপনার ফোন নাম্বার ইনপুট করে নিচের বাটনটিতে প্রেস করুন এবং মেসেঞ্জার লিঙ্ক কোড স্ক্যান করুন।
+                          </p>
+                          <div className="flex flex-col gap-2">
+                            <button
+                              type="button"
+                              onClick={handleGenerateOtp}
+                              disabled={isGeneratingOtp || !otpPhone}
+                              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-650 hover:to-teal-650 font-black rounded-xl text-xs text-white bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-all cursor-pointer border border-transparent disabled:opacity-50 flex items-center justify-center gap-1 shadow-md shadow-emerald-100 dark:shadow-none"
+                            >
+                              {isGeneratingOtp ? 'অপেক্ষা করুন...' : 'কিউআর কোড জেনারেট করুন (Generate QR Code)'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleResync}
+                              className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-bold rounded-xl text-xs transition-all cursor-pointer border border-indigo-100 dark:border-indigo-800/40"
+                            >
+                              Re-sync Connection
+                            </button>
+                          </div>
+
+                          {otpError && (
+                            <p className="text-[10px] text-rose-500 bg-rose-50 dark:bg-rose-950/20 border border-rose-100/55 p-2.5 rounded-xl font-bold whitespace-normal leading-normal">{otpError}</p>
+                          )}
+
+                          {otpCode && (
+                            <div className="bg-white dark:bg-slate-900 border border-indigo-500/25 p-4 rounded-xl text-center flex flex-col items-center space-y-3 shadow-md pb-5" id="qrcode">
+                              <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider animate-bounce">
+                                Scan QR to Link Device
+                              </p>
+                              <div className="bg-white p-2 rounded-xl shadow-sm border border-gray-105 flex justify-center max-w-[190px]">
+                                <QRCode 
+                                  value={otpCode}
+                                  size={180}
+                                  level="H"
+                                  className="animate-pulse duration-1000"
+                                  style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                                />
+                              </div>
+                              <p className="text-[9.5px] text-gray-400 leading-relaxed font-sans max-w-xs">
+                                WhatsApp Settings {'>'} Linked Devices {'>'} <strong>Link a Device</strong> দিয়ে এই কোডটি মোবাইল ক্যামেরা দিয়ে স্ক্যান করুন।
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Test Connection Section */}
+                    <div className="bg-indigo-50/40 dark:bg-slate-900/40 p-5 rounded-2xl border border-indigo-100/50 dark:border-slate-800/80 space-y-3.5">
+                      <div>
+                        <h4 className="text-xs font-black text-indigo-900 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <span className="flex h-2 w-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                          হোয়াটসঅ্যাপ কানেকশন টেস্ট (Test Connection)
+                        </h4>
+                        <p className="text-[10px] text-gray-400 font-medium">আপনার হোয়াটসঅ্যাপ গেটওয়েটি সঠিকভাবে বার্তা পাঠাচ্ছে কি না তা পরীক্ষা করুন</p>
+                      </div>
+                      <div className="space-y-2.5">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={testPhone}
+                            onChange={(e) => setTestPhone(e.target.value)}
+                            placeholder="টেস্ট নম্বর দিন (যেমন: 017XXXXXXXX)"
+                            className="w-full px-4 py-2.5 bg-white dark:bg-slate-950 border border-indigo-100 dark:border-slate-800 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-slate-200 transition-all shadow-inner"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSendTestMessage}
+                            disabled={testSending || !testPhone}
+                            className="px-5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-650 hover:to-indigo-650 text-white font-bold rounded-xl text-xs shadow-md transition-all whitespace-nowrap cursor-pointer active:scale-98 disabled:opacity-55"
+                          >
+                            {testSending ? 'পাঠানো হচ্ছে...' : 'টেস্ট মেসেজ পাঠান'}
+                          </button>
+                        </div>
+
+                        {testMsgStatus && (
+                          <p className="text-[10px] text-emerald-600 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100/55 p-2.5 rounded-xl font-bold whitespace-normal leading-normal">
+                            {testMsgStatus}
+                          </p>
+                        )}
+
+                        {testMsgError && (
+                          <p className="text-[10px] text-rose-500 bg-rose-50 dark:bg-rose-950/20 border border-rose-100/55 p-2.5 rounded-xl font-bold whitespace-normal leading-normal">
+                            {testMsgError}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-4 border-t border-gray-100 dark:border-slate-850">
+                    <div className="flex items-center gap-2">
+                      {saveSuccess && (
+                        <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest animate-bounce">
+                          সংরক্ষিত হয়েছে (Saved!)
+                        </span>
+                      )}
+                      <button
+                        onClick={() => {
+                          setIsSaving(true);
+                          setTimeout(() => {
+                            onSaveSettings({
+                              ...settings,
+                              zender_whatsapp_device_id: zenderDeviceId,
+                              zender_device_id: zenderDeviceId,
+                              zender_api_key: zenderApiKey || '4fe17fcfe73d5035f55b9144fa10e07443659005',
+                              zender_endpoint_url: 'https://app.sellerscampus.com/api/v1',
+                              default_route: 'whatsapp',
+                              whatsapp_status: whatsappStatus,
+                              waGatewayType: 'zender',
+                              smsGatewayType: 'none'
+                            });
+                            setIsSaving(false);
+                            setSaveSuccess(true);
+                            setTimeout(() => setSaveSuccess(false), 3000);
+                          }, 600);
+                        }}
+                        disabled={isSaving}
+                        className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500 rounded-xl font-bold text-xs shadow-md transition-all whitespace-nowrap cursor-pointer active:scale-98"
+                      >
+                        {isSaving ? 'সংরক্ষণ করা হচ্ছে...' : 'সেটিংস সংরক্ষণ করুন (Save)'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === 'config' && isMasterAdmin && (
               <motion.div
                 key="config-tab"
                 initial={{ opacity: 0, y: 15 }}
@@ -788,47 +1074,10 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
                       {/* Zender White-label Connector Area */}
                       <div className="bg-slate-100/50 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/80 p-4 rounded-xl space-y-4">
                           <h5 className="text-[11px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/20 px-2 py-1.5 rounded-lg border border-indigo-100/20 uppercase tracking-wider text-center">
-                            SellersCampus / Zender SaaS Credentials
+                            SellersCampus / Zender WhatsApp Configuration
                           </h5>
                           
                           <div className="space-y-3">
-                            <div>
-                              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">API Endpoint URL</label>
-                              <input
-                                type="text"
-                                value={zenderEndpointUrl}
-                                onChange={(e) => setZenderEndpointUrl(e.target.value)}
-                                placeholder="https://app.sellerscampus.com/api/v1"
-                                className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-slate-800 text-xs font-semibold focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">API Secret Key/Token</label>
-                              <div className="relative flex items-center w-full">
-                                <input
-                                  type={showApiKey ? "text" : "password"}
-                                  value={zenderApiKey}
-                                  onChange={(e) => setZenderApiKey(e.target.value)}
-                                  placeholder="Manual Zender token key"
-                                  className="w-full pl-3 pr-10 py-2 rounded-xl border border-gray-200 dark:border-slate-800 text-xs font-semibold focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
-                                />
-                                <button
-                                  type="button"
-                                  id="toggle-zender-token-visibility"
-                                  onClick={() => setShowApiKey(!showApiKey)}
-                                  className="absolute right-3 p-1 text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors focus:outline-none"
-                                  title={showApiKey ? "Hide Token" : "Show Token"}
-                                >
-                                  {showApiKey ? (
-                                    <EyeOff className="w-4 h-4" />
-                                  ) : (
-                                    <Eye className="w-4 h-4" />
-                                  )}
-                                </button>
-                              </div>
-                            </div>
-
                             <div>
                               <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Device Session ID</label>
                               <div className="flex gap-2">
@@ -900,14 +1149,23 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
                                         placeholder="input Your WhatsApp business number (e.g. 016XXXXXXXX)"
                                         className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-slate-800 text-xs font-mono font-bold focus:ring-1 focus:ring-indigo-500 outline-none bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
                                       />
-                                      <button
-                                        type="button"
-                                        onClick={handleGenerateOtp}
-                                        disabled={isGeneratingOtp}
-                                        className="w-full py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 font-bold rounded-xl text-xs text-white transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1"
-                                      >
-                                        {isGeneratingOtp ? 'অপেক্ষা করুন...' : 'কিউআর কোড জেনারেট করুন (Generate QR Code)'}
-                                      </button>
+                                      <div className="flex flex-col gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={handleGenerateOtp}
+                                          disabled={isGeneratingOtp}
+                                          className="w-full py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 font-bold rounded-xl text-xs text-white transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1"
+                                        >
+                                          {isGeneratingOtp ? 'অপেক্ষা করুন...' : 'লংকিং কোড জেনারেট করুন (Get Pairing Code)'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={handleResync}
+                                          className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition-all cursor-pointer border border-indigo-100"
+                                        >
+                                          Re-sync Connection
+                                        </button>
+                                      </div>
                                     </div>
 
                                     {otpError && (
@@ -917,19 +1175,27 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
                                     {otpCode && (
                                       <div className="bg-white dark:bg-slate-900 border border-indigo-500/30 p-3.5 rounded-2xl text-center flex flex-col items-center space-y-3 shadow-sm" id="qrcode">
                                         <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider animate-bounce">
-                                          Scan to Link Device
+                                          {otpCode.length < 40 ? 'Your 8-Digit Pairing Code' : 'Scan to Link Device'}
                                         </p>
                                         <div className="bg-white p-2 rounded-xl shadow-sm border border-gray-100 flex justify-center w-full">
-                                          <QRCode 
-                                            value={otpCode}
-                                            size={180}
-                                            level="H"
-                                            className="animate-pulse duration-1000"
-                                            style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                          />
+                                          {otpCode.length < 40 ? (
+                                            <div className="py-4 px-2 tracking-widest text-3xl font-black font-mono text-slate-800">
+                                              {otpCode}
+                                            </div>
+                                          ) : (
+                                            <QRCode 
+                                              value={otpCode}
+                                              size={180}
+                                              level="H"
+                                              className="animate-pulse duration-1000"
+                                              style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                                            />
+                                          )}
                                         </div>
                                         <p className="text-[9px] text-gray-400 leading-normal font-sans">
-                                          Go to WhatsApp Settings {'>'} Linked Devices {'>'} <strong>Link a Device</strong> and scan this code.
+                                          {otpCode.length < 40 
+                                            ? 'Enter this 8-digit code in WhatsApp > Linked Devices > Link with phone number.'
+                                            : 'Go to WhatsApp Settings > Linked Devices > Link a Device and scan this code.'}
                                         </p>
                                       </div>
                                     )}
@@ -943,12 +1209,68 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
                       <div className="p-3 bg-indigo-50/40 dark:bg-indigo-950/10 rounded-xl text-xs text-indigo-600 dark:text-indigo-400 leading-relaxed font-semibold">
                         SellersCampus Zender uses a central cloud node. Pair once and receive instant, automatic WhatsApp invoice drops.
                       </div>
+
+                      {/* Test Connection Section (Admin) */}
+                      <div className="bg-indigo-50/40 dark:bg-indigo-950/20 p-4 rounded-xl border border-indigo-100/50 dark:border-indigo-950/45 space-y-3">
+                        <div>
+                          <h6 className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="flex h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+                            হোয়াটসঅ্যাপ কানেকশন টেস্ট (Test Connection)
+                          </h6>
+                          <p className="text-[9px] text-gray-400 font-medium">আপনার হোয়াটসঅ্যাপ গেটওয়েটি সঠিকভাবে বার্তা পাঠাচ্ছে কি না তা পরীক্ষা করুন</p>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={testPhone}
+                              onChange={(e) => setTestPhone(e.target.value)}
+                              placeholder="টেস্ট নম্বর দিন (যেমন: 017XXXXXXXX)"
+                              className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 rounded-xl text-xs font-mono font-bold focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800 dark:text-slate-200 transition-all shadow-inner"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleSendTestMessage}
+                              disabled={testSending || !testPhone}
+                              className="px-4 py-1.5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-650 hover:to-indigo-650 text-white font-bold rounded-xl text-xs shadow-xs transition-all whitespace-nowrap cursor-pointer active:scale-98 disabled:opacity-55"
+                            >
+                              {testSending ? 'পাঠানো হচ্ছে...' : 'টেস্ট মেসেজ পাঠান'}
+                            </button>
+                          </div>
+
+                          {testMsgStatus && (
+                            <p className="text-[10.5px] text-emerald-600 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100/55 p-2 rounded-xl font-bold whitespace-normal leading-normal">
+                              {testMsgStatus}
+                            </p>
+                          )}
+
+                          {testMsgError && (
+                            <p className="text-[10.5px] text-rose-500 bg-rose-50 dark:bg-rose-950/20 border border-rose-100/55 p-2 rounded-xl font-bold whitespace-normal leading-normal">
+                              {testMsgError}
+                            </p>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
                   {/* SMS Hub */}
-                  <div className="bg-slate-50/60 dark:bg-slate-950/30 p-5 rounded-2xl border border-gray-100 dark:border-slate-850">
-                    <div className="flex items-center justify-between mb-4">
+                  <div className="bg-slate-50/60 dark:bg-slate-950/30 p-5 rounded-2xl border border-gray-100 dark:border-slate-850 relative overflow-hidden">
+                    {/* Coming Soon Overlay */}
+                    <div className="absolute inset-0 bg-slate-50/90 dark:bg-slate-950/95 backdrop-blur-[2px] z-10 flex flex-col items-center justify-center p-6 text-center">
+                      <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/45 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-3 border border-blue-100 dark:border-blue-900/30 shadow-sm animate-pulse">
+                        <Smartphone className="w-6 h-6 animate-bounce duration-1000" />
+                      </div>
+                      <span className="px-3 py-1 text-[9.5px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-400 bg-blue-100/60 dark:bg-blue-950/30 border border-blue-100/50 dark:border-blue-900/30 rounded-full mb-1.5">
+                        SMS Coming Soon
+                      </span>
+                      <h4 className="font-extrabold text-sm text-gray-950 dark:text-white mb-1">এসএমএস গেটওয়ে আসছে (SMS Gateway)</h4>
+                      <p className="text-[11px] text-gray-400 dark:text-slate-400 font-semibold max-w-xs leading-normal">
+                        মোবাইল সিম ও বাল্ক গেটওয়ের মাধ্যমে স্বয়ংক্রিয়ভাবে নোটিফিকেশন পাঠানোর সুবিধাটি খুব শীঘ্রই চালু হচ্ছে।
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between mb-4 opacity-20 select-none pointer-events-none">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-blue-50 dark:bg-blue-950/20 text-blue-600 rounded-xl flex items-center justify-center font-bold">
                           SMS

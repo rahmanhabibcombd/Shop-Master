@@ -289,9 +289,86 @@
         "exportedToSheet": { "type": "boolean" }
       },
       "required": ["title", "startTime", "endTime", "meetLink", "createdAt", "shopId"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "A shop product supplier details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "shopId": { "type": "string" },
+        "company": { "type": "string" },
+        "brand": { "type": "string" },
+        "srName": { "type": "string" },
+        "srPhone": { "type": "string" },
+        "srVisitDay": { "type": "string" },
+        "deliveryName": { "type": "string" },
+        "deliveryPhone": { "type": "string" },
+        "deliveryVisitDay": { "type": "string" },
+        "category": { "type": "string" },
+        "status": { "type": "string" },
+        "productCount": { "type": "number" }
+      },
+      "required": ["company", "brand", "srPhone", "shopId"]
+    },
+    "DraftInvoice": {
+      "title": "DraftInvoice",
+      "description": "A draft POS invoice configuration",
+      "type": "object",
+      "properties": {
+        "shopId": { "type": "string" },
+        "cart": { "type": "array" },
+        "discount": { "type": "number" },
+        "taxRate": { "type": "number" },
+        "customerId": { "type": "string" },
+        "walkInName": { "type": "string" },
+        "walkInPhone": { "type": "string" },
+        "finalTotal": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "orderId": { "type": "string" },
+        "tableNo": { "type": "string" },
+        "waiterId": { "type": "string" },
+        "waiterName": { "type": "string" }
+      },
+      "required": ["shopId", "cart", "finalTotal", "createdAt"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "A bug report, feature request, or feedback support ticket",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "shopId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string", "enum": ["bug", "feature", "question", "feedback"] },
+        "description": { "type": "string" },
+        "screenshot": { "type": "string" },
+        "rating": { "type": "number" },
+        "status": { "type": "string", "enum": ["open", "in_progress", "resolved", "closed"] },
+        "developerNote": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["shopId", "title", "type", "description", "createdAt"]
     }
   },
   "firestore": {
+    "/support_tickets/{ticketId}": {
+      "schema": "SupportTicket",
+      "description": "Collection of customer support tickets, bug reports, and feedback"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Collection of shop suppliers details"
+    },
+    "/draft_invoices/{draftId}": {
+      "schema": "DraftInvoice",
+      "description": "Collection of saved draft invoices configurations"
+    },
     "/warranty_records/{recordId}": {
       "schema": "WarrantyRecord",
       "description": "Collection of sold serialized warranty records"

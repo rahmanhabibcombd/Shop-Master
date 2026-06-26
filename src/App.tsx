@@ -2,13 +2,17 @@
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { MeetScheduler } from './components/MeetScheduler';
+import { BusinessMail } from './components/BusinessMail';
+import { SupportPage } from './components/SupportPage';
 import { bangladeshGeo } from './utils/bangladeshGeo';
 import { useVoiceSearch } from './hooks/useVoiceSearch';
 import { standardizeBn, toPhonetic, parseVoiceCommandQuantity, isPhoneticMatch, parseNewProductVoiceCommand, formatToBnDate } from './utils/voiceUtils';
 import { parseMathVoiceCommandAI } from './utils/mathVoiceParser';
 import { parsePosVoiceCommandAI } from './utils/aiVoiceParser';
 import { addToSyncQueue, getSyncQueue, removeFromSyncQueue } from './utils/offlineDb';
+import { syncGoogleContacts } from './utils/googleContactsSync';
 import { 
+  ArrowLeftRight,
   CheckSquare,
   LayoutDashboard, 
   Bot,
@@ -101,6 +105,8 @@ import {
   Coins,
   BarChart3,
   Smartphone,
+  Pill,
+  Truck,
   Monitor as MonitorIcon,
   Landmark,
   Lock,
@@ -125,11 +131,20 @@ import {
   BellRing,
   Tv,
   Mail,
-  Award
+  Award,
+  ChefHat,
+  Link,
+  Video,
+  Brain,
+  FileEdit,
+  DoorOpen,
+  Store,
+  Coffee
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Papa from 'papaparse';
+import { KitchenDisplay } from './components/KitchenDisplay';
 import { CategoryManagement } from './components/CategoryManagement';
 import { JarvisAI } from './components/JarvisAI';
 import { NetworkConsole } from './components/NetworkConsole';
@@ -138,20 +153,33 @@ import { SellerOrdersView } from './components/SellerOrdersView';
 import { PageManagement } from './components/PageManagement';
 import { MessagingGateway } from './components/MessagingGateway';
 import MainAdmin from './components/MainAdmin';
+import BusinessBio from './components/BusinessBio';
+import OnlineShop from './components/OnlineShop';
 import { LiveTVPortal } from './components/LiveTVPortal';
 import { GlobalPipPlayer } from './components/GlobalPipPlayer';
 import Dashboard from './components/Dashboard';
 import MembershipPage from './components/MembershipPage';
 import PremiumLockScreen from './components/PremiumLockScreen';
 import DamageExpirePage from './components/DamageExpirePage';
+import StockTransfer from './components/StockTransfer';
 import HowToUsePage from './components/HowToUsePage';
 import InventoryDashboard from './components/InventoryDashboard';
 import SalesCrmDashboard from './components/SalesCrmDashboard';
+import BranchCrm from './components/BranchCrm';
+import CentralWarehouse from './components/CentralWarehouse';
 import AccountingDashboard from './components/AccountingDashboard';
 import PaymentMethodManager from './components/PaymentMethodManager';
 import LoanManagement from './components/LoanManagement';
+import ServiceOfferDashboard from './components/ServiceOfferDashboard';
+import { MobileElectronicsView } from './components/MobileElectronicsView';
+import { PharmacyModuleView } from './components/PharmacyModuleView';
+import { DealershipModuleView } from './components/DealershipModuleView';
+import { HRM } from './components/HRM';
+import TableRoomPage from './components/TableRoomPage';
+import CommunityHubPage from './components/CommunityHubPage';
 
 import { fuzzyMatchProduct } from './utils/productMatcher';
+import { workspaceController } from './utils/workspaceController';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -209,6 +237,22 @@ import ReactBarcode from 'react-barcode';
 import QRCode from 'react-qr-code';
 
 // --- Types ---
+const isValidImageSource = (src: any): boolean => {
+  if (!src || typeof src !== 'string') return false;
+  const s = src.trim();
+  if (s.startsWith('<svg') || s.includes('xmlns="http://www.w3.org/2000/svg"')) return false;
+  return s.startsWith('data:image/') || s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/') || s.startsWith('./');
+};
+
+const getShopInitials = (name: string): string => {
+  if (!name) return 'M';
+  const cleanName = name.trim();
+  const parts = cleanName.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'M';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
+};
+
 type UserRole = 'admin' | 'manager' | 'assistant_manager' | 'sales_manager' | 'sales_team' | 'warehouse';
 
 interface AppUser {
@@ -223,6 +267,7 @@ interface AppUser {
 interface ShopSettings {
   name: string;
   address: string;
+  businessType?: 'Retail' | 'Restaurant' | 'Electronics' | 'Pharmacy' | 'Dealer';
   shopCode?: string;
   logoUrl?: string;
   logoBase64?: string;
@@ -254,6 +299,11 @@ interface ShopSettings {
   currencySymbol: string;
   jarvisLanguage: 'en' | 'bn';
   jarvisVoiceGender: 'male' | 'female';
+  multiBranchEnabled?: boolean;
+  warehouseEnabled?: boolean;
+  timeFormat?: '12h' | '24h';
+  alarmType?: 'local' | 'google';
+  autoReminderTime?: string;
 }
 
 const PRINT_TRANSLATIONS = {
@@ -433,6 +483,7 @@ const SYSTEM_TRANSLATIONS = {
     inventory: 'Inventory',
     sales: 'Sales History',
     pos: 'Point of Sale',
+    draftInvoice: 'Draft Invoice',
     customers: 'Customers',
     hishabNikash: 'Hishab Nikash',
     note: 'Note',
@@ -540,6 +591,7 @@ const SYSTEM_TRANSLATIONS = {
     inventory: 'ইনভেন্টরি',
     sales: 'বিক্রয় ইতিহাস',
     pos: 'পয়েন্ট অফ সেল',
+    draftInvoice: 'খসড়া ইনভয়েস',
     customers: 'ক্রেতাগণ',
     hishabNikash: 'হিসাব নিকাশ',
     note: 'নোট (Note)',
@@ -822,6 +874,7 @@ interface Customer {
   totalSpent: number;
   currentDue: number;
   dueDate?: string;
+  photoUrl?: string;
 }
 
 interface CustomerLog {
@@ -849,11 +902,15 @@ interface DuePayment {
 
 interface Note {
   id: string;
+  title?: string;
+  subject?: string;
   text: string;
   color: string;
   timestamp: any;
   priority?: 'low' | 'medium' | 'high';
   dueDate?: string;
+  googleTaskId?: string;
+  googleEventId?: string;
 }
 
 interface DailyClosing {
@@ -912,6 +969,21 @@ interface Employee {
   joiningDate?: string;
   schedule?: string;
   status: 'active' | 'inactive';
+  photoUrl?: string;
+  bloodGroup?: string;
+  emergencyPhone?: string;
+  paymentMode?: 'cash' | 'bank' | 'mfs';
+  bankName?: string;
+  accountNo?: string;
+  mfsNo?: string;
+  shiftStart?: string;
+  shiftEnd?: string;
+  yearlyLeaves?: number;
+  sector?: string;
+  shopId?: string;
+  allowLogin?: boolean;
+  username?: string;
+  password?: string;
 }
 
 interface RecycleItem {
@@ -1074,6 +1146,18 @@ const safeDate = (timestamp: any): Date => {
   return new Date(timestamp);
 };
 
+const combineDateAndTime = (dateStr?: string, timeStr?: string): Date => {
+  if (!dateStr && !timeStr) return new Date();
+  const d = dateStr ? new Date(dateStr) : new Date();
+  if (timeStr) {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    d.setHours(hours, minutes, 0, 0);
+  } else {
+    d.setHours(12, 0, 0, 0);
+  }
+  return d;
+};
+
 const generateInvoiceId = (prefix?: string): string => {
   const now = new Date();
   // Formula: time (h:mm) + date (dd) + month (MM) + year (yy)
@@ -1101,6 +1185,32 @@ export const fC = (amount: number | undefined | null) => {
   const symbol = (window as any)._globalCurrencySymbol || 'TK';
   const lang = (window as any)._globalLang || 'bn';
   return formatCurrency(amount, symbol, lang);
+};
+
+const formatTimeByPreference = (date: Date | string | number | undefined | null, settings?: ShopSettings): string => {
+  if (!date) return '';
+  const d = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date;
+  const is24h = settings?.timeFormat === '24h';
+  const lang = settings?.systemLanguage || settings?.printLanguage || 'en';
+  
+  const pattern = is24h ? 'HH:mm' : 'hh:mm a';
+  const formatted = format(d, pattern);
+  if (lang === 'bn') return toBengaliNumber(formatted);
+  if (lang === 'ar') return toArabicNumber(formatted);
+  return formatted;
+};
+
+const formatDateTimeByPreference = (date: Date | string | number | undefined | null, settings?: ShopSettings): string => {
+  if (!date) return '';
+  const d = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date;
+  const is24h = settings?.timeFormat === '24h';
+  const lang = settings?.systemLanguage || settings?.printLanguage || 'en';
+  
+  const pattern = is24h ? 'dd/MM/yyyy HH:mm' : 'dd/MM/yyyy hh:mm a';
+  const formatted = format(d, pattern);
+  if (lang === 'bn') return toBengaliNumber(formatted);
+  if (lang === 'ar') return toArabicNumber(formatted);
+  return formatted;
 };
 
 const fileToBase64 = (file: File): Promise<string> => {
@@ -1176,7 +1286,12 @@ const printDailyClosing = (closing: DailyClosing, settings: ShopSettings, user?:
 
   const formatVal = (num: number) => lang === 'bn' ? toBengaliNumber((num || 0).toFixed(2)) : (num || 0).toFixed(2);
   const formatDate = (dateStr: string) => lang === 'bn' ? toBengaliNumber(dateStr) : dateStr;
-  const formatDateTime = (date: Date) => lang === 'bn' ? toBengaliNumber(format(date, 'dd/MM/yyyy hh:mm a')) : format(date, 'dd/MM/yyyy hh:mm a');
+  const formatDateTime = (date: Date) => {
+    const is24h = settings.timeFormat === '24h';
+    const pattern = is24h ? 'dd/MM/yyyy HH:mm' : 'dd/MM/yyyy hh:mm a';
+    const formatted = format(date, pattern);
+    return lang === 'bn' ? toBengaliNumber(formatted) : formatted;
+  };
   
   const expectedCash = (closing.cashSales || 0) + (closing.collections || 0) - (closing.totalExpenses || 0);
   const discrepancy = (closing.cashInHand || 0) - expectedCash;
@@ -1310,11 +1425,16 @@ const printDailyClosing = (closing: DailyClosing, settings: ShopSettings, user?:
   printWindow.document.close();
 };
 
-const printInvoice = (sale: Sale, settings: ShopSettings) => {
+const printInvoice = (sale: Sale, settings: ShopSettings, options?: { isKOT?: boolean }) => {
   const lang = settings.printLanguage || 'bn';
   const t = PRINT_TRANSLATIONS[lang];
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
+
+  const isKOT = options?.isKOT || false;
+  const isRestaurant = settings.businessType === 'Restaurant';
+  const isElectronics = settings.businessType === 'Electronics';
+  const isPharmacy = settings.businessType === 'Pharmacy';
 
   const formatVal = (num: number) => {
     const formatted = (num || 0).toFixed(2);
@@ -1331,44 +1451,463 @@ const printInvoice = (sale: Sale, settings: ShopSettings) => {
   };
 
   const formatTime = (date: Date) => {
-    const formatted = format(date, 'HH:mm');
+    const is24h = settings.timeFormat === '24h';
+    const formatted = format(date, is24h ? 'HH:mm' : 'hh:mm a');
     if (lang === 'bn') return toBengaliNumber(formatted);
     if (lang === 'ar') return toArabicNumber(formatted);
     return formatted;
   };
 
-  const itemsHtml = sale.items.map(item => {
-    let qSuffix = '';
-    if (item.unit === 'unit') {
-      qSuffix = lang === 'bn' ? ' পিস' : lang === 'ar' ? ' وحدة' : ' p';
-    } else if (item.unit === 'kg') {
-      if (item.quantity >= 1) {
-        qSuffix = lang === 'bn' ? ' কেজি' : lang === 'ar' ? ' كجم' : ' K';
-      } else {
-        qSuffix = lang === 'bn' ? ' গ্রাম' : lang === 'ar' ? ' جم' : ' g';
-      }
-    }
-    
-    return `
-    <tr>
-      <td style="padding: 2px 0; vertical-align: top; text-align: ${lang === 'ar' ? 'right' : 'left'};">
-        <div style="font-weight: 500; font-size: 11px;">${item.productName}</div>
-      </td>
-      <td style="padding: 2px 0; text-align: center; vertical-align: top; font-size: 11px;">
-        ${lang === 'bn' ? toBengaliNumber(item.quantity.toString()) : lang === 'ar' ? toArabicNumber(item.quantity.toString()) : item.quantity}${qSuffix}
-      </td>
-      <td style="padding: 2px 0; text-align: ${lang === 'ar' ? 'left' : 'right'}; vertical-align: top; font-size: 11px;">
-        ${formatVal(item.price)}
-      </td>
-      <td style="padding: 2px 0; text-align: ${lang === 'ar' ? 'left' : 'right'}; vertical-align: top; font-size: 11px; font-weight: 600;">
-        ${formatVal(item.price * item.quantity)}
-      </td>
-    </tr>`;
-  }).join('');
-
-  const width = settings.receiptWidth || '58mm';
+  const width = isElectronics ? '210mm' : (settings.receiptWidth || '58mm');
   const changeAmount = Math.max(0, (sale.paidAmount || 0) - (sale.finalAmount || 0));
   const previousBalance = sale.previousBalance || 0;
+
+  let pageContent = '';
+
+  // 1. KOT TICKET (RESTAURANT - KITCHEN ORDER TICKET)
+  if (isRestaurant && isKOT) {
+    const kotItemsHtml = sale.items.map(item => {
+      return `
+      <tr style="border-bottom: 2px solid #000;">
+        <td style="padding: 6px 0; text-align: left; vertical-align: top;">
+          <div style="font-weight: 850; font-size: 14.5px; color: #000; line-height: 1.3;">• ${item.productName}</div>
+          ${item.foodVariant ? `<div style="font-size: 11px; font-weight: bold; margin: 2px 0; color: #444;">[সাইজ/Variant: ${item.foodVariant}]</div>` : ''}
+          ${item.cookingInstruction ? `
+            <div style="font-size: 12px; color: #d9381e; font-weight: 900; background: #fff1f0; border: 2px solid #d9381e; padding: 4px 6px; border-radius: 4px; margin-top: 4px; display: inline-block;">
+              ⚠️ রান্নার নির্দেশ: ${item.cookingInstruction}
+            </div>` : ''}
+        </td>
+        <td style="padding: 6px 0; text-align: right; vertical-align: middle; font-size: 19px; font-weight: 900; color: #000;">
+          X ${lang === 'bn' ? toBengaliNumber(item.quantity.toString()) : item.quantity}
+        </td>
+      </tr>`;
+    }).join('');
+
+    pageContent = `
+      <div class="kot-container" style="padding: 2mm 0; color: #000; font-weight: 700;">
+        <div style="text-align: center; border-bottom: 3px double #000; padding-bottom: 5px; margin-bottom: 10px;">
+          <h2 style="font-size: 20px; font-weight: 900; margin: 0; letter-spacing: 0.5px;">*** KITCHEN COPY (KOT) ***</h2>
+          <div style="font-size: 12px; font-weight: 800; margin-top: 3px;">কিচেন অর্ডার টিকিট</div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; margin-bottom: 10px; border-bottom: 2px solid #000; padding-bottom: 6px;">
+          <div><strong>KOT Order ID:</strong> #${lang === 'bn' ? toBengaliNumber(sale.id.slice(-6).toUpperCase()) : sale.id.slice(-6).toUpperCase()}</div>
+          <div style="display: flex; justify-content: space-between;">
+            <span><strong>Table/টেবিল:</strong> <span style="font-size: 15px; text-decoration: underline; background: #eee; padding: 0 4px;">${sale.tableNo || 'Walk-In'}</span></span>
+            <span><strong>Date:</strong> ${formatDate(safeDate(sale.timestamp))}</span>
+          </div>
+          ${sale.waiterName ? `<div><strong>Assigned Waitor:</strong> ${sale.waiterName}</div>` : ''}
+          <div><strong>Time:</strong> ${formatTime(safeDate(sale.timestamp))}</div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr style="border-bottom: 3px solid #000;">
+              <th style="text-align: left; padding-bottom: 4px; font-size: 13px;">Item / আইটেম</th>
+              <th style="text-align: right; padding-bottom: 4px; font-size: 13px; width: 60px;">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${kotItemsHtml}
+          </tbody>
+        </table>
+
+        <div style="margin-top: 25px; border-top: 2px dashed #000; padding-top: 8px; text-align: center; font-size: 12px; font-weight: bold;">
+          *** Send directly to Kitchen Station ***
+        </div>
+      </div>
+    `;
+
+  // 2. ELECTRONICS (FULL SIZE A4 WARRANTY INVOICE)
+  } else if (isElectronics) {
+    const electronicsItemsHtml = sale.items.map((item, index) => {
+      const qSuffix = item.unit === 'unit' ? ' Pcs' : ' Kg';
+      return `
+      <tr style="border-bottom: 1px solid #e2e8f0; vertical-align: middle;">
+        <td style="padding: 12px; text-align: center; font-size: 12px; font-weight: 600; color: #475569;">${lang === 'bn' ? toBengaliNumber(index + 1) : index + 1}</td>
+        <td style="padding: 12px; text-align: left; font-size: 12px;">
+          <div style="font-weight: 700; color: #1e293b; font-size: 13px;">${item.productName}</div>
+          ${item.cookingInstruction ? `<div style="font-size: 10.5px; color: #ef4444; font-weight: 700; margin-top: 2px;">Note: ${item.cookingInstruction}</div>` : ''}
+        </td>
+        <td style="padding: 12px; text-align: center; font-family: monospace; font-size: 11px; font-weight: 600; color: #64748b;">
+          ${(item as any).imei || (item as any).serialNumber || (item.productId ? `SN-${item.productId.substring(0, 8).toUpperCase()}` : 'N/A-STK')}
+        </td>
+        <td style="padding: 12px; text-align: center; font-size: 12px; font-weight: 800; color: #4f46e5; background-color: #f5f3ff;">
+          ${(item as any).warranty || '১ বছর (1 Year Warranty)'}
+        </td>
+        <td style="padding: 12px; text-align: center; font-size: 12px; font-weight: 700; color: #1e293b;">
+          ${lang === 'bn' ? toBengaliNumber(item.quantity.toString()) : item.quantity}${qSuffix}
+        </td>
+        <td style="padding: 12px; text-align: right; font-size: 12px; font-weight: 600; color: #1e293b;">
+          ${formatVal(item.price)}
+        </td>
+        <td style="padding: 12px; text-align: right; font-size: 12px; font-weight: 700; color: #111827;">
+          ${formatVal(item.price * item.quantity)}
+        </td>
+      </tr>`;
+    }).join('');
+
+    pageContent = `
+      <div class="a4-invoice-container" style="padding: 0; color: #1e293b;">
+        <!-- Clean Professional Header -->
+        <div style="display: flex; justify-content: space-between; align-items: start; border-bottom: 4px solid #4f46e5; padding-bottom: 20px; margin-bottom: 25px;">
+          <div>
+            ${settings.logoBase64 ? `<img src="${settings.logoBase64}" style="max-height: 22mm; margin-bottom: 10px; display: block;" />` : ''}
+            <h1 style="font-size: 26px; font-weight: 900; color: #1e1b4b; margin: 0; text-transform: uppercase; letter-spacing: -0.5px;">${settings.name}</h1>
+            <p style="font-size: 12px; color: #64748b; margin: 3px 0 0 0; font-weight: 600; max-width: 320px; line-height: 1.4;">${settings.address}</p>
+            ${settings.phone ? `<p style="font-size: 12px; color: #4f46e5; margin: 3px 0 0 0; font-weight: 700;">Mobile: ${settings.phone}</p>` : ''}
+          </div>
+          <div style="text-align: right;">
+            <div style="background-color: #4f46e5; color: white; padding: 6px 18px; border-radius: 8px; font-size: 14px; font-weight: 950; display: inline-block; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;">WARRANTY INVOICE</div>
+            <div style="font-size: 12px; font-weight: 600; color: #475569;">
+              <span style="display: block; margin-bottom: 2px;"><strong>Invoice No:</strong> #${sale.id.toUpperCase()}</span>
+              <span style="display: block; margin-bottom: 2px;"><strong>Date:</strong> ${formatDate(safeDate(sale.timestamp))}</span>
+              <span style="display: block;"><strong>Time:</strong> ${formatTime(safeDate(sale.timestamp))}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Meta Client Grid -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+          <div style="background-color: #f8fafc; border-left: 4px solid #4f46e5; padding: 15px; border-radius: 0 12px 12px 0;">
+            <h3 style="font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: #4f46e5; margin: 0 0 6px 0; font-weight: 900;">CUSTOMER INFORMATION</h3>
+            <div style="font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 3px;">Name: ${sale.customerName || 'Retail Customer/খুচরা ক্রেতা'}</div>
+            ${sale.customerPhone ? `<div style="font-size: 12px; color: #475569; font-weight: 600;">Phone: ${sale.customerPhone}</div>` : ''}
+          </div>
+          <div style="background-color: #f8fafc; border-left: 4px solid #10b981; padding: 15px; border-radius: 0 12px 12px 0; text-align: right;">
+            <h3 style="font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: #10b981; margin: 0 0 6px 0; font-weight: 900;">SALES AGENT DETAILS</h3>
+            <div style="font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 3px;">ShopMaster Terminals</div>
+            <div style="font-size: 12px; color: #475569; font-weight: 600;">System Generated Check</div>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+          <thead>
+            <tr style="background-color: #f1f5f9; border-top: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1;">
+              <th style="padding: 12px; font-size: 11px; font-weight: 900; text-transform: uppercase; color: #475569; text-align: center; width: 40px;">SL</th>
+              <th style="padding: 12px; font-size: 11px; font-weight: 900; text-transform: uppercase; color: #475569; text-align: left;">Item & Specification</th>
+              <th style="padding: 12px; font-size: 11px; font-weight: 900; text-transform: uppercase; color: #475569; text-align: center; width: 120px;">Serial/IMEI No</th>
+              <th style="padding: 12px; font-size: 11px; font-weight: 900; text-transform: uppercase; color: #475569; text-align: center; width: 150px; background-color: #e0e7ff; color: #4338ca;">Warranty Term</th>
+              <th style="padding: 12px; font-size: 11px; font-weight: 900; text-transform: uppercase; color: #475569; text-align: center; width: 60px;">Qty</th>
+              <th style="padding: 12px; font-size: 11px; font-weight: 900; text-transform: uppercase; color: #475569; text-align: right; width: 100px;">Unit Price</th>
+              <th style="padding: 12px; font-size: 11px; font-weight: 900; text-transform: uppercase; color: #475569; text-align: right; width: 110px;">Total Price</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${electronicsItemsHtml}
+          </tbody>
+        </table>
+
+        <!-- Totals & Info Block -->
+        <div style="display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; margin-top: 15px; page-break-inside: avoid;">
+          <div>
+            <!-- Professional detailed Warranty Terms and Conditions box -->
+            <div style="border: 1.5px solid #4f46e5; border-radius: 12px; padding: 14px; background-color: #fcfcff;">
+              <div style="font-weight: 900; font-size: 12.5px; color: #4f46e5; border-bottom: 1.5px solid #e0e7ff; padding-bottom: 6px; margin-bottom: 8px; display: flex; align-items: center; gap: 5px;">
+                🛡️ WARRANTY POLICY & GUIDELINES (ওয়ারেন্টি শর্তাবলী)
+              </div>
+              <ul style="margin: 0; padding-left: 14px; font-size: 11px; color: #475569; line-height: 1.5;">
+                <li style="margin-bottom: 3px;"><strong>Coverage:</strong> Standard warranty covers manufacturing defects and internal motherboard/component circuit failures.</li>
+                <li style="margin-bottom: 3px;"><strong>Void:</strong> Warranty ceases instantly due to physical screens cracks, heat damage, water/liquid penetration, lightning surges, or broken sticker seals.</li>
+                <li style="margin-bottom: 3px;"><strong>Claim:</strong> Physically bring this original invoice. No claim is accepted without verification. Service may require 10-14 days.</li>
+              </ul>
+            </div>
+          </div>
+          <div>
+            <div style="font-size: 13px; font-weight: 600; color: #475569; padding: 5px;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>Subtotal:</span> <span style="font-weight: 700; color: #1e293b;">${formatVal(sale.totalAmount)}</span></div>
+              ${sale.discount > 0 ? `<div style="display: flex; justify-content: space-between; margin-bottom: 5px; color: #ef4444;"><span>Discount:</span> <span>- ${formatVal(sale.discount)}</span></div>` : ''}
+              ${sale.taxAmount ? `<div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>Tax (VAT) ${sale.taxRate ? `(${sale.taxRate}%)` : ''}:</span> <span style="font-weight: 700; color: #1e293b;">+ ${formatVal(sale.taxAmount)}</span></div>` : ''}
+              <div style="border-top: 2px solid #cbd5e1; margin: 8px 0;"></div>
+              <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: 17px; color: #1e1b4b; margin-bottom: 8px;"><span>Grand Total:</span> <span>${formatVal(sale.finalAmount)}</span></div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px; color: #10b981; font-weight: 700;"><span>Amount Paid:</span> <span>${formatVal(sale.paidAmount)}</span></div>
+              <div style="border-top: 1px dotted #cbd5e1; margin: 6px 0;"></div>
+              <div style="display: flex; justify-content: space-between; font-weight: 800; color: #ef4444; font-size: 13.5px;"><span>Remaining Due:</span> <span>${formatVal(sale.finalAmount - (sale.paidAmount || 0))}</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ledger balance history if customer is linked -->
+        ${sale.customerId ? `
+        <div style="margin-top: 20px; border-top: 1px dashed #cbd5e1; padding-top: 10px; font-size: 11px; color: #475569; page-break-inside: avoid;">
+          <div style="font-weight: 700; margin-bottom: 3px; font-size: 11.5px;">CUSTOMER CREDIT STATEMENT</div>
+          <div style="display: flex; gap: 20px;">
+            <span><strong>Previous Balance Due:</strong> ${formatVal(previousBalance)}</span>
+            <span><strong>Today's Bill:</strong> ${formatVal(sale.finalAmount)}</span>
+            <span><strong>Total Outstanding:</strong> ${formatVal(sale.finalAmount + previousBalance - (sale.paidAmount || 0))}</span>
+          </div>
+        </div>
+        ` : ''}
+
+        <!-- Elegant signatures area -->
+        <div style="display: flex; justify-content: space-between; margin-top: 65px; font-size: 12px; page-break-inside: avoid;">
+          <div style="text-align: center; width: 40%; border-top: 1.5px solid #475569; padding-top: 8px; color: #475569;">
+            <strong>Customer Signature / ক্রেতার স্বাক্ষর</strong>
+          </div>
+          <div style="text-align: center; width: 40%; border-top: 1.5px solid #4f46e5; padding-top: 8px; color: #4f46e5;">
+            <strong>Authorized Stamp & Signature (ভারপ্রাপ্ত কর্মকর্তার স্বাক্ষর)</strong>
+          </div>
+        </div>
+
+        <div style="text-align: center; font-size: 11px; font-weight: 600; color: #64748b; margin-top: 55px; border-top: 1.5px solid #e2e8f0; padding-top: 12px; page-break-inside: avoid;">
+          ${settings.receiptFooter ? settings.receiptFooter.replace(/\n/g, '<br>') : 'Thank you for shopping high quality Electronics with us.'}
+        </div>
+      </div>
+    `;
+
+  // 3. PHARMACY (PRESCRIPTION-FRIENDLY TIMINGS AND GUIDELINES SLIP)
+  } else if (isPharmacy) {
+    const pharmacyItemsHtml = sale.items.map(item => {
+      const qSuffix = item.unit === 'unit' ? ' Pcs' : ' Unit';
+      return `
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td colspan="4" style="padding: 10px 0;">
+          <div style="font-weight: 800; font-size: 13.5px; color: #0f172a;">💊 ${item.productName}</div>
+          
+          <!-- Custom Timings Block -->
+          <div style="margin-top: 6px; padding: 6px 10px; background-color: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; font-size: 11px; line-height: 1.4;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-weight: bold; color: #166534; font-size: 11.5px;">⏰ Dose / সেবন মাত্রা:</span>
+              <span>
+                সকাল <span style="display:inline-block; border: 1.5px solid #166534; border-radius: 3px; width: 14px; height: 14px; vertical-align: middle; margin-right: 12px;">&nbsp;</span>
+                দুপুর <span style="display:inline-block; border: 1.5px solid #166534; border-radius: 3px; width: 14px; height: 14px; vertical-align: middle; margin-right: 12px;">&nbsp;</span>
+                রাত <span style="display:inline-block; border: 1.5px solid #166534; border-radius: 3px; width: 14px; height: 14px; vertical-align: middle;">&nbsp;</span>
+              </span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed #bbf7d0; padding-top: 4px; margin-top: 4px;">
+              <span style="color: #475569; font-weight: 600;">Rule / নিয়ম:</span>
+              <span>
+                খাবারের পূর্বে (Before) <span style="display:inline-block; border: 1.5px solid #475569; border-radius: 3px; width: 12px; height: 12px; vertical-align: middle; margin-right: 12px;">&nbsp;</span>
+                খাবারের পরে (After) <span style="display:inline-block; border: 1.5px solid #475569; border-radius: 3px; width: 12px; height: 12px; vertical-align: middle;">&nbsp;</span>
+              </span>
+            </div>
+            ${item.cookingInstruction ? `
+              <div style="margin-top: 5px; color: #d97706; font-weight: 800; border-top: 1px dotted #bbf7d0; padding-top: 4px;">
+                ✍️ নির্দেশ: ${item.cookingInstruction}
+              </div>` : ''}
+          </div>
+        </td>
+      </tr>
+      <tr style="border-bottom: 2px solid #e2e8f0; background: #fafafa;">
+        <td style="padding: 4px 6px; font-size: 11px; color: #64748b; font-weight: 700;">Qty: ${lang === 'bn' ? toBengaliNumber(item.quantity.toString()) : item.quantity}${qSuffix}</td>
+        <td style="padding: 4px 6px; font-size: 11px; color: #64748b; font-weight: 700;" colspan="2">Price: ${formatVal(item.price)}</td>
+        <td style="padding: 4px 6px; font-size: 11px; text-align: right; font-weight: 900; color: #000;">${formatVal(item.price * item.quantity)}</td>
+      </tr>`;
+    }).join('');
+
+    pageContent = `
+      <div class="pharmacy-invoice-container" style="padding: 2mm 0; color: #1e293b;">
+        <!-- Banner medical green accent -->
+        <div style="border: 2px solid #10b981; border-radius: 12px; padding: 10px; margin-bottom: 15px; background: #f0fdf4;">
+          <h2 style="font-size: 15px; font-weight: 900; text-align: center; color: #047857; margin: 0 0 5px 0; text-transform: uppercase;">Prescription & Patient Info (Rx)</h2>
+          <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: bold; color: #065f46;">
+            <div style="display: flex; justify-content: space-between;">
+              <span><strong>Doc/ডাক্তার:</strong> ________________________</span>
+              <span><strong>ID:</strong> #${lang === 'bn' ? toBengaliNumber(sale.id.slice(-6).toUpperCase()) : sale.id.slice(-6).toUpperCase()}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-top: 2px;">
+              <span><strong>Patient Name:</strong> ${sale.customerName || '________________________'}</span>
+              <span><strong>Age/Sex:</strong> _________</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-bottom: 10px;">
+          <h1 style="font-size: 18px; font-weight: 900; color: #0f172a; margin: 0;">${settings.name}</h1>
+          <p style="font-size: 11px; color: #64748b; margin: 2px 0 0 0; font-weight: 700;">${settings.address}</p>
+          ${settings.phone ? `<p style="font-size: 11px; color: #047857; margin: 2px 0 0 0; font-weight: 800;">Tel: ${settings.phone}</p>` : ''}
+        </div>
+
+        <div style="border-top: 2px solid #cbd5e1; border-bottom: 2px solid #cbd5e1; padding: 4px 0; margin-bottom: 10px; display: flex; justify-content: space-between; font-size: 11px; font-weight: bold;">
+          <span>Invoice No: #${sale.id.slice(-8).toUpperCase()}</span>
+          <span>Date: ${formatDate(safeDate(sale.timestamp))}</span>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse;">
+          <tbody>
+            ${pharmacyItemsHtml}
+          </tbody>
+        </table>
+
+        <!-- Totals details -->
+        <table style="width: 100%; margin-top: 15px; font-size: 12px; font-weight: bold;">
+          <tbody>
+            <tr>
+              <td style="padding: 2px 0; text-align: left;">Subtotal / উপ-মোট:</td>
+              <td style="padding: 2px 0; text-align: right;">${formatVal(sale.totalAmount)}</td>
+            </tr>
+            ${sale.discount > 0 ? `
+            <tr style="color: #ef4444;">
+              <td style="padding: 2px 0; text-align: left;">Discount / ছাড়:</td>
+              <td style="padding: 2px 0; text-align: right;">- ${formatVal(sale.discount)}</td>
+            </tr>` : ''}
+            ${sale.taxAmount ? `
+            <tr>
+              <td style="padding: 2px 0; text-align: left;">Tax / ভ্যাট:</td>
+              <td style="padding: 2px 0; text-align: right;">+ ${formatVal(sale.taxAmount)}</td>
+            </tr>` : ''}
+            <tr style="border-top: 2px solid #000; font-size: 14px;">
+              <td style="padding: 4px 0; text-align: left;">Total / গ্র্যান্ড মোট:</td>
+              <td style="padding: 4px 0; text-align: right; font-weight: 900;">${formatVal(sale.finalAmount)}</td>
+            </tr>
+            <tr style="border-top: 1px dotted #ccc;">
+              <td style="padding: 2px 0; text-align: left; color: #16a34a;">Paid / পরিশোধিত:</td>
+              <td style="padding: 2px 0; text-align: right; color: #16a34a;">${formatVal(sale.paidAmount)}</td>
+            </tr>
+            <tr style="color: #dc2626;">
+              <td style="padding: 2px 0; text-align: left;">Due / বাকি:</td>
+              <td style="padding: 2px 0; text-align: right;">${formatVal(sale.finalAmount - (sale.paidAmount || 0))}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Pharmacist alert warning -->
+        <div style="border: 1px dashed #ef4444; background: #fffbeb; border-radius: 8px; padding: 6px; font-size: 10px; color: #9a2b2b; text-align: center; margin-top: 15px; font-weight: 700; line-height: 1.3;">
+          ⚠️ বিশেষ সতর্কবার্তা: ডাক্তারের পরামর্শ ব্যতিত কোনো ঔষধ সেবন করবেন না। মেয়াদোত্তীর্ণ ঔষধ ফেরত নেওয়া হয়।
+        </div>
+
+        <div style="text-align: center; font-size: 11px; font-weight: bold; color: #64748b; border-top: 1px solid #cbd5e1; margin-top: 15px; padding-top: 8px;">
+          ${settings.receiptFooter ? settings.receiptFooter.replace(/\n/g, '<br>') : 'Thank you! Live healthy and secure.'}
+        </div>
+      </div>
+    `;
+
+  // 4. STANDARD RETAIL OR RESTAURANT CUSTOMER COPY SORTS
+  } else {
+    // Generate standard/restaurant layout items
+    const itemsHtml = sale.items.map(item => {
+      let qSuffix = '';
+      if (item.unit === 'unit') {
+        qSuffix = lang === 'bn' ? ' পিস' : lang === 'ar' ? ' وحدة' : ' p';
+      } else if (item.unit === 'kg') {
+        qSuffix = item.quantity >= 1 ? (lang === 'bn' ? ' কেজি' : lang === 'ar' ? ' كجم' : ' K') : (lang === 'bn' ? ' গ্রাম' : lang === 'ar' ? ' جم' : ' g');
+      }
+      
+      return `
+      <tr>
+        <td style="padding: 4px 0; vertical-align: top; text-align: ${lang === 'ar' ? 'right' : 'left'};">
+          <div style="font-weight: bold; font-size: 11.5px;">${item.productName}</div>
+          ${item.foodVariant ? `<div style="font-size: 10px; color:#555; font-weight:bold;">Variant: ${item.foodVariant}</div>` : ''}
+          ${item.cookingInstruction ? `<div style="font-size: 10px; color: #d9381e; font-weight: bold; background: #ffeef0; padding: 1px 4px; border-radius: 3px; display: inline-block;">⚠️ ${item.cookingInstruction}</div>` : ''}
+        </td>
+        <td style="padding: 4px 0; text-align: center; vertical-align: top; font-size: 11.5px; font-weight: bold;">
+          ${lang === 'bn' ? toBengaliNumber(item.quantity.toString()) : lang === 'ar' ? toArabicNumber(item.quantity.toString()) : item.quantity}${qSuffix}
+        </td>
+        <td style="padding: 4px 0; text-align: ${lang === 'ar' ? 'left' : 'right'}; vertical-align: top; font-size: 11.5px;">
+          ${formatVal(item.price)}
+        </td>
+        <td style="padding: 4px 0; text-align: ${lang === 'ar' ? 'left' : 'right'}; vertical-align: top; font-size: 11.5px; font-weight: 700;">
+          ${formatVal(item.price * item.quantity)}
+        </td>
+      </tr>`;
+    }).join('');
+
+    pageContent = `
+      <div class="header" style="text-align: center; margin-bottom: 2px;">
+        ${settings.logoBase64 ? `<img src="${settings.logoBase64}" class="logo" style="max-width: 25mm; max-height: 15mm; margin: 0 auto 2px auto; display: block;" />` : ''}
+        <div class="shop-name" style="font-size: 18px; font-weight: 800; margin-bottom: 1px; color: #000 !important;">${settings.name}</div>
+        <div class="shop-info" style="font-size: 13px; margin-bottom: 0px; color: #000 !important; font-weight: 600; line-height: 1.3;">${settings.address}</div>
+        ${settings.phone ? `<div class="shop-info" style="font-size: 13px; margin-bottom: 0px; color: #000 !important; font-weight: 600; line-height: 1.3;">${t.mobile}: ${lang === 'bn' ? toBengaliNumber(settings.phone) : lang === 'ar' ? toArabicNumber(settings.phone) : settings.phone}</div>` : ''}
+      </div>
+
+      <div class="divider" style="border-bottom: 1.5px solid #000; margin: 4px 0;"></div>
+
+      <!-- Dine-in Details for Restaurant Copy -->
+      ${isRestaurant ? `
+      <div style="font-size: 12px; margin-bottom: 5px; font-weight: 800; border: 1px solid #000; padding: 4px 6px; border-radius: 4px; display: flex; justify-content: space-between;">
+        <span>🍽️ টেবিল/Table: ${sale.tableNo || 'Walk-In'}</span>
+        ${sale.waiterName ? `<span>👤 ওয়েটার/Staff: ${sale.waiterName}</span>` : ''}
+      </div>
+      ` : ''}
+
+      <div class="meta-grid" style="display: flex; justify-content: space-between; font-size: 12px; margin: 4px 0; font-weight: 500; color: #000 !important;">
+        <div class="meta-left" style="display: flex; flex-direction: column; gap: 1px; text-align: ${lang === 'ar' ? 'right' : 'left'};">
+          <span><strong>${t.invoiceId}:</strong> #${lang === 'bn' ? toBengaliNumber(sale.id.slice(-8).toUpperCase()) : lang === 'ar' ? toArabicNumber(sale.id.slice(-8).toUpperCase()) : sale.id.slice(-8).toUpperCase()}</span>
+          <span><strong>${t.customer}:</strong> ${sale.customerName || t.retailSale}${sale.customerPhone ? `<br><strong>${t.phone}:</strong> ${lang === 'bn' ? toBengaliNumber(sale.customerPhone) : lang === 'ar' ? toArabicNumber(sale.customerPhone) : sale.customerPhone}` : ''}</span>
+        </div>
+        <div class="meta-right" style="text-align: ${lang === 'ar' ? 'left' : 'right'}; font-weight: bold;">
+          <span>${formatDate(safeDate(sale.timestamp))} ${formatTime(safeDate(sale.timestamp))}</span>
+        </div>
+      </div>
+
+      <div class="divider" style="border-bottom: 1.5px solid #000; margin: 4px 0;"></div>
+
+      <table style="width: 100%; border-collapse: collapse; margin-top: 2px; margin-bottom: 2px; color: #000 !important;">
+        <thead>
+          <tr>
+            <th style="width: 50%; font-size: 11.5px; text-align: ${lang === 'ar' ? 'right' : 'left'}; padding: 2px 0; font-weight: 800; color: #000 !important; border-bottom: 1.5px solid #000;">${t.item}</th>
+            <th style="width: 15%; font-size: 11.5px; text-align: center; border-bottom: 1.5px solid #000; padding: 2px 0;">${t.qty}</th>
+            <th style="width: 15%; font-size: 11.5px; text-align: ${lang === 'ar' ? 'left' : 'right'}; border-bottom: 1.5px solid #000; padding: 2px 0;">${t.price}</th>
+            <th style="width: 20%; font-size: 11.5px; text-align: ${lang === 'ar' ? 'left' : 'right'}; border-bottom: 1.5px solid #000; padding: 2px 0;">${t.amount}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsHtml}
+        </tbody>
+      </table>
+
+      <div class="divider" style="border-bottom: 1.5px solid #000; margin: 4px 0;"></div>
+
+      <div class="totals" style="font-size: 12px; margin-top: 2px; page-break-inside: avoid; color: #000 !important; font-weight: 600;">
+        <div class="total-row" style="display: flex; justify-content: space-between; margin: 1px 0;">
+          <span>${t.subtotal}:</span>
+          <span>${formatVal(sale.totalAmount)}</span>
+        </div>
+        
+        ${sale.discount > 0 ? `
+        <div class="total-row" style="display: flex; justify-content: space-between; margin: 1px 0;">
+          <span>${t.discount}:</span>
+          <span>- ${formatVal(sale.discount)}</span>
+        </div>
+        ` : ''}
+        
+        ${sale.taxAmount ? `
+        <div class="total-row" style="display: flex; justify-content: space-between; margin: 1px 0;">
+          <span>${t.tax}${sale.taxRate ? ` (${sale.taxRate}%)` : ''}:</span>
+          <span>+ ${formatVal(sale.taxAmount)}</span>
+        </div>
+        ` : ''}
+        
+        <div class="divider" style="border-bottom: 1.5px solid #000; margin: 4px 0;"></div>
+        
+        <div class="grand-total" style="display: flex; justify-content: space-between; font-weight: 800; font-size: 15px; margin: 2px 0;">
+          <span>${t.grandTotal}:</span>
+          <span>${formatVal(sale.finalAmount)}</span>
+        </div>
+        
+        <div class="divider" style="border-bottom: 1.5px solid #000; margin: 4px 0;"></div>
+        
+        <div class="total-row" style="display: flex; justify-content: space-between; margin: 1px 0;">
+          <span>${t.paid}:</span>
+          <span>${formatVal(sale.paidAmount)}</span>
+        </div>
+        
+        <div class="divider" style="border-bottom: 1.5px solid #000; margin: 4px 0;"></div>
+      </div>
+
+      <div class="due-amount" style="text-align: center; font-weight: 800; font-size: 13px; margin: 4px 0; color: #000 !important;">
+        ${t.due}: ${formatVal(sale.finalAmount - (sale.paidAmount || 0))}
+      </div>
+      
+      ${sale.customerId ? `
+      <div class="dashed-divider" style="border-bottom: 1px dashed #000; margin: 4px 0;"></div>
+      <div style="font-size: 10px; font-weight: 500; margin-top: 4px;">
+        <div style="text-align: center; font-weight: 700; margin-bottom: 2px;">${t.balanceSummary}</div>
+        <div style="display: flex; justify-content: space-between;"><span>${t.prevBalance}:</span> <span>${formatVal(previousBalance)}</span></div>
+        <div style="display: flex; justify-content: space-between;"><span>${t.todayBill}:</span> <span>${formatVal(sale.finalAmount)}</span></div>
+        <div style="display: flex; justify-content: space-between;"><span>${t.todayPaid}:</span> <span>- ${formatVal(sale.paidAmount)}</span></div>
+        <div class="divider" style="border-bottom: 1.5px solid #000; margin: 2px 0;"></div>
+        <div style="display: flex; justify-content: space-between; font-weight: 700;"><span>${t.currentBalance}:</span> <span>${formatVal(sale.finalAmount + previousBalance - (sale.paidAmount || 0))}</span></div>
+      </div>
+      ` : ''}
+
+      <div class="dashed-divider" style="border-bottom: 1px dashed #000; margin: 4px 0;"></div>
+
+      <div class="footer" style="text-align: center; font-size: 13px; line-height: 1.2; color: #000 !important; font-weight: 700; margin-top: 4px; page-break-inside: avoid;">
+        <div>${settings.receiptFooter ? settings.receiptFooter.replace(/\n/g, '<br>') : t.footer}</div>
+      </div>
+    `;
+  }
 
   const html = `<!DOCTYPE html>
     <html dir="${lang === 'ar' ? 'rtl' : 'ltr'}">
@@ -1382,141 +1921,28 @@ const printInvoice = (sale: Sale, settings: ShopSettings) => {
             width: ${width}; 
             max-width: 100%;
             margin: 0 auto; 
-            padding: 2mm 0; 
+            padding: ${isElectronics ? '15mm' : '2mm 1mm'}; 
             font-size: 11px; 
             line-height: 1.2;
             color: #000;
           }
-          .header { text-align: center; margin-bottom: 2px; }
-          .logo { max-width: 25mm; max-height: 15mm; margin: 0 auto 2px auto; display: block; }
-          .shop-name { font-size: 18px; font-weight: 800; margin-bottom: 1px; color: #000 !important; }
-          .shop-info { font-size: 13px; margin-bottom: 0px; color: #000 !important; font-weight: 600; line-height: 1.3; }
-          
-          .divider { border-bottom: 1.5px solid #000; margin: 2px 0; }
-          .dashed-divider { border-bottom: 1px dashed #000; margin: 2px 0; }
-          
-          .meta-grid { display: flex; justify-content: space-between; font-size: 12px; margin: 2px 0; font-weight: 500; color: #000 !important; }
-          .meta-left { display: flex; flex-direction: column; gap: 1px; text-align: ${lang === 'ar' ? 'right' : 'left'}; }
-          .meta-right { text-align: ${lang === 'ar' ? 'left' : 'right'}; }
-          
-          table { width: 100%; border-collapse: collapse; margin-top: 2px; margin-bottom: 2px; color: #000 !important; }
-          th { font-size: 11px; text-align: ${lang === 'ar' ? 'right' : 'left'}; padding: 2px 0; font-weight: 800; color: #000 !important; border-bottom: 1.5px solid #000;}
-          td { padding: 2px 0; border-bottom: 1px solid #000; font-weight: 500; }
-          
-          .totals { font-size: 12px; margin-top: 2px; page-break-inside: avoid; color: #000 !important; font-weight: 600; }
-          .total-row { display: flex; justify-content: space-between; margin: 1px 0; }
-          .grand-total { display: flex; justify-content: space-between; font-weight: 800; font-size: 15px; margin: 2px 0; }
-          
-          .due-amount { text-align: center; font-weight: 800; font-size: 13px; margin: 2px 0; color: #000 !important; }
-          
-          .footer { text-align: center; font-size: 13px; line-height: 1.2; color: #000 !important; font-weight: 700; margin-top: 4px; page-break-inside: avoid; }
           
           @media print {
-            @page { margin: 0; }
-            body { width: 100%; padding: 4mm 2mm; margin: 0; }
-            html, body {
-               height: auto;
+            @page { 
+              size: ${isElectronics ? 'A4' : 'auto'}; 
+              margin: ${isElectronics ? '10mm' : '0'}; 
+            }
+            body { 
+              width: 100%; 
+              padding: ${isElectronics ? '0' : '2mm 1mm'}; 
+              margin: 0; 
+              -webkit-print-color-adjust: exact;
             }
           }
         </style>
       </head>
       <body>
-        <div class="header">
-          ${settings.logoBase64 ? `<img src="${settings.logoBase64}" class="logo" />` : ''}
-          <div class="shop-name">${settings.name}</div>
-          <div class="shop-info">${settings.address}</div>
-          ${settings.phone ? `<div class="shop-info">${t.mobile}: ${lang === 'bn' ? toBengaliNumber(settings.phone) : lang === 'ar' ? toArabicNumber(settings.phone) : settings.phone}</div>` : ''}
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="meta-grid">
-          <div class="meta-left">
-            <span><strong>${t.invoiceId}:</strong> #${lang === 'bn' ? toBengaliNumber(sale.id) : lang === 'ar' ? toArabicNumber(sale.id) : sale.id}</span>
-            <span><strong>${t.customer}:</strong> ${sale.customerName || t.retailSale}${sale.customerPhone ? `<br><strong>${t.phone}:</strong> ${lang === 'bn' ? toBengaliNumber(sale.customerPhone) : lang === 'ar' ? toArabicNumber(sale.customerPhone) : sale.customerPhone}` : ''}</span>
-          </div>
-          <div class="meta-right">
-            <span>${formatDate(safeDate(sale.timestamp))} ${formatTime(safeDate(sale.timestamp))}</span>
-          </div>
-        </div>
-
-        <div class="divider"></div>
-
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 50%; text-align: ${lang === 'ar' ? 'right' : 'left'};">${t.item}</th>
-              <th style="width: 15%; text-align: center;">${t.qty}</th>
-              <th style="width: 15%; text-align: ${lang === 'ar' ? 'left' : 'right'};">${t.price}</th>
-              <th style="width: 20%; text-align: ${lang === 'ar' ? 'left' : 'right'};">${t.amount}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td colspan="4" style="padding: 0;"><div class="divider" style="margin: 0;"></div></td></tr>
-            ${itemsHtml}
-          </tbody>
-        </table>
-
-        <div class="divider"></div>
-
-        <div class="totals">
-          <div class="total-row">
-            <span>${t.subtotal}:</span>
-            <span>${formatVal(sale.totalAmount)}</span>
-          </div>
-          
-          ${sale.discount > 0 ? `
-          <div class="total-row">
-            <span>${t.discount}:</span>
-            <span>- ${formatVal(sale.discount)}</span>
-          </div>
-          ` : ''}
-          
-          ${sale.taxAmount ? `
-          <div class="total-row">
-            <span>${t.tax}${sale.taxRate ? ` (${sale.taxRate}%)` : ''}:</span>
-            <span>+ ${formatVal(sale.taxAmount)}</span>
-          </div>
-          ` : ''}
-          
-          <div class="divider"></div>
-          
-          <div class="grand-total">
-            <span>${t.grandTotal}:</span>
-            <span>${formatVal(sale.finalAmount)}</span>
-          </div>
-          
-          <div class="divider"></div>
-          
-          <div class="total-row">
-            <span>${t.paid}:</span>
-            <span>${formatVal(sale.paidAmount)}</span>
-          </div>
-          
-          <div class="divider"></div>
-        </div>
-
-        <div class="due-amount">
-          ${t.due}: ${formatVal(sale.finalAmount - (sale.paidAmount || 0))}
-        </div>
-        
-        ${sale.customerId ? `
-        <div class="dashed-divider"></div>
-        <div style="font-size: 10px; font-weight: 500; margin-top: 4px;">
-          <div style="text-align: center; font-weight: 700; margin-bottom: 2px;">${t.balanceSummary}</div>
-          <div style="display: flex; justify-content: space-between;"><span>${t.prevBalance}:</span> <span>${formatVal(previousBalance)}</span></div>
-          <div style="display: flex; justify-content: space-between;"><span>${t.todayBill}:</span> <span>${formatVal(sale.finalAmount)}</span></div>
-          <div style="display: flex; justify-content: space-between;"><span>${t.todayPaid}:</span> <span>- ${formatVal(sale.paidAmount)}</span></div>
-          <div class="divider" style="margin: 2px 0;"></div>
-          <div style="display: flex; justify-content: space-between; font-weight: 700;"><span>${t.currentBalance}:</span> <span>${formatVal(sale.finalAmount + previousBalance - (sale.paidAmount || 0))}</span></div>
-        </div>
-        ` : ''}
-
-        <div class="dashed-divider"></div>
-
-        <div class="footer">
-          <div>${settings.receiptFooter ? settings.receiptFooter.replace(/\n/g, '<br>') : t.footer}</div>
-        </div>
+         ${pageContent}
       </body>
       <script>
         window.onload = () => {
@@ -1526,6 +1952,7 @@ const printInvoice = (sale: Sale, settings: ShopSettings) => {
       </script>
     </html>
   `;
+
   printWindow.document.write(html);
   printWindow.document.close();
 };
@@ -1646,100 +2073,61 @@ const printPaymentReceipt = (payment: DuePayment, customerName: string, settings
 };
 
 const callWhatsAppApi = async (phone: string, message: string, settings: ShopSettings, saleId?: string) => {
-  let method = settings.waGatewayType || 'manual';
-  let defaultRoute = (settings as any).default_route || 'manual_redirect';
+  // Check trial limits first
+  const createdDate = settings?.createdAt ? new Date(settings.createdAt) : new Date();
+  const trialEnd = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000); // 90 days trial limit
+  const isPremium = settings?.plan && settings.plan !== 'free'; // Ensure they have a premium package
+  
+  if (!isPremium && trialEnd.getTime() < new Date().getTime()) {
+    window.dispatchEvent(new CustomEvent('showTrialExpiredModal'));
+    return { success: false, error: 'Trial expired' };
+  }
+
   const cleanPhone = (phone || '').replace(/\D/g, '');
   const formattedPhone = cleanPhone.startsWith('880') ? cleanPhone : `880${cleanPhone.startsWith('0') ? cleanPhone.slice(1) : cleanPhone}`;
 
-  if ((settings as any).whatsapp_status === 'connected') {
-     if (method === 'manual') method = 'zender';
-     if (defaultRoute === 'manual_redirect') defaultRoute = 'whatsapp';
-  }
-
-  if (method === 'zender' || method === 'walink' || defaultRoute === 'whatsapp' || defaultRoute === 'sms') {
-    try {
-      const response = await fetch('/api/gateways/dispatch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          shopId: settings.id || 'pos-merchant-master',
-          sale: {
-            id: saleId || 'pos-' + Math.floor(Math.random() * 100000),
-            customerPhone: formattedPhone,
-            message: message
-          },
+  try {
+    const response = await fetch('/api/gateways/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shopId: settings.id || 'pos-merchant-master',
+        sale: {
+          id: saleId || 'pos-' + Math.floor(Math.random() * 100000),
+          customerPhone: formattedPhone,
+          message: message
+        },
           gatewayConfig: {
-            default_route: defaultRoute,
-            zender_api_key: (settings as any).zender_api_key || settings.waToken || '',
-            zender_whatsapp_device_id: (settings as any).zender_whatsapp_device_id || '',
-            zender_sms_device_id: (settings as any).zender_sms_device_id || ''
-          }
-        })
-      });
+          default_route: 'whatsapp',
+          zender_api_key: (settings as any).waLinkSecret || (settings as any).zender_api_key || settings.waToken || '4fe17fcfe73d5035f55b9144fa10e07443659005',
+          zender_whatsapp_device_id: settings.waInstanceId || (settings as any).zender_whatsapp_device_id || (settings as any).zender_device_id || '',
+          zender_endpoint_url: 'https://app.sellerscampus.com/api/v1'
+        }
+      })
+    });
 
-      if (response.ok) {
-        const data = await response.json();
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success) {
         return { success: true, result: data };
+      } else {
+        console.error('[Dispatch controller failure]', data.error);
+        return { success: false, error: data.error };
       }
-    } catch (dispatchErr) {
-      console.error('[Dispatch controller failure, falling back to manual redirect]', dispatchErr);
+    } else {
+      let errorMsg = 'Server returned ' + response.status;
+      try {
+        const errorData = await response.json();
+        if (errorData.error) errorMsg = errorData.error;
+      } catch (e) {
+        // failed to parse
+      }
+      return { success: false, error: errorMsg };
     }
+  } catch (dispatchErr) {
+    console.error('[Dispatch controller failure]', dispatchErr);
+    return { success: false, error: dispatchErr };
   }
-
-  if (method !== 'manual' && method !== 'zender' && settings.waToken) {
-    try {
-      let finalResponse;
-      if (method === 'metacloud' && settings.waPhoneNumberId) {
-        const url = `https://graph.facebook.com/v20.0/${settings.waPhoneNumberId}/messages`;
-        finalResponse = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${settings.waToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            messaging_product: "whatsapp",
-            recipient_type: "individual",
-            to: formattedPhone,
-            type: "text",
-            text: { body: message }
-          })
-        });
-      } else if (method === 'generic' && settings.waApiUrl) {
-        let body: any = {};
-        if (settings.waApiUrl?.includes('ultramsg')) {
-          body = { token: settings.waToken, to: formattedPhone, body: message };
-        } else {
-          body = { instance: settings.waInstanceId, token: settings.waToken, to: formattedPhone, message };
-        }
-        finalResponse = await fetch(settings.waApiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-      }
-
-      if (finalResponse) {
-        const result = await finalResponse.json();
-        if (finalResponse.ok) {
-          return { success: true, result };
-        } else {
-          return { success: false, error: result };
-        }
-      }
-    } catch (error) {
-      return { success: false, error };
-    }
-  }
-
-  // Fallback to manual
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  if (isMobile) {
-    window.open(`https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`, '_blank');
-  } else {
-    window.open(`https://web.whatsapp.com/send?phone=${formattedPhone}&text=${encodeURIComponent(message)}`, '_blank');
-  }
-  return { success: true, fallback: true };
 };
 
 const generatePersonalizedMessage = async (customer: Customer | null | undefined, sale: Sale | null, type: 'invoice' | 'reminder', lang: 'en' | 'bn' | 'ar', settings: ShopSettings) => {
@@ -1815,7 +2203,7 @@ const sendWhatsAppInvoice = async (sale: Sale, settings: ShopSettings, lang: 'en
       '{{dueAmount}}': (sale.finalAmount - sale.paidAmount).toString(),
       '{{prevBalance}}': previousBalance.toString(),
       '{{currentBalance}}': currentBalance.toString(),
-      '{{invoiceLink}}': `https://${window.location.host}/invoice/${sale.id}`,
+      '{{invoiceLink}}': '', // explicit request to not include links
       '{{items}}': sale.items.map(item => `• ${item.productName}: ${item.quantity} x ${item.price}`).join('\n')
     };
 
@@ -1843,23 +2231,19 @@ const sendWhatsAppInvoice = async (sale: Sale, settings: ShopSettings, lang: 'en
         `*আজকের বিল:* ${settings.currencySymbol} ${sale.finalAmount}\n` +
         `*টোটাল বাকি:* ${settings.currencySymbol} ${(sale.finalAmount + previousBalance - (sale.paidAmount || 0))}\n\n` +
         `আপনার কেনাকাটার জন্য ধন্যবাদ!\n` +
-        `ইনভয়েস দেখুন: https://${window.location.host}/invoice/${sale.id}`;
-    } else if (!message.includes(window.location.host)) {
-      message += `\n\nইনভয়েস দেখুন: https://${window.location.host}/invoice/${sale.id}`;
+        `দয়া করে ইনভয়েস নাম্বার দিয়ে আপনার অর্ডার স্ট্যাটাস চেক করুন।`;
     }
   }
 
   const result = await callWhatsAppApi(sale.customerPhone, message, settings, sale.id);
-  if (!result.fallback) {
-    if (result.success) {
-      console.log('✅ WhatsApp invoice sent automatically.');
+  if (result.success) {
+    console.log('✅ WhatsApp invoice sent automatically.');
+  } else {
+    const errorMsg = typeof result.error === 'string' ? result.error : (result.error as any)?.message || 'Unknown error';
+    if (errorMsg === 'Failed to fetch') {
+      console.warn('❌ Automatic delivery skipped: No internet connection or API unreachable.');
     } else {
-      const errorMsg = typeof result.error === 'string' ? result.error : (result.error as any)?.message || 'Unknown error';
-      if (errorMsg === 'Failed to fetch') {
-        console.warn('❌ Automatic delivery skipped: No internet connection or API unreachable.');
-      } else {
-        console.error('❌ Automatic delivery failed:', result.error);
-      }
+      console.error('❌ Automatic delivery failed:', result.error);
     }
   }
 };
@@ -1876,9 +2260,7 @@ const testWhatsAppConnection = async (settings: ShopSettings) => {
   const msg = 'MasterShop WhatsApp Automation Test Message. Connection successful! ✅';
   const result = await callWhatsAppApi(testPhone, msg, settings);
   
-  if (result.fallback) {
-    alert('Opened manual WhatsApp window (Background API may not be completely configured).');
-  } else if (result.success) {
+  if (result.success) {
     alert('Test Message Sent Successfully in the background!');
   } else {
     alert('Failed to send test message: ' + JSON.stringify(result.error));
@@ -2196,7 +2578,7 @@ function SettingsPanel({
 
   const systemLang = settings.systemLanguage || 'en';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
-  const [activeSubTab, setActiveSubTab] = useState<'shop' | 'users' | 'download' | 'network'>('shop');
+  const [activeSubTab, setActiveSubTab] = useState<'shop' | 'download' | 'network'>('shop');
   const shopCodeForQr = (settings.shopCode || settings.shopId || '').toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '').slice(0, 6);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(settings.logoBase64 || null);
@@ -2271,6 +2653,7 @@ function SettingsPanel({
       ...settings,
       shopCode: ((formData.get('shopCode') as string) || (settings.shopCode || settings.shopId || '').toString()).replace(/^SHP-/i, '').replace(/[^0-9]/g, '').slice(0, 6) || settings.shopCode,
       name: formData.get('name') as string,
+      businessType: (formData.get('businessType') as any) || settings.businessType || 'Retail',
       platformTitle: formData.get('platformTitle') as string,
       address: formData.get('address') as string,
       phone: (formData.get('phone') || formData.get('whatsapp')) as string,
@@ -2297,6 +2680,8 @@ function SettingsPanel({
       waToken: formData.get('waToken') as string,
       autoSendWhatsApp: formData.get('autoSendWhatsApp') === 'on',
       aiWhatsAppEnabled: formData.get('aiWhatsAppEnabled') === 'on',
+      multiBranchEnabled: formData.get('multiBranchEnabled') === 'on',
+      warehouseEnabled: formData.get('warehouseEnabled') === 'on',
       receiptWidth: formData.get('receiptWidth') as '58mm' | '80mm',
       receiptFooter: isBrandingAuthorized ? (formData.get('receiptFooter') as string) : (settings.receiptFooter || "Thank you for shopping with us!\nPowered by ShopMaster"),
       waTemplateEnglish: formData.get('waTemplateEnglish') as string,
@@ -2306,6 +2691,9 @@ function SettingsPanel({
       currencySymbol: formData.get('currencySymbol') as string,
       jarvisLanguage: formData.get('jarvisLanguage') as 'en' | 'bn',
       jarvisVoiceGender: formData.get('jarvisVoiceGender') as 'male' | 'female',
+      timeFormat: (formData.get('timeFormat') as '12h' | '24h') || '12h',
+      alarmType: (formData.get('alarmType') as 'local' | 'google') || 'local',
+      autoReminderTime: formData.get('autoReminderTime') as string || '',
     });
   };
 
@@ -2364,12 +2752,6 @@ function SettingsPanel({
           Shop Profile
         </button>
         <button 
-          onClick={() => setActiveSubTab('users')}
-          className={`px-6 py-3 font-bold transition-all border-b-2 whitespace-nowrap ${activeSubTab === 'users' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-400'}`}
-        >
-          User Management
-        </button>
-        <button 
           onClick={() => setActiveSubTab('download')}
           className={`px-6 py-3 font-bold transition-all border-b-2 whitespace-nowrap ${activeSubTab === 'download' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-400'}`}
         >
@@ -2391,20 +2773,29 @@ function SettingsPanel({
         <div className="bg-gradient-to-b from-white to-slate-50 p-8 rounded-[2rem] shadow-xs border border-gray-100 w-full max-w-5xl mx-auto hover:shadow-xl transition-all duration-300">
           <div className="mb-10 text-center flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-left flex items-center gap-4">
-              {settings.logoBase64 || settings.logoUrl ? (
-                <div className="w-14 h-14 rounded-xl overflow-hidden shadow-sm border border-gray-100 bg-white p-1">
-                  <img src={settings.logoBase64 || settings.logoUrl} alt="Shop Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
-                </div>
-              ) : (
-                <div className="w-14 h-14 rounded-xl overflow-hidden shadow-sm border border-gray-100 bg-white p-1 select-none">
+              <div className="w-14 h-14 rounded-2xl overflow-hidden border border-gray-150 bg-white shadow-xs flex items-center justify-center shrink-0 relative select-none">
+                {isValidImageSource(settings.logoBase64 || settings.logoUrl) ? (
                   <img 
-                    src="/LOGO.JPG" 
+                    src={settings.logoBase64 || settings.logoUrl} 
                     alt="Shop Logo" 
-                    className="w-full h-full object-contain" 
+                    className="w-full h-full object-contain p-0.5 relative z-10" 
                     referrerPolicy="no-referrer" 
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      const fallback = e.currentTarget.parentElement?.querySelector('.logo-fallback');
+                      if (fallback) {
+                        (fallback as HTMLElement).style.display = 'flex';
+                      }
+                    }}
                   />
+                ) : null}
+                <div 
+                  className="logo-fallback absolute inset-0 w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-black text-sm select-none uppercase tracking-tight"
+                  style={{ display: isValidImageSource(settings.logoBase64 || settings.logoUrl) ? 'none' : 'flex' }}
+                >
+                  {getShopInitials(settings.name || '')}
                 </div>
-              )}
+              </div>
               <div>
                 <h3 className="text-2xl font-black text-gray-900">
                   Business Profile Settings
@@ -2432,6 +2823,24 @@ function SettingsPanel({
                   <div>
                     <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Shop Name <span className="text-red-500">*</span></label>
                     <input name="name" defaultValue={settings.name || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white font-bold transition-all" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-indigo-600 uppercase tracking-wider mb-2 flex items-center gap-1.5 select-none font-sans">
+                      <Briefcase className="w-4 h-4 text-indigo-500" /> Operational Business Field / ব্যবসায়িক ক্ষেত্র <span className="text-red-500">*</span>
+                    </label>
+                    <select 
+                      name="businessType" 
+                      defaultValue={settings.businessType || 'Retail'} 
+                      required 
+                      className="w-full px-4 py-3 rounded-xl border-2 border-indigo-100 hover:border-indigo-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-indigo-50/10 font-bold transition-all cursor-pointer shadow-xs text-sm"
+                    >
+                      <option value="Retail">Retail Store / সাধারণ রিটেল ও মুদি দোকান</option>
+                      <option value="Restaurant">Restaurant / রেস্টুরেন্ট ও কফি শপ</option>
+                      <option value="Electronics">Electronics / মোবাইল ও ইলেকট্রনিক্স শপ</option>
+                      <option value="Pharmacy">Pharmacy / মেডিসিন ও ফার্মেসি</option>
+                      <option value="Dealer">Dealer / ডিলারশিপ ও পাইকারি ব্যবসা</option>
+                    </select>
+                    <p className="text-[10px] text-indigo-400 font-bold mt-1 select-none">Choosing a category configures dynamic POS schemes and customized data models.</p>
                   </div>
                   <div>
                     <label className="block text-xs font-black text-green-600 uppercase tracking-wider mb-2 flex items-center gap-1">
@@ -2699,6 +3108,95 @@ function SettingsPanel({
                 )}
               </div>
 
+              {/* SECTION: BUSINESS MODULES */}
+              <div className="space-y-6">
+                <div className="border-b border-gray-150 pb-4">
+                  <h4 className="text-lg font-black text-gray-900 flex items-center gap-2">
+                    <Sliders className="w-5 h-5 text-indigo-500" />
+                    {systemLang === 'bn' ? 'ব্যবসায়িক মডিউল কাস্টমাইজেশন' : 'Business Module Customization'}
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {systemLang === 'bn' 
+                      ? 'আপনার ব্যবসার প্রয়োজন অনুযায়ী নির্দিষ্ট মডিউলগুলো চালু বা বন্ধ করুন। অব্যবহৃত মডিউল বন্ধ রাখলে সিস্টেমটি সহজ থাকবে।' 
+                      : 'Enable or disable specific advanced modules based on your business size and operational requirements.'}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Multi-Branch Toggle */}
+                  <div className="bg-white p-6 rounded-3xl border border-gray-200/85 hover:border-indigo-400 hover:shadow-lg transition-all duration-300 flex flex-col justify-between">
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 rounded-2xl flex items-center justify-center shrink-0">
+                        <Building2 className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <h5 className="font-black text-gray-900 text-sm md:text-base">
+                          {systemLang === 'bn' ? 'মাল্টি-ব্রাঞ্চ সেটিংস (Multi-Branch)' : 'Multi-Branch Management'}
+                        </h5>
+                        <p className="text-[11px] md:text-xs text-gray-500 leading-relaxed">
+                          {systemLang === 'bn'
+                            ? 'একাধিক দোকান বা ব্রাঞ্চ পরিচালনা করুন। বন্ধ রাখলে ব্রাঞ্চ সিলেকশন এবং অতিরিক্ত ব্রাঞ্চের হিসেব লুকানো থাকবে।'
+                            : 'Manage multiple physical store branches. Disabling this hides branch filters and defaults all actions to your primary store.'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-100">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                        {systemLang === 'bn' ? 'স্ট্যাটাস' : 'Status'}
+                      </span>
+                      <label className="relative inline-flex items-center cursor-pointer select-none">
+                        <input 
+                          type="checkbox" 
+                          name="multiBranchEnabled" 
+                          defaultChecked={settings.multiBranchEnabled !== false}
+                          className="sr-only peer" 
+                        />
+                        <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-focus:ring-2 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:bg-slate-700 peer-checked:bg-indigo-600"></div>
+                        <span className="ml-3 text-xs font-black text-indigo-600 peer-checked:text-indigo-600 text-gray-500 uppercase tracking-wider">
+                          {systemLang === 'bn' ? 'সক্রিয়' : 'Active'}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Central Warehouse / Godown Toggle */}
+                  <div className="bg-white p-6 rounded-3xl border border-gray-200/85 hover:border-indigo-400 hover:shadow-lg transition-all duration-300 flex flex-col justify-between">
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 bg-amber-50 dark:bg-amber-950/30 text-amber-600 rounded-2xl flex items-center justify-center shrink-0">
+                        <Warehouse className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <h5 className="font-black text-gray-900 text-sm md:text-base">
+                          {systemLang === 'bn' ? 'সেন্ট্রাল ওয়্যারহাউস / গোডাউন (Godown)' : 'Central Warehouse / Godown'}
+                        </h5>
+                        <p className="text-[11px] md:text-xs text-gray-500 leading-relaxed">
+                          {systemLang === 'bn'
+                            ? 'মালামাল রাখার আলাদা গোডাউন এবং সেখান থেকে বিভিন্ন ব্রাঞ্চে প্রোডাক্ট ট্রান্সফার বা স্টক ট্র্যাকিং মডিউল সক্রিয় করুন।'
+                            : 'Track bulk stock in a centralized repository and manage inventory transfers between warehouse and branches.'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-100">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                        {systemLang === 'bn' ? 'স্ট্যাটাস' : 'Status'}
+                      </span>
+                      <label className="relative inline-flex items-center cursor-pointer select-none">
+                        <input 
+                          type="checkbox" 
+                          name="warehouseEnabled" 
+                          defaultChecked={settings.warehouseEnabled !== false}
+                          className="sr-only peer" 
+                        />
+                        <div className="w-11 h-6 bg-gray-250 rounded-full peer peer-focus:ring-2 peer-focus:ring-amber-300 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:bg-slate-700 peer-checked:bg-amber-500"></div>
+                        <span className="ml-3 text-xs font-black text-amber-600 peer-checked:text-amber-600 text-gray-500 uppercase tracking-wider">
+                          {systemLang === 'bn' ? 'সক্রিয়' : 'Active'}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* SECTION: LOCALIZATION */}
               <div className="space-y-6">
                 <div className="border-b border-gray-150 pb-4">
@@ -2742,6 +3240,17 @@ function SettingsPanel({
                       <span className="text-[9px] bg-gray-200 text-gray-600 px-2 py-0.5 rounded-lg border border-gray-300">LOCKED</span>
                     </div>
                   </div>
+                  <div className="bg-white p-5 rounded-2xl border border-gray-200 hover:border-indigo-400 hover:shadow-lg transition-all duration-300">
+                    <label className="block text-[11px] font-black text-gray-500 uppercase tracking-wider mb-2">Time Format / সময় বিন্যাস</label>
+                    <select 
+                      name="timeFormat" 
+                      defaultValue={settings.timeFormat || '12h'} 
+                      className="w-full px-4 py-3 rounded-xl border border-indigo-100 bg-white text-indigo-950 font-black text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-550 transition-all cursor-pointer"
+                    >
+                      <option value="12h">12-Hour (AM/PM) / ১২ ঘণ্টা</option>
+                      <option value="24h">24-Hour (Military) / ২৪ ঘণ্টা</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -2760,6 +3269,47 @@ function SettingsPanel({
                     </div>
                 </div>
               </div>
+
+               {/* SECTION: ALARM & REMINDER SETTINGS */}
+              <div className="space-y-6 mt-6">
+                <div className="border-b border-gray-150 pb-4">
+                  <h4 className="text-lg font-black text-gray-900">Alarms & Reminders / অ্যালার্ম ও রিমাইন্ডার</h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-white p-5 rounded-2xl border border-gray-200 hover:border-indigo-400 hover:shadow-lg transition-all duration-300">
+                    <label className="block text-[11px] font-black text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <Bell className="w-4 h-4 text-indigo-500" />
+                      Alarm Integration Mode / অ্যালার্ম মোড
+                    </label>
+                    <select 
+                      name="alarmType" 
+                      defaultValue={settings.alarmType || 'local'} 
+                      className="w-full px-4 py-3 rounded-xl border border-indigo-100 bg-white text-indigo-950 font-black text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-550 transition-all cursor-pointer"
+                    >
+                      <option value="local">Local Browser Alarm / ব্রাউজার অ্যালার্ম</option>
+                      <option value="google">Google Calendar Push / গুগল ক্যালেন্ডার পুশ</option>
+                    </select>
+                    <p className="text-[10px] text-gray-400 font-medium mt-1.5">
+                      Choose how daily notifications and task alarms are executed. Google Calendar sync requires Google OAuth login.
+                    </p>
+                  </div>
+                  <div className="bg-white p-5 rounded-2xl border border-gray-200 hover:border-indigo-400 hover:shadow-lg transition-all duration-300">
+                    <label className="block text-[11px] font-black text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <Clock className="w-4 h-4 text-indigo-500" />
+                      Daily Closing Auto-Reminder Time / ক্লোজিং রিমাইন্ডার সময়
+                    </label>
+                    <input 
+                      type="time" 
+                      name="autoReminderTime" 
+                      defaultValue={settings.autoReminderTime || ''} 
+                      className="w-full px-4 py-3 rounded-xl border border-indigo-100 bg-white text-indigo-950 font-black text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-550 transition-all cursor-pointer font-mono"
+                    />
+                    <p className="text-[10px] text-gray-400 font-medium mt-1.5">
+                      Specify a time to automatically trigger an browser sound chime and visual push alert reminding you to perform daily closing.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </fieldset>
             
             <div className="flex justify-end pt-8">
@@ -2772,192 +3322,7 @@ function SettingsPanel({
         </div>
       )}
 
-      {activeSubTab === 'users' && (
-        <div className="space-y-8">
-          <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-            <h3 className="text-lg font-bold mb-6">Add New User</h3>
-            <form onSubmit={handleUserSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
-              <fieldset disabled={!isAuthorized} className="contents">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Full/Staff Name</label>
-                  <input 
-                    name="displayName" 
-                    value={newDisplayName}
-                    onChange={(e) => setNewDisplayName(e.target.value)}
-                    placeholder="e.g. Karim Uddin"
-                    required 
-                    className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Auto-Created Username</label>
-                  <input 
-                    name="username" 
-                    type="text"
-                    disabled
-                    placeholder="Will auto-generate..."
-                    value={generatedUsername}
-                    className="w-full px-4 py-2 rounded-xl border border-gray-200 bg-gray-50 text-indigo-700 font-black outline-none text-sm font-mono cursor-not-allowed" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">6-Digit Password</label>
-                  <input 
-                    name="password" 
-                    type="text"
-                    pattern="[0-9]{6}"
-                    maxLength={6}
-                    minLength={6}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value.replace(/\D/g, ''))}
-                    placeholder="6 digits (e.g. 123456)"
-                    required 
-                    className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-mono" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
-                  <select 
-                    name="role" 
-                    value={newRole}
-                    onChange={(e) => setNewRole(e.target.value as UserRole)}
-                    required 
-                    className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
-                  >
-                    <option value="manager">Manager</option>
-                    <option value="assistant_manager">Assistant Manager</option>
-                    <option value="sales_manager">Sales Manager</option>
-                    <option value="sales_team">Sales Team</option>
-                    <option value="warehouse">Warehouse</option>
-                  </select>
-                </div>
-                <div className="lg:col-span-4 flex justify-end">
-                  <button type="submit" className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                    <Plus className="w-4 h-4" />
-                    Add User
-                  </button>
-                </div>
-              </fieldset>
-            </form>
-          </div>
 
-          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-            <table className="w-full text-left">
-              <thead className="bg-gray-50 border-b border-gray-100">
-                <tr>
-                  <th className="px-6 py-4 text-sm font-semibold text-gray-600">User / Staff Name</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-gray-600">Login Username</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-gray-600">Shop Code</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-gray-600">Password</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-gray-600">Role</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-gray-600 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {users.filter(u => !(u.email?.toLowerCase().trim() === 'stratproamz@gmail.com' || u.username?.toLowerCase().trim() === 'stratproamz@gmail.com')).map(u => (
-                  <tr key={u.id}>
-                    <td className="px-6 py-4 font-medium text-gray-900">{u.displayName}</td>
-                    <td className="px-6 py-4 text-gray-600 font-mono text-sm">{u.username}</td>
-                    <td className="px-6 py-4 text-gray-600 font-mono text-sm">{(settings.shopCode || '').toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '') || "N/A"}</td>
-                    <td className="px-6 py-4">
-                      {editingUserId === u.id ? (
-                        <div className="flex items-center gap-2">
-                          <input 
-                            type="text" 
-                            pattern="[0-9]{6}"
-                            maxLength={6}
-                            minLength={6}
-                            value={editingPassword}
-                            onChange={(e) => setEditingPassword(e.target.value.replace(/\D/g, ''))}
-                            className="w-24 px-2 py-1 rounded border border-indigo-300 focus:ring-2 focus:ring-indigo-500 outline-none text-xs font-mono"
-                          />
-                          <button
-                            onClick={async () => {
-                              if (editingPassword.length !== 6 || !/^\d+$/.test(editingPassword)) {
-                                alert("Password must be exactly 6 digits.");
-                                return;
-                              }
-                              if (onUpdateUser) {
-                                await onUpdateUser(u.id, { password: editingPassword });
-                              }
-                              setEditingUserId(null);
-                            }}
-                            className="px-2 py-1 bg-green-600 text-white text-xs font-bold rounded hover:bg-green-700 transition-colors"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => setEditingUserId(null)}
-                            className="px-2 py-1 bg-gray-200 text-gray-700 text-xs font-bold rounded hover:bg-gray-300 transition-colors"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-sm tracking-widest bg-gray-50 px-2 py-1 rounded border border-gray-100 min-w-[70px] inline-block text-center">
-                            {showPasswords[u.id] ? u.password : '••••••'}
-                          </span>
-                          <button 
-                            type="button"
-                            onClick={() => setShowPasswords(prev => ({ ...prev, [u.id]: !prev[u.id] }))}
-                            className="text-gray-400 hover:text-gray-600 p-1"
-                            title="Toggle Password Visibility"
-                          >
-                            {showPasswords[u.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              setEditingUserId(u.id);
-                              setEditingPassword(u.password);
-                            }}
-                            className="text-gray-400 hover:text-indigo-600 p-1"
-                            title="Change Password"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-xs font-bold uppercase">
-                        {u.role.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <button 
-                        disabled={!isAuthorized}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirmDeleteId === u.id) {
-                            onDeleteUser(u.id);
-                            setConfirmDeleteId(null);
-                          } else {
-                            setConfirmDeleteId(u.id);
-                          }
-                        }}
-                        className={`p-2 rounded-lg transition-all relative ${
-                          confirmDeleteId === u.id 
-                            ? "bg-red-600 text-white hover:bg-red-700 shadow-lg scale-110" 
-                            : "text-gray-400 hover:text-red-600 hover:bg-red-50"
-                        } disabled:opacity-30 disabled:cursor-not-allowed`}
-                        title={!isAuthorized ? "Only Master Admin can delete users" : (confirmDeleteId === u.id ? "Click again to confirm" : "Delete User")}
-                      >
-                        {confirmDeleteId === u.id ? (
-                          <span className="text-[10px] font-bold px-1 animate-pulse">Confirm?</span>
-                        ) : (
-                          <Trash2 className="w-4 h-4" />
-                        )}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {activeSubTab === 'download' && (
         <div className="space-y-8">
@@ -3444,17 +3809,28 @@ function ShopManagement({ shops }: { shops: any[] }) {
             className={`bg-white p-6 rounded-3xl border shadow-sm hover:shadow-xl transition-all group ${shop?.status === 'blocked' ? 'border-rose-200 bg-rose-50/10' : 'border-gray-100'}`}
           >
             <div className="flex items-start justify-between mb-4">
-              <div className="w-16 h-16 bg-gray-50 rounded-2xl overflow-hidden flex items-center justify-center border border-gray-100">
-                {shop.logo ? (
-                  <img src={shop.logo} alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
-                ) : (
+              <div className="w-16 h-16 bg-gray-50 rounded-2xl overflow-hidden flex items-center justify-center border border-gray-100 relative select-none">
+                {isValidImageSource(shop.logo || shop.logoUrl || shop.logoBase64) ? (
                   <img 
-                    src="/LOGO.JPG" 
+                    src={shop.logo || shop.logoUrl || shop.logoBase64} 
                     alt="Logo" 
-                    className="w-full h-full object-contain" 
+                    className="w-full h-full object-contain p-0.5 relative z-10" 
                     referrerPolicy="no-referrer" 
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      const fallback = e.currentTarget.parentElement?.querySelector('.logo-fallback');
+                      if (fallback) {
+                        (fallback as HTMLElement).style.display = 'flex';
+                      }
+                    }}
                   />
-                )}
+                ) : null}
+                <div 
+                  className="logo-fallback absolute inset-0 w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-black text-xl select-none uppercase tracking-tight"
+                  style={{ display: isValidImageSource(shop.logo || shop.logoUrl || shop.logoBase64) ? 'none' : 'flex' }}
+                >
+                  {getShopInitials(shop.name || '')}
+                </div>
               </div>
               <div className="flex flex-col items-end gap-2">
                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${shop?.status === 'blocked' ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-indigo-50 text-indigo-600'}`}>
@@ -3967,6 +4343,9 @@ const SidebarNavItem = ({ item, idx, activeTab, setActiveTab, setIsSidebarOpen, 
   const visibleSubItems = item.subItems 
     ? item.subItems.filter((subItem: any) => {
         if (subItem.emailScope) return user?.email?.toLowerCase().trim() === subItem.emailScope.toLowerCase().trim();
+        if (subItem.id === 'branch_crm' && shopSettings?.multiBranchEnabled === false) return false;
+        if (subItem.id === 'warehouse' && shopSettings?.warehouseEnabled === false) return false;
+        if (subItem.id === 'stock_transfer' && shopSettings?.warehouseEnabled === false) return false;
         return (user && user.role && subItem.roles && subItem.roles.includes(user.role)) || (subItem.id === 'shops' && isMasterAdmin);
       })
     : [];
@@ -4223,6 +4602,14 @@ export default function App() {
 
   const [showPremiumPopup, setShowPremiumPopup] = useState(false);
   const [premiumDaysRemaining, setPremiumDaysRemaining] = useState(0);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     try {
@@ -4273,6 +4660,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentStream, setCurrentStream] = useState<any>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isTrialExpiredModalOpen, setIsTrialExpiredModalOpen] = useState(false);
+
+  useEffect(() => {
+    const handleTrialExpired = () => setIsTrialExpiredModalOpen(true);
+    window.addEventListener('showTrialExpiredModal', handleTrialExpired);
+    return () => window.removeEventListener('showTrialExpiredModal', handleTrialExpired);
+  }, []);
 
   useEffect(() => {
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -4307,6 +4701,28 @@ export default function App() {
     return true;
   });
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
+  const [showSyncAuditModal, setShowSyncAuditModal] = useState(false);
+  const [workingShopId, setWorkingShopId] = useState<string>(() => localStorage.getItem('admin_active_shop_id') || 'master');
+
+  useEffect(() => {
+    if (user && user.shopId) {
+      setWorkingShopId(user.shopId);
+    } else {
+      setWorkingShopId('master');
+    }
+  }, [user]);
+
+  const handleSwitchAdminShop = (id: string) => {
+    localStorage.setItem('admin_active_shop_id', id);
+    setWorkingShopId(id);
+    const bnMsg = id === 'master' ? 'সব শপের গ্লোবাল ভিউ সফলভাবে সিলেক্ট হয়েছে!' : 'শপের ডাটা সফলভাবে লোড হয়েছে!';
+    const enMsg = id === 'master' ? 'Successfully loaded all shops global view context!' : 'Successfully synchronized and loaded shop data context!';
+    setNotification({
+      message: shopSettings?.systemLanguage === 'bn' ? bnMsg : enMsg,
+      type: 'success'
+    });
+  };
 
   useEffect(() => {
     localStorage.setItem('sidebar_visible', String(isSidebarOpen));
@@ -4509,6 +4925,76 @@ export default function App() {
   useEffect(() => {
     if (navigator.onLine) syncOfflineData();
   }, []);
+
+  const triggerManualSync = async () => {
+    if (!navigator.onLine && !isOnline) {
+      setNotification({
+        message: systemLang === 'bn' 
+          ? "অফলাইন: অনুগ্রহ করে ইন্টারনেট সংযোগ চেক করুন!" 
+          : "Offline: Please verify your internet connection before syncing!",
+        type: 'error'
+      });
+      return;
+    }
+    
+    setIsManualSyncing(true);
+    setNotification({
+      message: systemLang === 'bn'
+        ? "সংযুক্তি পরীক্ষা করা হচ্ছে এবং অডিট সিঙ্ক শুরু হচ্ছে..."
+        : "Testing connection and starting immediate audit sync...",
+      type: 'info'
+    });
+
+    try {
+      // Connect check using firestore
+      const { getDoc, doc } = await import('firebase/firestore');
+      // Simple probe to ensure Firestore connection is active and stable before active sync
+      await getDoc(doc(db, 'system_info', 'ping')).catch(() => {});
+      
+      const prevQueue = await getSyncQueue();
+      if (prevQueue.length === 0) {
+        setNotification({
+          message: systemLang === 'bn' 
+            ? "অডিটে কোনো অফলাইন ডাটা বা ট্রানজ্যাকশন পাওয়া যায়নি।" 
+            : "Audit completed: No offline transactions found to sync.",
+          type: 'success'
+        });
+        setIsManualSyncing(false);
+        return;
+      }
+
+      await syncOfflineData();
+      
+      const postQueue = await getSyncQueue();
+      if (postQueue.length === 0) {
+        setNotification({
+          message: systemLang === 'bn'
+            ? "সব অফলাইন ট্রানজ্যাকশন সফলভাবে অডিট এবং সিঙ্ক করা হয়েছে!"
+            : "All offline transactions successfully audited and synced to Firestore!",
+          type: 'success'
+        });
+        setShowSyncAuditModal(false);
+      } else {
+        const remaining = postQueue.length;
+        setNotification({
+          message: systemLang === 'bn'
+            ? `আংশিক সিঙ্ক সম্পন্ন। ${remaining} টি ট্রানজ্যাকশন অডিটে থেকে গেছে।`
+            : `Partial sync completed. ${remaining} transactions remaining in queue.`,
+          type: 'warning'
+        });
+      }
+    } catch (err: any) {
+      console.error("Manual sync failed", err);
+      setNotification({
+        message: systemLang === 'bn'
+          ? "ম্যানুয়াল সিঙ্ক ব্যর্থ হয়েছে। অনুগ্রহ করে ইন্টারনেট সংযোগ চেক করুন।"
+          : "Manual sync failed. Please check internet connection quality.",
+        type: 'error'
+      });
+    } finally {
+      setIsManualSyncing(false);
+    }
+  };
 
   const syncOfflineData = async () => {
     const queue = await getSyncQueue();
@@ -4739,8 +5225,8 @@ export default function App() {
           setIsOnboarded(true);
           localStorage.setItem('shopmaster_user', JSON.stringify(userData));
         } else {
-          // Check if it's a staff member (in users collection) or a merchant
           try {
+            // Check if it's a staff member (in users collection) or a merchant
             const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
             if (userDoc.exists()) {
               const data = userDoc.data();
@@ -4760,12 +5246,26 @@ export default function App() {
                 return;
               }
 
+              // Validate if employee login access is locked/blocked
+              if (data.allowLogin === false) {
+                await signOut(auth);
+                setUser(null);
+                setIsOnboarded(null);
+                localStorage.removeItem('shopmaster_user');
+                setAuthError("আপনার অ্যাকাউন্ট অ্যাক্সেস সাময়িকভাবে বন্ধ বা ব্লক করা আছে।");
+                setNotification({ message: "Access Blocked / locked", type: 'error' });
+                setAuthChecked(true);
+                setLoading(false);
+                return;
+              }
+
               const userData = {
                 uid: firebaseUser.uid,
                 email: firebaseUser.email || '',
                 displayName: data.displayName || data.username || 'Staff',
                 role: data.role || 'sales_team',
                 shopId: data.shopId,
+                branchId: data.branchId || '',
                 isOnboarded: true
               };
               setUser(userData);
@@ -4815,8 +5315,12 @@ export default function App() {
                     }
                   }
                 }
-              } catch (shopSearchErr) {
-                console.error("Error searching shops during login setup:", shopSearchErr);
+              } catch (shopSearchErr: any) {
+                if (shopSearchErr?.message?.includes('offline') || shopSearchErr?.code?.includes('unavailable')) {
+                  console.warn("Offline during shop login setup:", shopSearchErr.message);
+                } else {
+                  console.warn("Shop search issue during login setup:", shopSearchErr);
+                }
               }
 
               if (!onboardStatus) {
@@ -4865,8 +5369,28 @@ export default function App() {
               setIsOnboarded(onboardStatus);
               localStorage.setItem('shopmaster_user', JSON.stringify(userData));
             }
-          } catch (err) {
-            console.error("Error fetching user profile:", err);
+          } catch (err: any) {
+            if (err?.message?.includes('offline') || err?.code?.includes('unavailable')) {
+              console.warn("Offline fallback activated during user profile fetch:", err.message);
+            } else {
+              console.warn("Error fetching user profile:", err);
+            }
+            
+            const cachedUserStr = localStorage.getItem('shopmaster_user');
+            if (cachedUserStr) {
+               try {
+                 const cachedData = JSON.parse(cachedUserStr);
+                 if (cachedData && cachedData.uid === firebaseUser.uid) {
+                    console.log("Using cached user data due to offline/error.");
+                    setUser(cachedData);
+                    setIsOnboarded(cachedData.isOnboarded);
+                    return;
+                 }
+               } catch(ex) {
+                 console.warn("Failed to parse cached user", ex);
+               }
+            }
+
             // Fallback to basic data
             const userData = {
               uid: firebaseUser.uid,
@@ -4894,18 +5418,40 @@ export default function App() {
 
   // Data States
   const [products, setProducts] = useState<Product[]>([]);
+  const [branchStocks, setBranchStocks] = useState<any[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [customerOrders, setCustomerOrders] = useState<any[]>([]);
   const [shops, setShops] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [activeBranchId, setActiveBranchId] = useState<string>(() => {
+    return localStorage.getItem('shopmaster_active_branch_id') || 'all';
+  });
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [draftInvoices, setDraftInvoices] = useState<any[]>([]);
+  const [selectedDraftForView, setSelectedDraftForView] = useState<any>(null);
+  const [draftSearch, setDraftSearch] = useState('');
+  const [googleToken, setGoogleToken] = useState<string | null>(getCachedAccessToken());
+  const [globalNotifiedTasks, setGlobalNotifiedTasks] = useState<string[]>([]);
   const [dashboardPeriod, setDashboardPeriod] = useState<'day' | 'week' | 'month' | 'year'>('day');
   const [dashboardViewMetric, setDashboardViewMetric] = useState<'revenue' | 'profit'>('revenue');
   const [syncQueue, setSyncQueue] = useState<any[]>([]);
   
+  useEffect(() => {
+    if (user && user.shopId && googleToken) {
+      workspaceController.syncWorkspaceToFirestore(user.shopId).catch(console.warn);
+    }
+  }, [user?.shopId, googleToken]);
+
+  useEffect(() => {
+    if (user && user.role !== 'admin' && user.role !== 'master_admin' && user.branchId) {
+      setActiveBranchId(user.branchId);
+    }
+  }, [user]);
+
   useEffect(() => {
     const fetchSyncQueue = async () => {
       const queue = await getSyncQueue();
@@ -4998,6 +5544,48 @@ export default function App() {
   const [warrantyRecords, setWarrantyRecords] = useState<any[]>([]);
   const [expiringProducts, setExpiringProducts] = useState<Product[]>([]);
   
+  // Multi-branch filtration logic
+  const filteredProductsByBranch = useMemo(() => {
+    return products.map(p => {
+      let branchStockQty = 0;
+      if (activeBranchId === 'all') {
+        const matches = branchStocks.filter(bs => bs.productId === p.id);
+        if (matches.length > 0) {
+          branchStockQty = matches.reduce((sum, item) => sum + (item.quantity || 0), 0);
+        } else {
+          branchStockQty = p.stock || 0; // fallback to global
+        }
+      } else {
+        const match = branchStocks.find(bs => bs.productId === p.id && bs.branchId === activeBranchId);
+        branchStockQty = match ? match.quantity : 0;
+      }
+      return {
+        ...p,
+        stock: branchStockQty
+      };
+    });
+  }, [products, branchStocks, activeBranchId]);
+
+  const filteredSalesByBranch = useMemo(() => {
+    if (activeBranchId === 'all') return sales;
+    return sales.filter(s => s.branchId === activeBranchId);
+  }, [sales, activeBranchId]);
+
+  const filteredExpensesByBranch = useMemo(() => {
+    if (activeBranchId === 'all') return expenses;
+    return expenses.filter(e => e.branchId === activeBranchId);
+  }, [expenses, activeBranchId]);
+
+  const filteredDailyClosingsByBranch = useMemo(() => {
+    if (activeBranchId === 'all') return dailyClosings;
+    return dailyClosings.filter(d => d.branchId === activeBranchId);
+  }, [dailyClosings, activeBranchId]);
+
+  const filteredStockRecordsByBranch = useMemo(() => {
+    if (activeBranchId === 'all') return stockRecords;
+    return stockRecords.filter(r => r.branchId === activeBranchId);
+  }, [stockRecords, activeBranchId]);
+  
   // Check for expiring products
   useEffect(() => {
     if (products.length > 0) {
@@ -5032,6 +5620,8 @@ export default function App() {
     waGatewayType: 'zender',
     autoSendWhatsApp: false,
     aiWhatsAppEnabled: false,
+    multiBranchEnabled: true,
+    warehouseEnabled: true,
     waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.\n\nView Invoice: {{invoiceLink}}",
     waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}}।\n\nইনভয়েস দেখুন: {{invoiceLink}}",
     printLanguage: 'en',
@@ -5040,6 +5630,15 @@ export default function App() {
     jarvisLanguage: 'bn',
     jarvisVoiceGender: 'male',
   });
+
+  useEffect(() => {
+    if (shopSettings?.multiBranchEnabled === false && activeBranchId === 'all' && branches.length > 0) {
+      const firstBranchId = branches[0]?.id;
+      if (firstBranchId) {
+        setActiveBranchId(firstBranchId);
+      }
+    }
+  }, [shopSettings?.multiBranchEnabled, activeBranchId, branches]);
 
   const checkPremiumStatus = () => {
     if (user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com') return true;
@@ -5115,6 +5714,8 @@ export default function App() {
       waGatewayType: 'zender',
       autoSendWhatsApp: false,
       aiWhatsAppEnabled: false,
+      multiBranchEnabled: true,
+      warehouseEnabled: true,
       waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.\n\nView Invoice: {{invoiceLink}}",
       waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}}।\n\nইনভয়েস দেখুন: {{invoiceLink}}",
       printLanguage: 'en',
@@ -5261,6 +5862,132 @@ export default function App() {
   useEffect(() => {
     (window as any)._globalCurrencySymbol = dynamicSettings.currencySymbol;
   }, [dynamicSettings.currencySymbol]);
+
+  // Global Task & Note Reminder notifications background task
+  useEffect(() => {
+    const checkGlobalReminders = () => {
+      // Respect user preference set via the switch in the UI
+      if (localStorage.getItem('reminder_notifications_enabled') === 'false') {
+        return;
+      }
+
+      const now = new Date();
+
+      // Check the Daily Closing Automatic Reminder time
+      if (dynamicSettings.autoReminderTime) {
+        const [remHour, remMin] = dynamicSettings.autoReminderTime.split(':').map(Number);
+        if (!isNaN(remHour) && !isNaN(remMin)) {
+          const currentHour = now.getHours();
+          const currentMinute = now.getMinutes();
+          const todayDateStr = format(now, 'yyyy-MM-dd');
+          const lastReminderDate = localStorage.getItem('last_auto_closing_reminder_date');
+
+          if (currentHour === remHour && currentMinute === remMin && lastReminderDate !== todayDateStr) {
+            localStorage.setItem('last_auto_closing_reminder_date', todayDateStr);
+
+            // 1. Play the browser-based audio chime
+            try {
+              const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+              if (AudioContextClass) {
+                const audioCtx = new AudioContextClass();
+                const playBeep = (freq: number, startTime: number, duration: number) => {
+                  const osc = audioCtx.createOscillator();
+                  const gainNode = audioCtx.createGain();
+                  osc.connect(gainNode);
+                  gainNode.connect(audioCtx.destination);
+                  osc.type = 'sine';
+                  osc.frequency.setValueAtTime(freq, startTime);
+                  gainNode.gain.setValueAtTime(0.12, startTime);
+                  gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+                  osc.start(startTime);
+                  osc.stop(startTime + duration);
+                };
+                playBeep(587.33, audioCtx.currentTime, 0.4); // D5
+                playBeep(783.99, audioCtx.currentTime + 0.25, 0.6); // G5
+              }
+            } catch (err) {
+              console.warn("Auto closing chime failed to play:", err);
+            }
+
+            // 2. Trigger Web Notifications API
+            const isBn = dynamicSettings.systemLanguage === 'bn';
+            const title = isBn ? "🔔 ডেইলী ক্লোজিং রিমাইন্ডার" : "🔔 Daily Closing Reminder";
+            const body = isBn 
+              ? `আপনার নির্ধারিত ক্লোজিং রিমাইন্ডার সময় (${dynamicSettings.autoReminderTime}) হয়েছে। অনুগ্রহ করে দিনের ক্লোজিং রিপোর্ট তৈরি করুন!`
+              : `Your scheduled closing reminder time (${dynamicSettings.autoReminderTime}) has arrived. Please record your Day End Closing report.`;
+
+            setNotification({
+              message: `🔊 ${title}: ${body}`,
+              type: 'info'
+            });
+
+            if ("Notification" in window) {
+              if (Notification.permission === "granted") {
+                new Notification(title, { body, icon: "/favicon.ico" });
+              } else if (Notification.permission !== "denied") {
+                Notification.requestPermission().then(permission => {
+                  if (permission === "granted") {
+                    new Notification(title, { body, icon: "/favicon.ico" });
+                  }
+                });
+              }
+            }
+          }
+        }
+      }
+
+      notes.forEach(note => {
+        if (!note.dueDate) return;
+        const dueTime = new Date(note.dueDate);
+        
+        // Match already handled in this session
+        if (globalNotifiedTasks.includes(note.id)) return;
+
+        const diffMs = dueTime.getTime() - now.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+
+        // Warn within 60 minutes prior to the deadline, and up to 12 hours after if it was missed
+        if (diffMins <= 60 && diffMins >= -720) {
+          // Play a delightful notification chime
+          try {
+            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+            if (AudioContextClass) {
+              const audioCtx = new AudioContextClass();
+              const osc = audioCtx.createOscillator();
+              const gainNode = audioCtx.createGain();
+              osc.connect(gainNode);
+              gainNode.connect(audioCtx.destination);
+              
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5 pitch
+              gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+              osc.start();
+              osc.stop(audioCtx.currentTime + 0.18);
+            }
+          } catch (err) {
+            console.warn("Chime failed to play in background:", err);
+          }
+
+          const isBn = dynamicSettings.systemLanguage === 'bn';
+          const isGoogleSynced = !!(note.googleTaskId || note.googleEventId);
+          const typeLabel = isGoogleSynced 
+            ? (isBn ? 'গুগল সিঙ্কড টাস্ক রিমাইন্ডার' : 'Google Synced Task')
+            : (isBn ? 'টাস্ক রিমাইন্ডার' : 'Task Reminder');
+
+          setNotification({
+            message: `🔔 [${typeLabel}] "${note.text.substring(0, 30)}..." ${isBn ? 'এর শেষ সময়সীমা আসন্ন!' : 'deadline is approaching!'}`,
+            type: 'info'
+          });
+
+          setGlobalNotifiedTasks(prev => [...prev, note.id]);
+        }
+      });
+    };
+
+    checkGlobalReminders();
+    const timer = setInterval(checkGlobalReminders, 25000); // Check every 25 seconds
+    return () => clearInterval(timer);
+  }, [notes, globalNotifiedTasks, dynamicSettings.systemLanguage, dynamicSettings.autoReminderTime]);
   
   // Auto-Cleanup logic for Recycle Bin (30 days)
   useEffect(() => {
@@ -5365,6 +6092,8 @@ export default function App() {
         waGatewayType: 'zender',
         autoSendWhatsApp: false,
         aiWhatsAppEnabled: false,
+        multiBranchEnabled: true,
+        warehouseEnabled: true,
         waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.\n\nView Invoice: {{invoiceLink}}",
         waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}}।\n\nইনভয়েস দেখুন: {{invoiceLink}}",
         printLanguage: 'en',
@@ -5423,6 +6152,10 @@ export default function App() {
       setSuppliers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Supplier)));
     }, (err) => console.error("Suppliers sync error", err));
 
+    const unsubBranchStocks = onSnapshot(query(collection(db, 'branchStocks'), where('shopId', '==', currentShopId)), (snapshot) => {
+      setBranchStocks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => console.error("Branch stocks sync error", err));
+
     const unsubExpenses = onSnapshot(query(collection(db, 'expenses'), where('shopId', '==', currentShopId)), (snapshot) => {
       setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense)));
     }, (err) => console.error("Expenses sync error", err));
@@ -5477,6 +6210,62 @@ export default function App() {
       setWarrantyRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (err) => console.error("Warranty records sync error", err));
 
+    const unsubDrafts = onSnapshot(query(collection(db, 'draft_invoices'), where('shopId', '==', currentShopId)), (snapshot) => {
+      setDraftInvoices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => console.error("Draft invoices sync error", err));
+
+    const unsubBranches = onSnapshot(query(collection(db, 'branches'), where('shopId', '==', currentShopId)), async (snapshot) => {
+      const branchList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setBranches(branchList);
+      if (branchList.length === 0 && currentShopId) {
+        try {
+          const settingsSnap = await getDoc(doc(db, 'settings', currentShopId));
+          let storeName = systemLang === 'bn' ? 'প্রধান শাখা (Default)' : 'Main Branch (Default)';
+          if (settingsSnap.exists()) {
+            const settingsData = settingsSnap.data();
+            if (settingsData && settingsData.name) {
+              storeName = settingsData.name;
+            }
+          }
+          const defaultBranchData = {
+            name: storeName,
+            manager: user?.name || user?.email || 'Store Manager',
+            phone: '',
+            address: '',
+            dailyTarget: 100000,
+            revenue: 0,
+            staffCount: 1,
+            conversionRate: 100,
+            shopId: currentShopId,
+            createdAt: new Date().toISOString()
+          };
+          await addDoc(collection(db, 'branches'), defaultBranchData);
+        } catch (err) {
+          console.error("Error creating default branch with custom store name:", err);
+          const defaultBranchData = {
+            name: systemLang === 'bn' ? 'প্রধান শাখা (Default)' : 'Main Branch (Default)',
+            manager: user?.name || user?.email || 'Store Manager',
+            phone: '',
+            address: '',
+            dailyTarget: 100000,
+            revenue: 0,
+            staffCount: 1,
+            conversionRate: 100,
+            shopId: currentShopId,
+            createdAt: new Date().toISOString()
+          };
+          addDoc(collection(db, 'branches'), defaultBranchData).catch(err2 => console.error("Fallback branch creation failed", err2));
+        }
+      } else if (branchList.length > 0) {
+        const savedActive = localStorage.getItem('shopmaster_active_branch_id');
+        if (!savedActive || (savedActive !== 'all' && !branchList.some(b => b.id === savedActive))) {
+          const firstBranchId = branchList[0].id;
+          setActiveBranchId(firstBranchId);
+          localStorage.setItem('shopmaster_active_branch_id', firstBranchId);
+        }
+      }
+    }, (err) => console.error("Branches sync error", err));
+
     return () => {
       unsubSettings();
       unsubUsers();
@@ -5497,8 +6286,11 @@ export default function App() {
       unsubNotes();
       unsubCustomerOrders();
       unsubWarrantyRecords();
+      unsubDrafts();
+      unsubBranchStocks();
+      unsubBranches();
     };
-  }, [user, isMasterAdmin, isOnboarded, authChecked]);
+  }, [user, isMasterAdmin, isOnboarded, authChecked, workingShopId]);
 
   // Auto-sync merchant logo base64 & URL to global shops collection for display across Customer Portal and listing dashboards
   useEffect(() => {
@@ -5566,16 +6358,250 @@ export default function App() {
     }
   }, [user, shopSettings.shopCode, authChecked]);
 
-  const handleAddNote = async (text: string, color: string, extra?: { priority?: string, dueDate?: string }) => {
+  // Google Tasks & Calendar Helpers
+  const createGoogleTask = async (token: string, title: string, priority?: string, dueDate?: string) => {
     try {
-      if (!user || !user.shopId) return;
+      const formattedDue = dueDate ? new Date(dueDate).toISOString() : undefined;
+      const body: any = {
+        title,
+        notes: `Priority: ${priority || 'medium'} | Reminders synced with Intel Ledger.`
+      };
+      if (formattedDue) {
+        body.due = formattedDue;
+      }
+      const res = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.id as string;
+      }
+    } catch (e) {
+      console.error("Tasks creation failed", e);
+    }
+    return undefined;
+  };
+
+  const createGoogleCalendarEvent = async (token: string, title: string, priority?: string, dueDate?: string) => {
+    try {
+      const startDate = dueDate ? new Date(dueDate) : new Date();
+      const endDate = new Date(startDate.getTime() + 60 * 60 * 1000); // 1 hour duration
+      const body = {
+        summary: title,
+        description: `Intel Ledger Task. Priority: ${priority || 'medium'}.`,
+        start: {
+          dateTime: startDate.toISOString(),
+          timeZone: "Asia/Dhaka"
+        },
+        end: {
+          dateTime: endDate.toISOString(),
+          timeZone: "Asia/Dhaka"
+        },
+        reminders: {
+          useDefault: false,
+          overrides: [
+            { method: "popup", minutes: 0 },    // Immediate alarm/notification at start time
+            { method: "popup", minutes: 5 },    // Alarm 5 mins before
+            { method: "popup", minutes: 15 },   // Alarm 15 mins before
+            { method: "popup", minutes: 30 }    // Alarm 30 mins before
+          ]
+        }
+      };
+      const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.id as string;
+      }
+    } catch (e) {
+      console.error("Calendar event creation failed", e);
+    }
+    return undefined;
+  };
+
+  const createGoogleCalendarRecurringEvent = async (token: string, title: string, timeStr: string) => {
+    try {
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      if (isNaN(hours) || isNaN(minutes)) return undefined;
+      const startDate = new Date();
+      startDate.setHours(hours, minutes, 0, 0);
+      const endDate = new Date(startDate.getTime() + 60 * 60 * 1000); // 1 hour duration
+      const body = {
+        summary: title,
+        description: `Daily Automatic Closing Reminder.`,
+        start: {
+          dateTime: startDate.toISOString(),
+          timeZone: "Asia/Dhaka"
+        },
+        end: {
+          dateTime: endDate.toISOString(),
+          timeZone: "Asia/Dhaka"
+        },
+        recurrence: [
+          "RRULE:FREQ=DAILY"
+        ],
+        reminders: {
+          useDefault: false,
+          overrides: [
+            { method: "popup", minutes: 0 },    // Immediate alarm/notification
+            { method: "popup", minutes: 5 },    // Alarm 5 mins before
+            { method: "popup", minutes: 15 }    // Alarm 15 mins before
+          ]
+        }
+      };
+      const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.id as string;
+      }
+    } catch (e) {
+      console.error("Calendar recurring event creation failed", e);
+    }
+    return undefined;
+  };
+
+  const updateGoogleTask = async (token: string, taskId: string, title: string, priority?: string, dueDate?: string): Promise<boolean> => {
+    try {
+      const formattedDue = dueDate ? new Date(dueDate).toISOString() : undefined;
+      const body: any = {
+        id: taskId,
+        title,
+        notes: `Priority: ${priority || 'medium'} | Reminders synced with Intel Ledger.`
+      };
+      if (formattedDue) {
+        body.due = formattedDue;
+      }
+      const res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      return res.ok;
+    } catch (e) {
+      console.error("Tasks update failed", e);
+      return false;
+    }
+  };
+
+  const updateGoogleCalendarEvent = async (token: string, eventId: string, title: string, priority?: string, dueDate?: string): Promise<boolean> => {
+    try {
+      const startDate = dueDate ? new Date(dueDate) : new Date();
+      const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+      const body = {
+        summary: title,
+        description: `Intel Ledger Task. Priority: ${priority || 'medium'}.`,
+        start: {
+          dateTime: startDate.toISOString(),
+          timeZone: "Asia/Dhaka"
+        },
+        end: {
+          dateTime: endDate.toISOString(),
+          timeZone: "Asia/Dhaka"
+        },
+        reminders: {
+          useDefault: false,
+          overrides: [
+            { method: "popup", minutes: 0 },    // Immediate alarm/notification at start time
+            { method: "popup", minutes: 5 },    // Alarm 5 mins before
+            { method: "popup", minutes: 15 },   // Alarm 15 mins before
+            { method: "popup", minutes: 30 }    // Alarm 30 mins before
+          ]
+        }
+      };
+      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      return res.ok;
+    } catch (e) {
+      console.error("Calendar event update failed", e);
+      return false;
+    }
+  };
+
+  const deleteGoogleTask = async (token: string, taskId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${taskId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return res.ok;
+    } catch (e) {
+      console.error("Tasks deletion failed", e);
+      return false;
+    }
+  };
+
+  const deleteGoogleCalendarEvent = async (token: string, eventId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return res.ok;
+    } catch (e) {
+      console.error("Calendar deletion failed", e);
+      return false;
+    }
+  };
+
+  const handleAddNote = async (text: string, color: string, extra?: { priority?: string, dueDate?: string, title?: string, subject?: string, timestamp?: string }) => {
+    try {
+      const activeShopId = user?.shopId;
+      if (!user || !activeShopId) return;
+      
+      let gTaskId: string | undefined;
+      let gEventId: string | undefined;
+
+      const combinedDateTime = extra?.timestamp 
+        ? combineDateAndTime(extra.dueDate, extra.timestamp).toISOString() 
+        : (extra?.dueDate ? new Date(extra.dueDate).toISOString() : undefined);
+
+      if (googleToken) {
+        gTaskId = await createGoogleTask(googleToken, text, extra?.priority, combinedDateTime);
+        gEventId = await createGoogleCalendarEvent(googleToken, text, extra?.priority, combinedDateTime);
+      }
+
       await addDoc(collection(db, 'notes'), {
         text,
         color,
-        shopId: user.shopId,
+        shopId: activeShopId,
         priority: extra?.priority || 'medium',
         dueDate: extra?.dueDate || null,
-        timestamp: serverTimestamp()
+        title: extra?.title || '',
+        subject: extra?.subject || '',
+        googleTaskId: gTaskId || null,
+        googleEventId: gEventId || null,
+        timestamp: combinedDateTime ? new Date(combinedDateTime).toISOString() : serverTimestamp()
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'notes');
@@ -5584,18 +6610,85 @@ export default function App() {
 
   const handleDeleteNote = async (id: string) => {
     try {
+      const noteObj = notes.find(n => n.id === id);
+      let googleSyncSuccessful = false;
+      if (googleToken) {
+        if (noteObj?.googleTaskId) {
+          await deleteGoogleTask(googleToken, noteObj.googleTaskId);
+        }
+        if (noteObj?.googleEventId) {
+          await deleteGoogleCalendarEvent(googleToken, noteObj.googleEventId);
+        }
+        googleSyncSuccessful = true;
+      }
       await deleteDoc(doc(db, 'notes', id));
+      
+      const isBn = dynamicSettings.systemLanguage === 'bn';
+      setNotification({
+        message: googleSyncSuccessful
+          ? (isBn ? 'টাস্কটি সফলভাবে মুছে ফেলা হয়েছে এবং গুগল ক্যালেন্ডার ও টাস্ক থেকে সিঙ্ক করা হয়েছে!' : 'Task deleted successfully and synced with Google Calendar & Tasks!')
+          : (isBn ? 'টাস্কটি স্থানীয়ভাবে মুছে ফেলা হয়েছে।' : 'Task deleted locally.'),
+        type: 'success'
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'notes');
     }
   };
 
-  const handleUpdateNote = async (id: string, text: string, extra?: { priority?: string, dueDate?: string }) => {
+  const handleUpdateNote = async (id: string, text: string, extra?: { priority?: string, dueDate?: string, title?: string, subject?: string, timestamp?: string }) => {
     try {
+      const noteObj = notes.find(n => n.id === id);
+      let gTaskId = noteObj?.googleTaskId;
+      let gEventId = noteObj?.googleEventId;
+
+      const combinedDateTime = extra?.timestamp 
+        ? combineDateAndTime(extra.dueDate || noteObj?.dueDate, extra.timestamp).toISOString() 
+        : (extra?.dueDate ? new Date(extra.dueDate).toISOString() : (noteObj?.dueDate ? new Date(noteObj.dueDate).toISOString() : undefined));
+
+      let googleSyncSuccessful = false;
+      if (googleToken) {
+        if (gTaskId) {
+          const success = await updateGoogleTask(googleToken, gTaskId, text, extra?.priority, combinedDateTime);
+          if (!success) {
+            // Re-create if 404 or missing
+            gTaskId = await createGoogleTask(googleToken, text, extra?.priority, combinedDateTime);
+          }
+        } else {
+          gTaskId = await createGoogleTask(googleToken, text, extra?.priority, combinedDateTime);
+        }
+        
+        if (gEventId) {
+          const success = await updateGoogleCalendarEvent(googleToken, gEventId, text, extra?.priority, combinedDateTime);
+          if (!success) {
+            // Re-create if 404 or missing
+            gEventId = await createGoogleCalendarEvent(googleToken, text, extra?.priority, combinedDateTime);
+          }
+        } else {
+          gEventId = await createGoogleCalendarEvent(googleToken, text, extra?.priority, combinedDateTime);
+        }
+        googleSyncSuccessful = true;
+      }
+
       const updateData: any = { text };
       if (extra?.priority) updateData.priority = extra.priority;
       if (extra?.dueDate !== undefined) updateData.dueDate = extra.dueDate;
+      if (extra?.title !== undefined) updateData.title = extra.title;
+      if (extra?.subject !== undefined) updateData.subject = extra.subject;
+      if (extra?.timestamp !== undefined) {
+        updateData.timestamp = combinedDateTime ? new Date(combinedDateTime).toISOString() : serverTimestamp();
+      }
+      if (gTaskId !== undefined) updateData.googleTaskId = gTaskId || null;
+      if (gEventId !== undefined) updateData.googleEventId = gEventId || null;
+      
       await updateDoc(doc(db, 'notes', id), updateData);
+
+      const isBn = dynamicSettings.systemLanguage === 'bn';
+      setNotification({
+        message: googleSyncSuccessful
+          ? (isBn ? 'টাস্কটি সফলভাবে আপডেট এবং গুগল ক্যালেন্ডারের সাথে সিঙ্ক করা হয়েছে!' : 'Task successfully updated and synced with Google Calendar & Tasks!')
+          : (isBn ? 'টাস্কটি স্থানীয়ভাবে আপডেট করা হয়েছে।' : 'Task updated locally.'),
+        type: 'success'
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'notes');
     }
@@ -5653,6 +6746,13 @@ export default function App() {
         return;
       }
 
+      if (userDoc.data().allowLogin === false) {
+        await signOut(auth);
+        setAuthError(st('loginTitle') === 'Business Management Suite' ? "Access locked. Your account is blocked." : "আপনার অ্যাকাউন্ট অ্যাক্সেস ব্লক বা নিষ্ক্রিয় করা হয়েছে।");
+        setLoading(false);
+        return;
+      }
+
       setUsername('');
       setPassword('');
       setLoginShopCode('');
@@ -5687,6 +6787,8 @@ export default function App() {
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
         setCachedAccessToken(credential.accessToken);
+        setGoogleToken(credential.accessToken);
+        // Dispatch to unified workspace service controller if needed later
       }
       
       const isMasterAdmin = googleUser.email?.toLowerCase().trim() === "stratproamz@gmail.com";
@@ -5741,8 +6843,12 @@ export default function App() {
               }
             }
           }
-        } catch (shopSearchErr) {
-          console.error("Error searching shops during Google Login:", shopSearchErr);
+        } catch (shopSearchErr: any) {
+          if (shopSearchErr?.message?.includes('offline') || shopSearchErr?.code?.includes('unavailable')) {
+            console.warn("Offline during Google Login search:", shopSearchErr.message);
+          } else {
+            console.warn("Error searching shops during Google Login:", shopSearchErr);
+          }
         }
       }
 
@@ -5771,6 +6877,8 @@ export default function App() {
       localStorage.setItem('shopmaster_user', JSON.stringify(userData));
       setNotification({ message: `Signed in as ${userData.displayName}`, type: 'success' });
     } catch (error: any) {
+      console.error("DETAILED GOOGLE OAUTH ERROR:", error);
+      
       const isPopupClosed = 
         error?.code === 'auth/popup-closed-by-user' || 
         error?.code === 'auth/cancelled-popup-request' ||
@@ -5781,12 +6889,21 @@ export default function App() {
       if (isPopupClosed) {
         console.warn("Google login popup closed by user (expected in headless / sandbox testing environments).");
         setAuthError(''); 
+        setNotification({
+          message: 'লগইন উইন্ডোটি বন্ধ করা হয়েছে। সম্পূর্ণ করতে অনুগ্রহ করে আবার চেষ্টা করুন। (Sign-In popup window was closed.)',
+          type: 'info'
+        });
       } else if (error?.code === 'auth/network-request-failed' || error?.message?.includes('network-request-failed') || error?.message?.includes('Pending promise was never set')) {
         console.error("Google login error due to network or iframe restricted popup", error);
         setAuthError(`Google Sign-In failed (Network / Popup Blocked). If you are using the AI Studio preview, please open the app in a new tab (using the arrow icon at the top right) to log in with Google, or check your internet connection.`);
+      } else if (error?.code === 'auth/invalid-credential' || error?.code === 'auth/operation-not-allowed') {
+        const msg = `Authentication rejected: ${error.message}. Scopes or API configuration issue.`;
+        console.error(msg);
+        setAuthError(msg);
       } else {
-        console.error("Google login error", error);
-        setAuthError(`Google Sign-In failed: ${error.message}`);
+        const msg = `Login Failed: ${error?.message || 'Unknown error occurred'} (Code: ${error?.code || 'N/A'}). Check permissions.`;
+        console.error(msg);
+        setAuthError(msg);
       }
     } finally {
       setLoading(false);
@@ -5907,7 +7024,10 @@ export default function App() {
     walkInPhone: '',
     paidAmount: 0,
     paymentMethod: 'cash' as 'cash' | 'due',
-    orderId: ''
+    orderId: '',
+    tableNo: '',
+    waiterId: '',
+    waiterName: ''
   });
 
   // Automatic Customer Selection
@@ -5925,6 +7045,16 @@ export default function App() {
 
   const handleCheckout = async (sendWhatsApp: boolean = false) => {
     if (cart.length === 0) return;
+    const currentLang = shopSettings.systemLanguage || 'bn';
+    if (activeBranchId === 'all') {
+      setNotification({
+        message: currentLang === 'bn' 
+          ? 'বিক্রয় সম্পন্ন করতে অনুগ্রহ করে একটি নির্দিষ্ট ব্রাঞ্চ সিলেক্ট করুন!' 
+          : 'Please select a specific branch to checkout!',
+        type: 'error'
+      });
+      return;
+    }
     setIsCheckingOut(true);
 
     try {
@@ -5950,6 +7080,7 @@ export default function App() {
           if (item.productId) {
             const productRef = doc(db, 'products', item.productId);
             await updateDoc(productRef, { stock: increment(item.quantity || 0) });
+            await updateBranchStock(item.productId, editingSale.branchId || activeBranchId, item.quantity || 0);
           }
         }
         if (editingSale.customerId) {
@@ -5963,6 +7094,7 @@ export default function App() {
 
       const saleData: any = {
         shopId: user.shopId,
+        branchId: activeBranchId,
         customerName: selectedCustomer?.name || checkoutData.walkInName || defaultRetailName,
         customerPhone: selectedCustomer?.phone || checkoutData.walkInPhone || '',
         items: cart.map(item => ({
@@ -5972,7 +7104,12 @@ export default function App() {
           unit: item.unit || 'unit',
           price: item.discountedPrice || 0,
           originalPrice: item.originalPrice || 0,
-          cost: item.cost || 0
+          cost: item.cost || 0,
+          foodVariant: (item as any).foodVariant || null,
+          cookingInstruction: (item as any).cookingInstruction || null,
+          imei: (item as any).selectedImei || null,
+          serialNumber: (item as any).selectedSerial || null,
+          warranty: (item as any).warranty || item.warranty || null
         })),
         totalAmount: cartTotal,
         discount: discount,
@@ -5984,7 +7121,11 @@ export default function App() {
         previousBalance: selectedCustomer?.currentDue || 0,
         paymentMethod: checkoutData.paymentMethod,
         timestamp: editingSale ? editingSale.timestamp : new Date(),
-        sellerId: auth.currentUser?.uid || 'unknown'
+        sellerId: auth.currentUser?.uid || 'unknown',
+        tableNo: checkoutData.tableNo || null,
+        waiterId: checkoutData.waiterId || null,
+        waiterName: checkoutData.waiterName || null,
+        kitchenStatus: shopSettings.businessType === 'Restaurant' ? 'Pending' : null
       };
 
       if (checkoutData.customerId) {
@@ -6024,6 +7165,7 @@ export default function App() {
         for (const item of cart) {
           const productRef = doc(db, 'products', item.id);
           await updateDoc(productRef, { stock: increment(-item.quantity) });
+          await updateBranchStock(item.id, activeBranchId, -item.quantity);
         }
       }
 
@@ -6040,6 +7182,28 @@ export default function App() {
           currentDue: increment(finalTotal - checkoutData.paidAmount),
           totalSpent: increment(finalTotal)
         });
+
+        // Auto-sync with the backend Loan Book (লোন খাতা) if there's any pending due amount
+        if (dueAmount > 0) {
+          try {
+            await addDoc(collection(db, 'shops', user.shopId, 'loans'), {
+              institutionName: `${selectedCustomer?.name || 'Customer'} (POS Due #${finalSale.id})`,
+              principalAmount: dueAmount,
+              repaymentFrequency: 'monthly',
+              repaymentDay: '1',
+              totalInstallments: 1,
+              paidInstallments: 0,
+              interestPercentage: 0,
+              collectorName: user?.displayName || user?.username || 'POS',
+              collectorPhone: selectedCustomer?.phone || '',
+              startDate: new Date().toISOString().split('T')[0],
+              status: 'Active',
+              notes: `Auto-synced outstanding due from POS Invoice #${finalSale.id}. Synchronized across workspaces.`
+            });
+          } catch (loanSyncErr) {
+            console.error("Failed to auto-sync loan record for outstanding invoice due:", loanSyncErr);
+          }
+        }
 
         // Record overpayment in due_payments for history visibility
         if (overpayment > 0) {
@@ -6065,7 +7229,7 @@ export default function App() {
       setCart([]);
       setDiscount(0);
       setTaxRate(0);
-      setCheckoutData({ customerId: '', walkInName: '', walkInPhone: '', paidAmount: 0, paymentMethod: 'cash', orderId: '' });
+      setCheckoutData({ customerId: '', walkInName: '', walkInPhone: '', paidAmount: 0, paymentMethod: 'cash', orderId: '', tableNo: '', waiterId: '', waiterName: '' });
       setEditingSale(null);
       setShowReceiptModal(true);
     } catch (error) {
@@ -6092,6 +7256,7 @@ export default function App() {
               await updateDoc(productRef, { 
                 stock: increment(Number(item.quantity) || 0) 
               });
+              await updateBranchStock(item.productId, sale.branchId || activeBranchId, Number(item.quantity) || 0);
             } catch (e) {
               console.warn(`Could not revert stock for product ${item.productId}:`, e);
             }
@@ -6162,6 +7327,7 @@ export default function App() {
                 await updateDoc(productRef, { 
                   stock: increment(-Number(sItem.quantity) || 0) 
                 });
+                await updateBranchStock(sItem.productId, sale.branchId || activeBranchId, -Number(sItem.quantity) || 0);
               } catch (e) {
                 console.warn(`Could not deduct stock for restored product ${sItem.productId}:`, e);
               }
@@ -6318,8 +7484,22 @@ export default function App() {
     const isMaster = user.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
     const userRole = (user.role || '').toLowerCase().trim();
     if (userRole !== 'admin' && userRole !== 'owner' && !isMaster) {
-      setNotification({ message: 'Error: Only Shop Admins/Owners are authorized to change or update settings.', type: 'error' });
-      return;
+      // Allow general floor/POS staff to modify operational fields like table statuses, waiter assignments, or table listings.
+      // Restrict all other administrative/pricing/contact settings.
+      const nonOperationalKeys = Object.keys(newSettings).filter(
+        key => key !== 'tables' && key !== 'tableStatuses' && key !== 'tableWaiters' && key !== 'tableBookings'
+      );
+      let administrativeChanges = false;
+      for (const k of nonOperationalKeys) {
+        if (JSON.stringify(newSettings[k as keyof ShopSettings]) !== JSON.stringify(shopSettings[k as keyof ShopSettings])) {
+          administrativeChanges = true;
+          break;
+        }
+      }
+      if (administrativeChanges) {
+        setNotification({ message: 'Error: Only Shop Admins/Owners are authorized to change or update administrative settings.', type: 'error' });
+        return;
+      }
     }
     setIsSavingSettings(true);
     try {
@@ -6490,6 +7670,28 @@ export default function App() {
     }
   };
 
+  const updateBranchStock = async (productId: string, branchId: string, quantityChange: number) => {
+    if (!branchId || branchId === 'all') return;
+    const docId = `bs_${productId}_${branchId}`;
+    const docRef = doc(db, 'branchStocks', docId);
+    try {
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        await updateDoc(docRef, { quantity: increment(quantityChange) });
+      } else {
+        await setDoc(docRef, {
+          id: docId,
+          productId,
+          branchId,
+          quantity: quantityChange,
+          shopId: user?.shopId || ''
+        });
+      }
+    } catch (err) {
+      console.error("Error updating branch stock:", err);
+    }
+  };
+
   const handleAddCustomer = async (newCustomer: Omit<Customer, 'id' | 'serialNumber'>): Promise<string | undefined> => {
     try {
       if (!user?.shopId) return undefined;
@@ -6503,6 +7705,34 @@ export default function App() {
       handleFirestoreError(error, OperationType.WRITE, 'customers');
       return undefined;
     }
+  };
+
+  const handlePrintOrderInvoice = (order: any) => {
+    const saleObj: Sale = {
+      id: order.id || `ord_${Date.now()}`,
+      customerId: order.customerId || '',
+      customerName: order.customerName || 'Customer',
+      customerPhone: order.customerPhone || '',
+      items: (order.items || []).map((item: any) => ({
+        productId: item.productId || 'custom',
+        productName: item.productName || 'Product',
+        quantity: typeof item.quantity === 'number' ? item.quantity : parseFloat(item.quantity) || 1,
+        price: typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0,
+        originalPrice: typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0,
+        cost: 0,
+        unit: item.unit || 'unit'
+      })),
+      totalAmount: order.totalAmount || 0,
+      discount: 0,
+      finalAmount: order.totalAmount || 0,
+      paidAmount: order.paymentMethod !== 'cod' ? (order.totalAmount || 0) : 0,
+      dueAmount: order.paymentMethod === 'cod' ? (order.totalAmount || 0) : 0,
+      paymentMethod: order.paymentMethod === 'cod' ? 'due' : 'cash',
+      timestamp: order.timestamp ? new Date(order.timestamp) : new Date(),
+      sellerId: order.shopId || 'merchant'
+    };
+
+    printInvoice(saleObj, dynamicSettings);
   };
 
   const handleLoadOrderToPOS = async (order: any) => {
@@ -6552,6 +7782,15 @@ export default function App() {
 
       const orderRef = doc(db, 'customer_orders', order.id);
       await updateDoc(orderRef, { status: 'approved' });
+
+      // Send Order Confirmation immediately
+      if (order.customerPhone) {
+        let msgStr = shopSettings.systemLanguage === 'bn' 
+          ? `প্রিয় ${order.customerName},\nআপনার অর্ডার (#${order.orderNumber || order.id}) সফলভাবে নিশ্চিত করা হয়েছে।\n\nমোট বিল: ${shopSettings.currencySymbol} ${order.totalAmount}\n\nধন্যবাদ!\n${shopSettings.name}`
+          : `Dear ${order.customerName},\nYour order (#${order.orderNumber || order.id}) has been confirmed successfully.\n\nTotal Bill: ${shopSettings.currencySymbol} ${order.totalAmount}\n\nThank you!\n${shopSettings.name}`;
+          
+        await callWhatsAppApi(order.customerPhone, msgStr, shopSettings, order.id);
+      }
 
       setNotification({
         message: shopSettings.systemLanguage === 'bn' 
@@ -6655,9 +7894,7 @@ export default function App() {
     setNotification({ message: 'Sending WhatsApp reminder...', type: 'info' });
     const result = await callWhatsAppApi(customer.phone, message, shopSettings);
     
-    if (result.fallback) {
-      setNotification({ message: 'Opened WhatsApp manually.', type: 'info' });
-    } else if (result.success) {
+    if (result.success) {
       setNotification({ message: 'Reminder sent automatically!', type: 'success' });
     } else {
       setNotification({ message: `Failed to send automatically: ${JSON.stringify(result.error)}`, type: 'error' });
@@ -7145,18 +8382,29 @@ export default function App() {
                   <motion.div 
                     whileHover={{ rotate: 360 }}
                     transition={{ duration: 0.8, ease: "anticipate" }}
-                    className="w-11 h-11 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl overflow-hidden flex items-center justify-center shadow-lg shadow-indigo-100 flex-shrink-0"
+                    className="w-11 h-11 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl overflow-hidden flex items-center justify-center shadow-lg shadow-indigo-100 flex-shrink-0 relative select-none"
                   >
-                    {shopSettings.logoBase64 || shopSettings.logoUrl ? (
-                      <img src={shopSettings.logoBase64 || shopSettings.logoUrl} alt="Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
+                    {isValidImageSource(shopSettings.logoBase64 || shopSettings.logoUrl) ? (
                       <img 
-                        src="/LOGO.JPG" 
+                        src={shopSettings.logoBase64 || shopSettings.logoUrl} 
                         alt="Logo" 
-                        className="w-full h-full object-cover" 
+                        className="w-full h-full object-cover relative z-10" 
                         referrerPolicy="no-referrer" 
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          const fallback = e.currentTarget.parentElement?.querySelector('.logo-fallback');
+                          if (fallback) {
+                            (fallback as HTMLElement).style.display = 'flex';
+                          }
+                        }}
                       />
-                    )}
+                    ) : null}
+                    <div 
+                      className="logo-fallback absolute inset-0 w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-black text-sm select-none uppercase tracking-tight"
+                      style={{ display: isValidImageSource(shopSettings.logoBase64 || shopSettings.logoUrl) ? 'none' : 'flex' }}
+                    >
+                      {getShopInitials(shopSettings.name || '')}
+                    </div>
                   </motion.div>
                   <div className="flex flex-col whitespace-nowrap">
                     <span className="font-black text-xl text-gray-900 dark:text-gray-100 tracking-tight leading-none group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors uppercase">{shopSettings.name}</span>
@@ -7178,17 +8426,23 @@ export default function App() {
               { id: 'core', label: 'Core', items: [
                 { id: 'dashboard', icon: LayoutDashboard, label: st('dashboard'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                 { id: 'pos', icon: ShoppingBag, label: st('pos'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                { id: 'draft_invoice', icon: FileText, label: 'Draft Invoice', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                { id: 'table_room', icon: DoorOpen, label: 'Table/Room', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                { id: 'kitchen_display', icon: ChefHat, label: 'Kitchen Display (KDS)', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                { id: 'draft_invoice', icon: FileText, label: st('draftInvoice'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                { id: 'mobile_electronics', icon: Smartphone, label: 'Mobile & Electronics', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                { id: 'pharmacy_module', icon: Pill, label: 'Pharmacy & Medicine', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                { id: 'dealership_module', icon: Truck, label: 'Dealership & Bulk Dispatch', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                 { id: 'how_to_use', icon: BookOpen, label: 'How To Use', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'] },
               ]},
               { id: 'inventory_section', label: 'Inventory', items: [
                 { id: 'inventory_dashboard', icon: LayoutDashboard, label: 'Inventory Dashboard', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'],
                   subItems: [
                     { id: 'inventory', icon: Package, label: st('inventory'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['warehouse'] },
+                    { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['admin', 'manager', 'warehouse'] },
                     { id: 'supplier', icon: Users, label: st('supplier'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'barcode', icon: Barcode, label: st('barcode'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'damage_expire', icon: Trash2, label: 'Damage/Expire', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'stock_transfer', icon: ArrowLeftRight, label: systemLang === 'bn' ? 'স্টক ট্রান্সফার' : 'Stock Transfer', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'] },
                   ]
                 }
               ]},
@@ -7197,12 +8451,12 @@ export default function App() {
                   subItems: [
                     { id: 'sales', icon: History, label: 'Sales Records', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'customers', icon: Users, label: st('customers'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'branch_crm', icon: Building2, label: 'Branch Sales & CRM', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'customer_orders', icon: ShoppingBag, label: 'Customer Orders', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'online_shop', icon: Globe, label: st('onlineShop'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'courier', icon: Truck, label: st('courier'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'warranty', icon: ShieldCheck, label: st('warranty'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'service_offer', icon: Zap, label: 'Service', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'activation_code', icon: KeySquare, label: 'Activation', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'note', icon: StickyNote, label: st('note'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'recycle_bin', icon: Trash2, label: st('recycleBin'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                   ]
@@ -7216,11 +8470,34 @@ export default function App() {
                   ]
                 }
               ]},
+              { id: 'hrm_section', label: 'HRM', items: [
+                { id: 'hrm_dashboard', icon: LayoutDashboard, label: 'HRM Dashboard', roles: ['admin', 'manager', 'assistant_manager'],
+                  subItems: [
+                    { id: 'staff_directory', icon: Users, label: 'Staff Directory', roles: ['admin', 'manager', 'assistant_manager'] },
+                    { id: 'attendance_tracker', icon: CheckSquare, label: 'Attendance & Shifts', roles: ['admin', 'manager', 'assistant_manager'] },
+                    { id: 'payroll_disbursal', icon: Banknote, label: 'Payroll & Salaries', roles: ['admin', 'manager', 'assistant_manager'] },
+                    { id: 'leave_planner', icon: Calendar, label: 'Leave & Holidays', roles: ['admin', 'manager', 'assistant_manager'] },
+                    { id: 'system_login', icon: ShieldCheck, label: 'System Login', roles: ['admin', 'manager', 'assistant_manager'] },
+                    { id: 'employment_contracts', icon: FileText, label: 'Contracts & Releases', roles: ['admin', 'manager', 'assistant_manager'] }
+                  ]
+                }
+              ]},
+              { id: 'marketing_content_section', label: 'Marketing Content', items: [
+                { id: 'marketing_content', icon: LayoutDashboard, label: 'Marketing Content', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'],
+                  subItems: [
+                    { id: 'content_plan', icon: FileText, label: 'Content Plan', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'hook_generator', icon: Link, label: 'Hook Generator', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'visual_hook_pro', icon: ImageIcon, label: 'Visual Hook Pro', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'content_writer_pro', icon: FileEdit, label: 'Content Writer Pro', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'story_maker', icon: Video, label: 'Story Maker (OVC)', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'brand_memory', icon: Brain, label: 'Brand Memory', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                  ]
+                }
+              ]},
               { id: 'management_section', label: 'Management', items: [
                 { id: 'management_dashboard', icon: LayoutDashboard, label: 'Management Dashboard', roles: ['admin'],
                   subItems: [
                     { id: 'membership', icon: Award, label: 'Membership', roles: ['admin', 'manager'] },
-                    { id: 'shops', icon: Globe, label: 'Merchant Console', roles: [], emailScope: 'stratproamz@gmail.com' },
                     { id: 'jarvis', icon: Bot, label: st('jarvisAI'), roles: ['admin'] },
                     { id: 'payment_method', icon: CreditCard, label: st('paymentMethod'), roles: ['admin'] },
                     { id: 'loan_management', icon: Banknote, label: st('loanManagement'), roles: ['admin'] },
@@ -7232,15 +8509,16 @@ export default function App() {
                     { id: 'meet_scheduler', icon: Calendar, label: 'Meet Scheduler', roles: ['admin'] },
                     { id: 'release_logs', icon: Activity, label: 'Release Logs', roles: ['admin'] },
                     { id: 'settings', icon: Settings, label: st('settings'), roles: ['admin'] },
-                    { id: 'messaging_gateway', icon: MessageSquare, label: 'Messaging Gateway', roles: ['admin'] },
-                    { id: 'page_management', icon: Sliders, label: 'Page Management', roles: [], emailScope: 'stratproamz@gmail.com' },
-                    { id: 'main_admin', icon: UserCog, label: st('mainAdmin'), roles: [], emailScope: 'stratproamz@gmail.com' },
+                    { id: 'messaging_gateway', icon: MessageSquare, label: 'Messaging Gateway', roles: ['admin', 'master_admin'] },
                   ]
                 }
               ]},
             ].filter((group) => {
               if (group.id === 'management_section') {
                 return user && (user.role === 'admin' || user.email?.toLowerCase().trim() === 'stratproamz@gmail.com');
+              }
+              if (group.id === 'hrm_section') {
+                return user && (user.role === 'admin' || user.role === 'manager' || user.role === 'assistant_manager' || user.email?.toLowerCase().trim() === 'stratproamz@gmail.com');
               }
               return true;
             }).map((group) => (
@@ -7342,22 +8620,26 @@ export default function App() {
               </button>
 
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white border border-gray-150 dark:border-slate-850 rounded-xl overflow-hidden shadow-xs flex items-center justify-center shrink-0">
-                  {dynamicSettings.logoBase64 || dynamicSettings.logoUrl ? (
+                <div className="w-10 h-10 bg-white border border-gray-150 dark:border-slate-850 rounded-xl overflow-hidden shadow-xs flex items-center justify-center shrink-0 relative select-none">
+                  {isValidImageSource(dynamicSettings.logoBase64 || dynamicSettings.logoUrl) ? (
                     <img 
                       src={dynamicSettings.logoBase64 || dynamicSettings.logoUrl} 
                       alt={dynamicSettings.name} 
-                      className="w-full h-full object-contain p-0.5" 
+                      className="w-full h-full object-contain p-0.5 relative z-10" 
                       onError={(e) => {
                         e.currentTarget.style.display = 'none';
-                        if (e.currentTarget.nextElementSibling) {
-                          (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex';
+                        const fallback = e.currentTarget.parentElement?.querySelector('.logo-fallback');
+                        if (fallback) {
+                          (fallback as HTMLElement).style.display = 'flex';
                         }
                       }}
                     />
                   ) : null}
-                  <div className="w-full h-full items-center justify-center bg-indigo-50 dark:bg-slate-900" style={{ display: (dynamicSettings.logoBase64 || dynamicSettings.logoUrl) ? 'none' : 'flex' }}>
-                    <Building2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  <div 
+                    className="logo-fallback absolute inset-0 w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-black text-[11px] select-none uppercase tracking-tight"
+                    style={{ display: isValidImageSource(dynamicSettings.logoBase64 || dynamicSettings.logoUrl) ? 'none' : 'flex' }}
+                  >
+                    {getShopInitials(dynamicSettings.name || '')}
                   </div>
                 </div>
                 <div>
@@ -7370,13 +8652,143 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div className="flex flex-row-reverse items-center justify-end gap-2">
-                <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-450 rounded-2xl text-xs font-black tracking-wide border border-emerald-200/60 dark:border-emerald-900/30 shadow-sm shadow-emerald-50/20 hover:bg-emerald-100/30 transition-all">
-                  <div className="relative flex h-2.5 w-2.5 items-center justify-center">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+             <div className="flex flex-row-reverse items-center justify-end gap-2">
+                {/* Active Branch Selector for Merchant */}
+                {user && shopSettings?.multiBranchEnabled !== false && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-indigo-400 rounded-2xl border border-indigo-200/60 dark:border-indigo-800/30 shadow-xs">
+                    <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <select
+                      value={activeBranchId}
+                      disabled={user.role !== 'admin' && user.role !== 'master_admin' && !!user.branchId}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setActiveBranchId(val);
+                        localStorage.setItem('shopmaster_active_branch_id', val);
+                        setNotification({
+                          message: systemLang === 'bn' ? 'শাখা সফলভাবে পরিবর্তন করা হয়েছে!' : 'Branch switched successfully!',
+                          type: 'success'
+                        });
+                      }}
+                      className={`bg-transparent border-none outline-none text-xs font-black tracking-wide uppercase font-sans pr-1 text-indigo-700 dark:text-indigo-400 font-bold ${
+                        (user.role !== 'admin' && user.role !== 'master_admin' && !!user.branchId) ? 'opacity-80 cursor-not-allowed' : 'cursor-pointer'
+                      }`}
+                    >
+                      {(user.role === 'admin' || user.role === 'master_admin') && (
+                        <option value="all" className="text-gray-900 dark:text-white bg-white dark:bg-slate-900">
+                          {systemLang === 'bn' ? 'সকল শাখা' : 'All Branches'}
+                        </option>
+                      )}
+                      {branches
+                        .filter((b: any) => {
+                          const isStaff = user.role !== 'admin' && user.role !== 'master_admin' && !!user.branchId;
+                          if (isStaff) {
+                            return b.id === user.branchId;
+                          }
+                          return true;
+                        })
+                        .map((b: any) => (
+                          <option 
+                            key={b.id} 
+                            value={b.id} 
+                            className="text-gray-900 dark:text-white bg-white dark:bg-slate-900"
+                          >
+                            {b.name}
+                          </option>
+                        ))
+                      }
+                    </select>
                   </div>
-                  <span>{systemLang === 'bn' ? 'সিস্টেম অনলাইন' : systemLang === 'ar' ? 'النظام متصل' : 'System Online'}</span>
+                )}
+                {isOnline ? (
+                  <div className="flex items-center gap-2 flex-row-reverse">
+                    <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-450 rounded-2xl text-xs font-black tracking-wide border border-emerald-200/60 dark:border-emerald-900/30 shadow-sm shadow-emerald-50/20">
+                      <div className="relative flex h-2.5 w-2.5 items-center justify-center">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                      </div>
+                      <span>{systemLang === 'bn' ? 'সিস্টেম অনলাইন' : systemLang === 'ar' ? 'النظام متصل' : 'System Online'}</span>
+                    </div>
+
+                    {syncQueue.length > 0 && (
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => setShowSyncAuditModal(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white hover:bg-amber-600 rounded-2xl text-xs font-black tracking-wide shadow-md shadow-amber-200/40 border border-transparent transition-all cursor-pointer animate-pulse"
+                        title={systemLang === 'bn' ? 'ম্যানুয়াল সিঙ্ক অডিট' : 'Audit and sync offline transactions manually'}
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isManualSyncing ? 'animate-spin' : ''}`} />
+                        <span>
+                          {systemLang === 'bn' 
+                            ? `সিঙ্ক করুন (${syncQueue.length})` 
+                            : `Audit Sync (${syncQueue.length})`}
+                        </span>
+                      </motion.button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 flex-row-reverse">
+                    <div className="flex items-center gap-2 px-4 py-2 bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 rounded-2xl text-xs font-black tracking-wide border border-rose-200/60 dark:border-rose-900/30 shadow-sm">
+                      <div className="relative flex h-2.5 w-2.5 items-center justify-center">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-rose-500"></span>
+                      </div>
+                      <span>{systemLang === 'bn' ? 'সিস্টেম অফলাইন' : systemLang === 'ar' ? 'غير متصل' : 'System Offline'}</span>
+                    </div>
+
+                    {syncQueue.length > 0 && (
+                      <button
+                        onClick={() => setShowSyncAuditModal(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-slate-800 text-amber-700 dark:text-amber-400 rounded-2xl text-xs font-black border border-amber-200/40 hover:bg-amber-100 transition-colors cursor-pointer"
+                        title={systemLang === 'bn' ? 'সংরক্ষিত অফলাইন ডাটা অডিট করুন' : 'Audit offline cache'}
+                      >
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+                        <span>{syncQueue.length} {systemLang === 'bn' ? 'অপেক্ষমাণ' : 'Pending'}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Visual Sync Status Icon next to Clock */}
+                <div className="flex items-center gap-1">
+                  {shopSettings.alarmType === 'google' ? (
+                    googleToken ? (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl text-[10px] font-black text-emerald-600 dark:text-emerald-400 select-none animate-fadeIn">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        <span className="hidden sm:inline">Google Synced</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 rounded-2xl text-[10px] font-black text-amber-600 dark:text-amber-400 select-none animate-fadeIn" title="Reminder alarms are saved locally on this browser only. Connect to Google Calendar & Tasks for automatic alarms/reminders on your mobile!">
+                        <span className="relative flex h-2 w-2">
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                        </span>
+                        <span className="hidden sm:inline">Pending Sync</span>
+                      </div>
+                    )
+                  ) : (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800/40 rounded-2xl text-[10px] font-black text-indigo-600 dark:text-indigo-400 select-none animate-fadeIn">
+                      <span className="relative flex h-2 w-2">
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                      </span>
+                      <span className="hidden sm:inline">Local Alarm</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Real-time Clock Component in Header */}
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs select-none hover:border-indigo-400 dark:hover:border-indigo-800 transition-colors">
+                  <Clock className="w-4 h-4 text-indigo-500 animate-pulse shrink-0" />
+                  <div className="flex flex-col text-left leading-none">
+                    <span className="text-xs font-black text-gray-900 dark:text-gray-100 font-mono tracking-tight whitespace-nowrap">
+                      {formatTimeByPreference(currentTime, shopSettings)}
+                    </span>
+                    <span className="text-[9px] font-black uppercase text-gray-400 dark:text-gray-500 tracking-wider mt-0.5 whitespace-nowrap">
+                      {format(currentTime, 'dd MMM yyyy')}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Fullscreen Toggle Button in Header */}
@@ -7500,13 +8912,70 @@ export default function App() {
               transition={{ duration: 0.2 }}
               className="w-full flex-1 flex flex-col animate-fadeIn"
             >
-              {PREMIUM_ONLY_IDS.includes(activeTab) && !isPremiumUnlocked && (
-                <PremiumLockScreen 
-                  title={sidebarItems.flatMap(g => g.items.flatMap(i => i.subItems ? i.subItems : [i])).find(i => i.id === activeTab)?.label || 'Premium Feature'} 
-                  description="This module requires a Premium Membership plan to access."
-                  onNavigateToMembership={() => setActiveTab('membership')} 
-                />
-              )}
+              {activeBranchId === 'all' && shopSettings?.multiBranchEnabled !== false && !['dashboard', 'how_to_use', 'membership', 'release_logs', 'main_admin', 'shops', 'settings', 'recycle_bin', 'live_tv'].includes(activeTab) ? (
+                <div className="flex-1 flex items-center justify-center p-6 bg-slate-50 dark:bg-slate-900/50 min-h-[500px]">
+                  <motion.div 
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="w-full max-w-2xl bg-white dark:bg-slate-800 rounded-3xl p-8 md:p-10 text-center border border-gray-100 dark:border-slate-700/60 shadow-xl shadow-slate-100 dark:shadow-none flex flex-col items-center"
+                  >
+                    <div className="w-20 h-20 bg-rose-50 dark:bg-rose-950/30 text-rose-500 rounded-3xl flex items-center justify-center shadow-lg shadow-rose-100/30 dark:shadow-none mb-6 border border-rose-100/50 dark:border-rose-900/30 animate-bounce">
+                      <AlertTriangle className="w-10 h-10" />
+                    </div>
+                    <h2 className="text-2xl md:text-3xl font-black text-gray-900 dark:text-slate-100 tracking-tight max-w-md uppercase">
+                      {dynamicSettings.systemLanguage === 'bn' 
+                        ? 'নির্দিষ্ট ব্রাঞ্চ নির্বাচন করা আবশ্যক!' 
+                        : 'Specific Branch Required!'}
+                    </h2>
+                    <p className="text-gray-500 dark:text-gray-400 text-sm md:text-base mt-3 max-w-lg font-medium leading-relaxed">
+                      {dynamicSettings.systemLanguage === 'bn' 
+                        ? 'ইনভেন্টরি, ক্যাটেগরি, টেবিল রুম, কিচেন ডিসপ্লে এবং অন্যান্য কার্য পরিচালনা করতে অনুগ্রহ করে নির্দিষ্ট একটি ব্রাঞ্চ সিলেক্ট করুন। অল ব্রাঞ্চ ভিউতে শুধুমাত্র ড্যাশবোর্ড দেখা যাবে।' 
+                        : 'To perform POS checkout, inventory management, draft invoices, table room operations, and other activities, please select a specific branch first. "All Branches" view is restricted to Dashboard analytics only.'}
+                    </p>
+
+                    <div className="w-full mt-8 pt-8 border-t border-gray-100 dark:border-slate-700/60">
+                      <h3 className="text-xs font-black uppercase text-gray-400 tracking-widest mb-4">
+                        {dynamicSettings.systemLanguage === 'bn' 
+                          ? 'সরাসরি ব্রাঞ্চে প্রবেশ করুন' 
+                          : 'Quick Access Branches'}
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md mx-auto">
+                        {branches.filter(b => b.id !== 'all').map((branch) => (
+                          <button
+                            key={branch.id}
+                            onClick={() => {
+                              setActiveBranchId(branch.id);
+                              localStorage.setItem('shopmaster_active_branch_id', branch.id);
+                              setNotification({
+                                message: dynamicSettings.systemLanguage === 'bn' 
+                                  ? `${branch.name} ব্রাঞ্চে সফলভাবে প্রবেশ করেছেন!` 
+                                  : `Successfully entered ${branch.name} branch!`,
+                                type: 'success'
+                              });
+                            }}
+                            className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-indigo-50/70 dark:bg-slate-750 dark:hover:bg-indigo-950/30 border border-gray-150 dark:border-slate-700/50 hover:border-indigo-200 dark:hover:border-indigo-900/50 rounded-2xl transition-all duration-200 text-center group cursor-pointer"
+                          >
+                            <span className="font-bold text-gray-800 dark:text-slate-200 text-sm group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                              {branch.name}
+                            </span>
+                            <span className="text-[10px] text-gray-400 mt-1 font-semibold">
+                              {branch.manager || (dynamicSettings.systemLanguage === 'bn' ? 'ব্রাঞ্চ ম্যানেজার' : 'Branch Manager')}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </motion.div>
+                </div>
+              ) : (
+                <>
+                  {PREMIUM_ONLY_IDS.includes(activeTab) && !isPremiumUnlocked && (
+                    <PremiumLockScreen 
+                      title={sidebarItems.flatMap(g => g.items.flatMap(i => i.subItems ? i.subItems : [i])).find(i => i.id === activeTab)?.label || 'Premium Feature'} 
+                      description="This module requires a Premium Membership plan to access."
+                      onNavigateToMembership={() => setActiveTab('membership')} 
+                    />
+                  )}
 
               {activeTab === 'how_to_use' && (
                 <HowToUsePage />
@@ -7530,6 +8999,18 @@ export default function App() {
 
               {activeTab === 'damage_expire' && (
                 <DamageExpirePage products={products} user={user} shopSettings={shopSettings} setNotification={setNotification} />
+              )}
+
+              {activeTab === 'stock_transfer' && (
+                <StockTransfer 
+                  products={filteredProductsByBranch} 
+                  branches={branches} 
+                  branchStocks={branchStocks} 
+                  user={user} 
+                  shopSettings={shopSettings} 
+                  setNotification={setNotification} 
+                  updateBranchStock={updateBranchStock} 
+                />
               )}
 
               {activeTab === 'shops' && isMasterAdmin && (
@@ -7633,10 +9114,14 @@ export default function App() {
                       const dueAmount = finalTotal - paidAmount;
                       const previousBalance = selectedCustomer?.currentDue || 0;
                       const currentLang = shopSettings.systemLanguage || 'bn';
+                      if (activeBranchId === 'all') {
+                        return { success: false, error: currentLang === 'bn' ? 'বিক্রয় সম্পন্ন করতে অনুগ্রহ করে একটি নির্দিষ্ট ব্রাঞ্চ সিলেক্ট করুন!' : 'Please select a specific branch to checkout!' };
+                      }
                       const defaultRetailName = currentLang === 'bn' ? 'নগদ ক্রেতা (Walk-in)' : 'Retail Sale (Walk-in)';
 
                       const finalSaleData: any = {
                         shopId: user?.shopId,
+                        branchId: activeBranchId,
                         customerName: selectedCustomer?.name || defaultRetailName,
                         customerPhone: selectedCustomer?.phone || '',
                         customerId: selectedCustomer?.id || null,
@@ -7676,6 +9161,7 @@ export default function App() {
                         for (const item of itemsToSell) {
                           const productRef = doc(db, 'products', item.id);
                           await updateDoc(productRef, { stock: increment(-item.quantity) });
+                          await updateBranchStock(item.id, activeBranchId, -item.quantity);
                         }
                         
                         // Update customer
@@ -7707,10 +9193,18 @@ export default function App() {
             )}
             {activeTab === 'inventory_dashboard' && <PlaceholderView title="Inventory Dashboard" />}
             {activeTab === 'damage_expire' && <PlaceholderView title="Damage / Expire" />}
+            {activeTab === 'stock_transfer' && <PlaceholderView title="Stock Transfer" />}
             {activeTab === 'sales_crm_dashboard' && <PlaceholderView title="Sales & CRM Dashboard" />}
             {activeTab === 'accounting_dashboard' && <PlaceholderView title="Accounting Dashboard" />}
+            {activeTab === 'marketing_content' && <PlaceholderView title="Marketing Content Dashboard" />}
+            {activeTab === 'content_plan' && <PlaceholderView title="Content Plan" />}
+            {activeTab === 'hook_generator' && <PlaceholderView title="Hook Generator" />}
+            {activeTab === 'visual_hook_pro' && <PlaceholderView title="Visual Hook Pro" />}
+            {activeTab === 'content_writer_pro' && <PlaceholderView title="Content Writer Pro" />}
+            {activeTab === 'story_maker' && <PlaceholderView title="Story Maker (OVC)" />}
+            {activeTab === 'brand_memory' && <PlaceholderView title="Brand Memory" />}
             {activeTab === 'management_dashboard' && <PlaceholderView title="Management Dashboard" />}
-            {activeTab === 'community_hub' && <PlaceholderView title="Community Hub" />}
+            {activeTab === 'community_hub' && <CommunityHubPage user={user} shopSettings={shopSettings} />}
             {activeTab === 'live_tv' && <LiveTVPortal currentStream={currentStream} setCurrentStream={setCurrentStream} />}
             {activeTab !== 'live_tv' && currentStream && (
               <GlobalPipPlayer 
@@ -7719,8 +9213,20 @@ export default function App() {
                 onMaximize={() => setActiveTab('live_tv')} 
               />
             )}
-            {activeTab === 'contact_us' && <PlaceholderView title="Contact Us" />}
-            {activeTab === 'business_mail' && isPremiumUnlocked && <PlaceholderView title="Business Mail" />}
+            {activeTab === 'contact_us' && (
+              <SupportPage 
+                user={user} 
+                setNotification={setNotification} 
+                lang={dynamicSettings?.systemLanguage || 'en'} 
+              />
+            )}
+            {activeTab === 'business_bio' && <BusinessBio />}
+            {activeTab === 'business_mail' && isPremiumUnlocked && (
+              <BusinessMail 
+                setNotification={setNotification} 
+                lang={dynamicSettings?.systemLanguage || 'en'} 
+              />
+            )}
             {activeTab === 'meet_scheduler' && (
               <MeetScheduler 
                 shopId={user?.shopId} 
@@ -7729,8 +9235,14 @@ export default function App() {
               />
             )}
             {activeTab === 'release_logs' && <PlaceholderView title="Release Logs" />}
-            {activeTab === 'online_shop' && isPremiumUnlocked && <PlaceholderView title="Online Shop" />}
-            {activeTab === 'service_offer' && <PlaceholderView title="Service Offer" />}
+            {activeTab === 'online_shop' && isPremiumUnlocked && <OnlineShop />}
+            {activeTab === 'service_offer' && (
+              <ServiceOfferDashboard 
+                user={user} 
+                settings={dynamicSettings} 
+                setNotification={setNotification} 
+              />
+            )}
             {activeTab === 'main_admin' && (
               <MainAdmin 
                 platformBranding={platformBranding}
@@ -7749,11 +9261,11 @@ export default function App() {
 
             {activeTab === 'dashboard' && (
               <Dashboard 
-                products={products} 
-                sales={sales} 
+                products={filteredProductsByBranch} 
+                sales={filteredSalesByBranch} 
                 customers={customers} 
-                expenses={expenses}
-                dailyClosings={dailyClosings}
+                expenses={filteredExpensesByBranch}
+                dailyClosings={filteredDailyClosingsByBranch}
                 settings={dynamicSettings}
                 onDelete={handleDeleteDailyClosing}
                 onViewProductHistory={(p) => {
@@ -7766,69 +9278,500 @@ export default function App() {
                 setPeriod={setDashboardPeriod}
                 viewMetric={dashboardViewMetric}
                 setViewMetric={setDashboardViewMetric}
+                onSaveSettings={handleSaveSettings}
               />
             )}
             {activeTab === 'draft_invoice' && (
-              <div className="flex flex-col items-center justify-center min-h-[50vh] text-center max-w-lg mx-auto">
-                <div className="w-24 h-24 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center mb-6 shadow-inner ring-4 ring-white">
-                  <FileText className="w-10 h-10" />
+              <div className="space-y-6 max-w-7xl mx-auto p-4 md:p-6" id="draft-invoice-workspace">
+                {/* Header Section */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-slate-800">
+                  <div>
+                    <h1 className="text-2xl md:text-3xl font-black text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-3">
+                      <FileText className="w-8 h-8 text-indigo-500" />
+                      {dynamicSettings.systemLanguage === 'bn' ? 'খসড়া চালানসমূহ (Draft Invoices)' : 'Draft Invoices'}
+                    </h1>
+                    <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm mt-1">
+                      {dynamicSettings.systemLanguage === 'bn' 
+                        ? 'খসড়া হিসেবে স্থগিত বা পেন্ডিং রাখা সমস্ত বিল বা কার্ট এখানে পরিচালনা করুন।' 
+                        : 'Review, recall, and manage all held or suspended checkout sessions.'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 bg-indigo-50/50 dark:bg-indigo-950/20 px-4 py-2 border border-indigo-100 dark:border-indigo-900/40 rounded-2xl">
+                    <span className="text-2xl font-black text-indigo-600 dark:text-indigo-400">
+                      {draftInvoices.length}
+                    </span>
+                    <span className="text-xs font-black text-indigo-500 uppercase tracking-widest">
+                      {dynamicSettings.systemLanguage === 'bn' ? 'মোট স্থগিত বিল' : 'Active Drafts'}
+                    </span>
+                  </div>
                 </div>
-                <h1 className="text-3xl font-black text-slate-800 tracking-tight mb-4">Draft Invoices</h1>
-                <p className="text-slate-500 leading-relaxed font-medium">
-                  Keep track of all incomplete or pending sale records here. Feature coming soon!
-                </p>
+
+                {/* Filter and Search Bar */}
+                <div className="flex flex-col md:flex-row md:items-center gap-4 bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder={dynamicSettings.systemLanguage === 'bn' ? 'রেফারেন্স, কাস্টমার বা বিল নম্বর দিয়ে খুঁজুন...' : 'Search by reference, notes or customer details...'}
+                      value={draftSearch}
+                      onChange={(e) => setDraftSearch(e.target.value)}
+                      className="w-full pl-11 pr-4 py-3 bg-gray-50 dark:bg-slate-800 text-gray-800 dark:text-slate-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs md:text-sm font-semibold transition-all border border-transparent focus:bg-white"
+                    />
+                  </div>
+                  {draftSearch && (
+                    <button
+                      onClick={() => setDraftSearch('')}
+                      className="px-4 py-2 text-xs font-black text-red-500 bg-red-50 dark:bg-red-950/30 rounded-xl hover:bg-red-100 transition-colors"
+                    >
+                      {dynamicSettings.systemLanguage === 'bn' ? 'ফিল্টার মুছুন' : 'Clear Search'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Draft list / grid cards */}
+                {(() => {
+                  const filteredDrafts = draftInvoices.filter(draft => {
+                    if (!draftSearch) return true;
+                    const searchLower = draftSearch.toLowerCase();
+                    const notesMatch = draft.notes?.toLowerCase().includes(searchLower);
+                    const walkInNameMatch = draft.walkInName?.toLowerCase().includes(searchLower);
+                    const customerName = draft.customerId ? (customers.find(c => c.id === draft.customerId)?.name || '') : '';
+                    const customerMatch = customerName.toLowerCase().includes(searchLower);
+                    return notesMatch || walkInNameMatch || customerMatch;
+                  });
+
+                  if (filteredDrafts.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center min-h-[40vh] text-center bg-white dark:bg-slate-900 p-8 rounded-3xl border border-gray-100 dark:border-slate-800 shadow-sm max-w-xl mx-auto">
+                        <div className="w-20 h-20 bg-indigo-50/50 dark:bg-slate-800 text-indigo-500 rounded-full flex items-center justify-center mb-6 shadow-inner">
+                          <FileText className="w-8 h-8 opacity-60" />
+                        </div>
+                        <h3 className="text-lg font-black text-gray-800 dark:text-slate-200">
+                          {dynamicSettings.systemLanguage === 'bn' ? 'কোনো খসড়া চালান পাওয়া যায়নি!' : 'No Draft Invoices Found'}
+                        </h3>
+                        <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm max-w-md mt-2">
+                          {dynamicSettings.systemLanguage === 'bn' 
+                            ? "পয়েন্ট অফ সেল (POS) কার্টে পণ্য যোগ করার পর উপরে 'Save as Draft' বাটনে ক্লিক করে খসড়া চালান স্থগিত রাখতে পারেন।"
+                            : 'To suspend structured shopping sessions, simply add items to the POS cart and click on the "Save as Draft" paper icon.'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      <AnimatePresence>
+                        {filteredDrafts.map((draft) => {
+                          const customerObj = draft.customerId ? customers.find(c => c.id === draft.customerId) : null;
+                          const clientLabel = customerObj ? customerObj.name : (draft.walkInName || (dynamicSettings.systemLanguage === 'bn' ? 'ওয়াক-ইন কাস্টমার' : 'Walk-in Customer'));
+                          const formattedDate = draft.createdAt 
+                            ? formatDateTimeByPreference(draft.createdAt, dynamicSettings)
+                            : (dynamicSettings.systemLanguage === 'bn' ? 'তারিখ পাওয়া যায়নি' : 'No date');
+
+                          return (
+                            <motion.div
+                              key={draft.id}
+                              layout
+                              initial={{ opacity: 0, y: 15 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95 }}
+                              className="group bg-white dark:bg-slate-900 p-5 rounded-2xl border border-gray-150 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-indigo-100 dark:hover:border-indigo-950 transition-all flex flex-col justify-between"
+                            >
+                              <div className="space-y-4">
+                                {/* Top Badges and Date */}
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="space-y-1 min-w-0">
+                                    <span id={`draft-label-${draft.id}`} className="text-[10px] font-black uppercase tracking-wider text-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 rounded-lg block w-max truncate max-w-full">
+                                      {draft.notes || (dynamicSettings.systemLanguage === 'bn' ? 'খসড়া রেফারেন্স নেই' : 'Unlabeled Draft')}
+                                    </span>
+                                    <p className="text-[10px] text-gray-400 dark:text-gray-500 font-bold mt-1">
+                                      {formattedDate}
+                                    </p>
+                                  </div>
+                                  <div className="text-right flex-shrink-0">
+                                    <p className="text-lg font-black text-indigo-600 dark:text-indigo-400">
+                                      ৳{Number(draft.finalTotal || 0).toLocaleString()}
+                                    </p>
+                                    <span className="text-[9px] font-extrabold text-gray-450 dark:text-gray-500 uppercase">
+                                      {draft.cart?.length || 0} {dynamicSettings.systemLanguage === 'bn' ? 'টি পণ্য' : 'items'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Divider */}
+                                <div className="border-t border-dashed border-gray-100 dark:border-slate-800"></div>
+
+                                {/* Customer Info */}
+                                <div>
+                                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">
+                                    {dynamicSettings.systemLanguage === 'bn' ? 'ক্রেতার বিবরণ' : 'Client Profile'}
+                                  </p>
+                                  <p className="text-xs md:text-sm font-bold text-gray-800 dark:text-slate-200 mt-1 truncate">
+                                    {clientLabel}
+                                  </p>
+                                  {(customerObj?.phone || draft.walkInPhone) && (
+                                    <p className="text-[10px] font-bold text-indigo-500/80 mt-0.5">
+                                      📞 {customerObj?.phone || draft.walkInPhone}
+                                    </p>
+                                  )}
+                                </div>
+
+                                {/* Table Number / Waiter if present */}
+                                {(draft.tableNo || draft.waiterName) && (
+                                  <div className="flex gap-2 text-[10px] bg-slate-50 dark:bg-slate-805 p-2 rounded-lg font-bold text-slate-600 dark:text-slate-400">
+                                    {draft.tableNo && (
+                                      <span>
+                                        📍 {dynamicSettings.systemLanguage === 'bn' ? `টেবিল: ${draft.tableNo}` : `Table: ${draft.tableNo}`}
+                                      </span>
+                                    )}
+                                    {draft.waiterName && (
+                                      <span>
+                                        🤵 {dynamicSettings.systemLanguage === 'bn' ? `ওয়েটার: ${draft.waiterName}` : `Waiter: ${draft.waiterName}`}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Preview items bullet list */}
+                                <div className="space-y-1.5 bg-gray-50/50 dark:bg-slate-950/20 p-3 rounded-xl max-h-[100px] overflow-y-auto custom-scrollbar">
+                                  {draft.cart?.slice(0, 3).map((item: any, idX: number) => (
+                                    <div key={idX} className="flex justify-between items-center text-[11px] text-gray-650 dark:text-gray-400 font-bold">
+                                      <span className="truncate max-w-[70%]">
+                                        • {item.name || (dynamicSettings.systemLanguage === 'bn' ? 'অজানা পণ্য' : 'Unknown Product')}
+                                      </span>
+                                      <span className="text-xs text-indigo-500">
+                                        x{item.quantity || 1}
+                                      </span>
+                                    </div>
+                                  ))}
+                                  {draft.cart?.length > 3 && (
+                                    <p className="text-[10px] text-indigo-400 italic text-center font-bold mt-1">
+                                      + {draft.cart.length - 3} {dynamicSettings.systemLanguage === 'bn' ? 'টি অতিরিক্ত পণ্য...' : 'more items...'}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Footer Action Buttons */}
+                              <div className="flex items-center gap-2 mt-5 border-t border-gray-50 dark:border-slate-800 pt-4">
+                                <button
+                                  onClick={() => {
+                                    setCart(draft.cart || []);
+                                    setDiscount(draft.discount || 0);
+                                    setTaxRate(draft.taxRate || 0);
+                                    setCheckoutData({
+                                      customerId: draft.customerId || '',
+                                      walkInName: draft.walkInName || '',
+                                      walkInPhone: draft.walkInPhone || '',
+                                      paidAmount: 0,
+                                      paymentMethod: draft.paymentMethod || 'cash',
+                                      orderId: draft.orderId || '',
+                                      tableNo: draft.tableNo || '',
+                                      waiterId: draft.waiterId || '',
+                                      waiterName: draft.waiterName || ''
+                                    });
+                                    setActiveTab('pos');
+                                    deleteDoc(doc(db, 'draft_invoices', draft.id));
+                                    setNotification({
+                                      message: dynamicSettings.systemLanguage === 'bn' 
+                                        ? 'খসড়া চালান পিওএস কার্টে সফলভাবে ফিরিয়ে আনা হয়েছে।' 
+                                        : 'Draft invoice back-loaded to POS active cart successfully!',
+                                      type: 'success'
+                                    });
+                                  }}
+                                  className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-sm group-hover:scale-[1.01] active:scale-[0.98] transition-all"
+                                >
+                                  <ShoppingBag className="w-3.5 h-3.5" />
+                                  {dynamicSettings.systemLanguage === 'bn' ? 'কার্টে ফিরিয়ে নিন' : 'Recall to Cart'}
+                                </button>
+
+                                <button
+                                  onClick={() => setSelectedDraftForView(draft)}
+                                  className="p-2 text-slate-500 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/40 rounded-xl transition-all"
+                                  title={dynamicSettings.systemLanguage === 'bn' ? 'খসড়া ভাউচার দেখুন' : 'Quick View Bill'}
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+
+                                <button
+                                  onClick={async () => {
+                                    if (confirm(dynamicSettings.systemLanguage === 'bn' ? 'আপনি কি নিশ্চিতভাবে এই স্থগিত চালান খসড়াটি বাতিল করতে চান?' : 'Are you sure you want to discard this layout draft?')) {
+                                      try {
+                                        await deleteDoc(doc(db, 'draft_invoices', draft.id));
+                                        setNotification({
+                                          message: dynamicSettings.systemLanguage === 'bn' ? 'খসড়া চালান মুছে ফেলা হয়েছে।' : 'Draft invoice discarded successfully.',
+                                          type: 'success'
+                                        });
+                                      } catch (error) {
+                                        console.error("Discard draft error", error);
+                                      }
+                                    }
+                                  }}
+                                  className="p-2 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 dark:bg-slate-800 dark:hover:bg-slate-900 rounded-xl transition-all"
+                                  title={dynamicSettings.systemLanguage === 'bn' ? 'মুছে ফেলুন' : 'Discard Draft'}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })()}
+
+                {/* Print Quick View Modal */}
+                {selectedDraftForView && (
+                  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <motion.div
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[85vh]"
+                    >
+                      {/* Modal Header */}
+                      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-150 dark:border-slate-800">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-5 h-5 text-indigo-500" />
+                          <h3 className="font-black text-gray-950 dark:text-slate-100 text-sm md:text-base">
+                            {dynamicSettings.systemLanguage === 'bn' ? 'চালান খসড়া ভিউ' : 'Draft Bill Viewer'}
+                          </h3>
+                        </div>
+                        <button
+                          onClick={() => setSelectedDraftForView(null)}
+                          className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full text-gray-500 transition-colors"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      {/* Modal Document Body */}
+                      <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6" id="draft-print-area">
+                        {/* Company Details */}
+                        <div className="text-center space-y-1">
+                          <h4 className="text-xl font-black text-gray-900 dark:text-slate-100 uppercase tracking-wide">
+                            {dynamicSettings.name || (dynamicSettings.systemLanguage === 'bn' ? 'আমার ব্যবসা' : 'My Business')}
+                          </h4>
+                          <p className="text-xs text-gray-550 dark:text-gray-400 font-bold">
+                            {dynamicSettings.address || 'Dhaka, Bangladesh'}
+                          </p>
+                          <p className="text-xs text-indigo-500 font-black">
+                            📞 {dynamicSettings.phone || ''}
+                          </p>
+                          <div className="inline-block mt-2 bg-indigo-50 dark:bg-indigo-950 px-3 py-1 rounded-full text-[9px] font-black uppercase text-indigo-600 dark:text-indigo-400">
+                            {dynamicSettings.systemLanguage === 'bn' ? 'চালান চালানি (খসড়া)' : 'Pro-Forma / suspended cart'}
+                          </div>
+                        </div>
+
+                        {/* Customer & Timestamp Profile */}
+                        <div className="grid grid-cols-2 gap-4 text-xs bg-slate-50 dark:bg-slate-805 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                          <div>
+                            <p className="text-[10px] font-black uppercase text-gray-400">{dynamicSettings.systemLanguage === 'bn' ? 'ক্রেতা' : 'Customer'}</p>
+                            <p className="font-bold text-gray-800 dark:text-slate-200 mt-1">
+                              {selectedDraftForView.customerId 
+                                ? (customers.find(c => c.id === selectedDraftForView.customerId)?.name || '') 
+                                : (selectedDraftForView.walkInName || (dynamicSettings.systemLanguage === 'bn' ? 'ওয়াক-ইন কাস্টমার' : 'Walk-in Customer'))}
+                            </p>
+                            {selectedDraftForView.walkInPhone && (
+                              <p className="text-gray-550 dark:text-gray-400 mt-0.5">{selectedDraftForView.walkInPhone}</p>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] font-black uppercase text-gray-400">{dynamicSettings.systemLanguage === 'bn' ? 'তারিখ ও সময়' : 'Timestamp'}</p>
+                            <p className="font-semibold text-gray-700 dark:text-slate-300 mt-1">
+                              {formatDateTimeByPreference(selectedDraftForView.createdAt, dynamicSettings)}
+                            </p>
+                            {selectedDraftForView.notes && (
+                              <p className="text-[10px] bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded text-indigo-600 dark:text-indigo-400 inline-block mt-1 max-w-full truncate">
+                                Ref: {selectedDraftForView.notes}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Itemized List */}
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-gray-400">
+                            {dynamicSettings.systemLanguage === 'bn' ? 'আইটেম তালিকা' : 'Itemizations'}
+                          </p>
+                          <div className="border border-gray-150 dark:border-slate-800 rounded-xl overflow-hidden">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="bg-slate-50 dark:bg-slate-805 text-[10px] font-black text-gray-500 uppercase border-b border-gray-150 dark:border-slate-800">
+                                  <th className="py-2.5 px-3">{dynamicSettings.systemLanguage === 'bn' ? 'আইটেম' : 'Item'}</th>
+                                  <th className="py-2.5 px-3 text-center">{dynamicSettings.systemLanguage === 'bn' ? 'পরিমাণ' : 'Qty'}</th>
+                                  <th className="py-2.5 px-3 text-right">{dynamicSettings.systemLanguage === 'bn' ? 'মূল্য' : 'Rate'}</th>
+                                  <th className="py-2.5 px-3 text-right">{dynamicSettings.systemLanguage === 'bn' ? 'মোট' : 'Total'}</th>
+                                </tr>
+                              </thead>
+                              <tbody className="text-xs font-bold text-gray-700 dark:text-slate-300">
+                                {selectedDraftForView.cart?.map((item: any, idX: number) => (
+                                  <tr key={idX} className="border-b last:border-b-0 border-gray-100 dark:border-slate-800/60">
+                                    <td className="py-2.5 px-3 truncate max-w-[150px]">
+                                      {item.name}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-center text-indigo-600">
+                                      {item.quantity}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right text-gray-500">
+                                      ৳{item.price}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right text-slate-850">
+                                      ৳{Number(item.price * item.quantity).toLocaleString()}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* Subtotal summary calculations */}
+                        <div className="space-y-1.5 border-t border-gray-150 dark:border-slate-800 pt-4 text-xs font-bold text-gray-600 dark:text-gray-400">
+                          {selectedDraftForView.discount > 0 && (
+                            <div className="flex justify-between">
+                              <span>{dynamicSettings.systemLanguage === 'bn' ? 'ছাড় (Discount):' : 'Discount:'}</span>
+                              <span className="text-red-500">-৳{selectedDraftForView.discount}</span>
+                            </div>
+                          )}
+                          {selectedDraftForView.taxRate > 0 && (
+                            <div className="flex justify-between">
+                              <span>{dynamicSettings.systemLanguage === 'bn' ? `ভ্যাট/ট্যাক্স (${selectedDraftForView.taxRate}%):` : `Tax (${selectedDraftForView.taxRate}%):`}</span>
+                              <span>+৳{Math.round((selectedDraftForView.finalTotal * selectedDraftForView.taxRate) / 100)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-base font-black text-gray-900 dark:text-slate-100 pt-2 border-t border-gray-100 dark:border-slate-850">
+                            <span>{dynamicSettings.systemLanguage === 'bn' ? 'মোট প্রদেয় বিল:' : 'Total Estimate:'}</span>
+                            <span className="text-indigo-600 dark:text-indigo-400">৳{Number(selectedDraftForView.finalTotal || 0).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Modal Footer Controls */}
+                      <div className="px-6 py-4 bg-gray-50 dark:bg-slate-805 border-t border-gray-150 dark:border-slate-800/80 flex items-center justify-end gap-3">
+                        <button
+                          onClick={() => {
+                            const printContents = document.getElementById("draft-print-area")?.innerHTML;
+                            if (printContents) {
+                              const originalContents = document.body.innerHTML;
+                              document.body.innerHTML = `<div style="padding: 40px; background: white; color: black; font-family: sans-serif;">${printContents}</div>`;
+                              window.print();
+                              // Refresh automatically to restore the screen
+                              window.location.reload();
+                            }
+                          }}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-indigo-50 hover:bg-indigo-150 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-black transition-colors"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          {dynamicSettings.systemLanguage === 'bn' ? 'চালানটি প্রিন্ট করুন' : 'Print Draft'}
+                        </button>
+                        <button
+                          onClick={() => setSelectedDraftForView(null)}
+                          className="px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-250 dark:hover:bg-slate-650 text-gray-800 dark:text-slate-100 rounded-xl text-xs font-black transition-colors"
+                        >
+                          {dynamicSettings.systemLanguage === 'bn' ? 'বন্ধ করুন' : 'Close'}
+                        </button>
+                      </div>
+                    </motion.div>
+                  </div>
+                )}
               </div>
             )}
             {activeTab === 'pos' && (
-              <POS 
-                sales={sales}
-                products={products} 
-                cart={cart} 
-                addToCart={addToCart} 
-                removeFromCart={removeFromCart} 
-                updateCartQuantity={updateCartQuantity}
-                updateCartQuantityManual={updateCartQuantityManual}
-                updateCartPriceManual={updateCartPriceManual}
-                updateCartLineTotalManual={updateCartLineTotalManual}
-                handleCheckout={handleCheckout}
-                discount={discount}
-                setDiscount={setDiscount}
-                taxRate={taxRate}
-                setTaxRate={setTaxRate}
-                taxAmount={taxAmount}
-                cartTotal={cartTotal}
-                finalTotal={finalTotal}
-                customers={customers}
-                checkoutData={checkoutData}
-                setCheckoutData={setCheckoutData}
-                editingSale={editingSale}
-                onCancelEdit={() => {
-                  setEditingSale(null);
-                  setCart([]);
-                  setDiscount(0);
-                  setTaxRate(0);
-                  setCheckoutData({ customerId: '', walkInName: '', walkInPhone: '', paidAmount: 0, paymentMethod: 'cash', orderId: '' });
-                }}
+              <div className="relative">
+                {activeBranchId === 'all' && (
+                  <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-white/75 dark:bg-slate-900/80 backdrop-blur-md rounded-[2.5rem] p-8 text-center border border-gray-100 dark:border-slate-800/80 min-h-[500px]">
+                    <div className="w-20 h-20 bg-rose-50 dark:bg-rose-950/30 text-rose-500 rounded-3xl flex items-center justify-center shadow-lg shadow-rose-100/30 dark:shadow-none mb-6 border border-rose-100/50 dark:border-rose-900/30 animate-bounce">
+                      <AlertTriangle className="w-10 h-10" />
+                    </div>
+                    <h2 className="text-2xl font-black text-gray-900 dark:text-slate-100 tracking-tight max-w-md uppercase">
+                      {dynamicSettings.systemLanguage === 'bn' 
+                        ? 'নির্দিষ্ট ব্রাঞ্চ নির্বাচন করুন!' 
+                        : 'Select a Specific Branch!'}
+                    </h2>
+                    <p className="text-gray-500 dark:text-gray-400 text-sm mt-3 max-w-md font-medium">
+                      {dynamicSettings.systemLanguage === 'bn' 
+                        ? 'বিক্রয় (Point of Sale) সম্পন্ন করতে অনুগ্রহ করে ওপরের হেডার ড্রপডাউন থেকে একটি নির্দিষ্ট ব্রাঞ্চ (যেমন: Main Branch) নির্বাচন করুন। অল ব্রাঞ্চ ভিউতে সরাসরি বিক্রয় করা সম্ভব নয়।' 
+                        : 'To complete a sale, please select a specific branch (e.g., Main Branch) from the top header dropdown. Direct checkout is disabled in "All Branches" mode.'}
+                    </p>
+                  </div>
+                )}
+                <POS 
+                  sales={filteredSalesByBranch}
+                  products={filteredProductsByBranch} 
+                  cart={cart} 
+                  addToCart={addToCart} 
+                  removeFromCart={removeFromCart} 
+                  updateCartQuantity={updateCartQuantity}
+                  updateCartQuantityManual={updateCartQuantityManual}
+                  updateCartPriceManual={updateCartPriceManual}
+                  updateCartLineTotalManual={updateCartLineTotalManual}
+                  handleCheckout={handleCheckout}
+                  discount={discount}
+                  setDiscount={setDiscount}
+                  taxRate={taxRate}
+                  setTaxRate={setTaxRate}
+                  taxAmount={taxAmount}
+                  cartTotal={cartTotal}
+                  finalTotal={finalTotal}
+                  customers={customers}
+                  checkoutData={checkoutData}
+                  setCheckoutData={setCheckoutData}
+                  editingSale={editingSale}
+                  onCancelEdit={() => {
+                    setEditingSale(null);
+                    setCart([]);
+                    setDiscount(0);
+                    setTaxRate(0);
+                    setCheckoutData({ customerId: '', walkInName: '', walkInPhone: '', paidAmount: 0, paymentMethod: 'cash', orderId: '', tableNo: '', waiterId: '', waiterName: '' });
+                  }}
+                  settings={dynamicSettings}
+                  setNotification={setNotification}
+                  user={user}
+                  isOnline={isOnline}
+                  onAddCustomer={handleAddCustomer}
+                  generateCustomerSuggestion={generateCustomerSuggestion}
+                  isCustomerModalOpen={isCustomerModalOpen}
+                  setIsCustomerModalOpen={setIsCustomerModalOpen}
+                  customerSuggestion={customerSuggestion}
+                  isCustomerVoiceListening={isCustomerVoiceListening}
+                  setIsCustomerVoiceListening={setIsCustomerVoiceListening}
+                  isCheckingOut={isCheckingOut}
+                  setCart={setCart}
+                  employees={employees}
+                  setIsScannerOpen={setIsScannerOpen}
+                  setScannerMode={setScannerMode}
+                  activeBranchId={activeBranchId}
+                />
+              </div>
+            )}
+            {activeTab === 'table_room' && (
+              <TableRoomPage 
                 settings={dynamicSettings}
-                setNotification={setNotification}
+                onSaveSettings={handleSaveSettings}
+                employees={employees}
+                sales={sales}
                 user={user}
+                setNotification={setNotification}
+                activeBranchId={activeBranchId}
+                branches={branches}
+              />
+            )}
+            {activeTab === 'kitchen_display' && (
+              <KitchenDisplay 
+                sales={sales} 
+                setNotification={setNotification}
                 isOnline={isOnline}
-                onAddCustomer={handleAddCustomer}
-                generateCustomerSuggestion={generateCustomerSuggestion}
-                isCustomerModalOpen={isCustomerModalOpen}
-                setIsCustomerModalOpen={setIsCustomerModalOpen}
-                customerSuggestion={customerSuggestion}
-                isCustomerVoiceListening={isCustomerVoiceListening}
-                setIsCustomerVoiceListening={setIsCustomerVoiceListening}
-                isCheckingOut={isCheckingOut}
+                activeBranchId={activeBranchId}
+                branches={branches}
               />
             )}
             {activeTab === 'inventory' && (
               <Inventory 
-                products={products} 
+                products={filteredProductsByBranch} 
                 categories={categories} 
-                stockRecords={stockRecords}
-                sales={sales}
+                stockRecords={filteredStockRecordsByBranch}
+                sales={filteredSalesByBranch}
                 onViewHistory={(p) => {
                   setSelectedProductForHistory(p);
                 }}
@@ -7841,6 +9784,8 @@ export default function App() {
                 setIsScannerOpen={setIsScannerOpen}
                 user={user}
                 suppliers={suppliers}
+                activeBranchId={activeBranchId}
+                branches={branches}
               />
             )}
             {activeTab === 'category' && (
@@ -7853,7 +9798,7 @@ export default function App() {
             )}
             {activeTab === 'sales' && (
               <SalesHistory 
-                sales={sales} 
+                sales={filteredSalesByBranch} 
                 onEdit={handleEditSale}
                 onDelete={handleDeleteSale}
                 settings={dynamicSettings}
@@ -7874,6 +9819,25 @@ export default function App() {
                 recycleBin={recycleBin}
                 isOnline={isOnline}
                 syncQueue={syncQueue}
+                triggerManualSync={triggerManualSync}
+                isManualSyncing={isManualSyncing}
+                setShowSyncAuditModal={setShowSyncAuditModal}
+                branches={branches}
+                activeBranchId={activeBranchId}
+              />
+            )}
+            {activeTab === 'branch_crm' && (
+              <BranchCrm 
+                shopSettings={dynamicSettings}
+                user={user}
+                onSendMessage={async (phone, msg) => {
+                  try {
+                    return await callWhatsAppApi(phone, msg, dynamicSettings);
+                  } catch (e) {
+                    return { success: false, error: e.message || String(e) };
+                  }
+                }}
+                setNotification={setNotification}
               />
             )}
             {activeTab === 'customer_orders' && (
@@ -7882,6 +9846,7 @@ export default function App() {
                 products={products}
                 lang={dynamicSettings.systemLanguage || 'en'} 
                 onLoadToPOS={handleLoadOrderToPOS} 
+                onPrintInvoice={handlePrintOrderInvoice}
               />
             )}
             {activeTab === 'daily_closing' && isPremiumUnlocked && (
@@ -7894,92 +9859,14 @@ export default function App() {
                 user={user}
                 onDelete={handleDeleteDailyClosing}
                 setNotification={setNotification}
+                activeBranchId={activeBranchId}
+                branches={branches}
+                googleToken={googleToken}
+                onCreateRecurringEvent={createGoogleCalendarRecurringEvent}
               />
             )}
             {activeTab === 'warehouse' && (
-              <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-xl border border-gray-100 dark:border-slate-800">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-                  <div className="flex items-center gap-3">
-                    <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-2xl text-amber-600">
-                      <WarehouseIcon className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold text-gray-900 dark:text-slate-100">{dynamicSettings.systemLanguage === 'bn' ? 'ওয়্যারহাউস তথ্য' : 'Warehouse Inventory'}</h2>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        {dynamicSettings.systemLanguage === 'bn' ? 'ওয়্যারহাউস বা ডিপো অনুযায়ী স্টকের পরিমাণ এবং আইটেম সংখ্যা' : 'Track and view stock levels grouped by designated warehouse locations.'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {Object.entries(
-                    products.reduce((acc, p) => {
-                      const whName = p.warehouse?.trim() || (dynamicSettings.systemLanguage === 'bn' ? 'অনির্ধারিত / মূল শপ' : 'Store / Main Shop');
-                      if (!acc[whName]) acc[whName] = [];
-                      acc[whName].push(p);
-                      return acc;
-                    }, {} as Record<string, typeof products>)
-                  ).map(([locationName, whProducts]) => {
-                    const totalWhStock = whProducts.reduce((sum, p) => sum + p.stock, 0);
-                    const totalWhValue = whProducts.reduce((sum, p) => sum + (p.stock * (p.purchasePrice || 0)), 0);
-
-                    return (
-                      <div key={locationName} className="border border-gray-100 dark:border-slate-800/80 rounded-2xl p-5 hover:shadow-lg transition-all bg-gray-50/50 dark:bg-slate-950/40 flex flex-col justify-between">
-                        <div>
-                          <div className="flex justify-between items-start mb-4 border-b border-gray-100 dark:border-slate-800/40 pb-3">
-                            <span className="font-bold text-gray-800 dark:text-slate-200 flex items-center gap-2 text-sm truncate max-w-[70%]">
-                              <WarehouseIcon className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                              {locationName}
-                            </span>
-                            <span className="px-2.5 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded-full text-xs font-black">
-                              {whProducts.length} {dynamicSettings.systemLanguage === 'bn' ? 'আইটেম' : 'items'}
-                            </span>
-                          </div>
-                          
-                          <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1 mb-4">
-                            {whProducts.map(p => {
-                              const isLowStock = p.stock <= (p.lowStockThreshold || 5);
-                              return (
-                                <div key={p.id} className="flex justify-between items-center text-xs border-b border-gray-100/60 dark:border-slate-800/30 pb-2 pt-1 last:border-0">
-                                  <div className="flex flex-col min-w-0 flex-1 mr-2">
-                                    <span className="text-gray-800 dark:text-slate-300 font-semibold truncate" title={p.name}>
-                                      {p.name}
-                                    </span>
-                                    {p.sku && (
-                                      <span className="text-[10px] text-gray-400 font-mono font-medium truncate">
-                                        SKU: {p.sku}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-right flex-shrink-0">
-                                    <span className={`font-mono font-bold px-2 py-0.5 rounded-md text-xs ${isLowStock ? 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400' : 'bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-slate-300'}`}>
-                                      {p.stock}
-                                    </span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div className="pt-3 border-t border-gray-100 dark:border-slate-800/60 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 font-semibold mt-auto">
-                          <div>
-                            <span className="block text-[10px] text-gray-400 uppercase tracking-wider">{dynamicSettings.systemLanguage === 'bn' ? 'মোট স্টক' : 'Total Stock'}</span>
-                            <span className="text-sm font-bold text-gray-900 dark:text-slate-100 font-mono">{totalWhStock}</span>
-                          </div>
-                          <div className="text-right">
-                            <span className="block text-[10px] text-gray-400 uppercase tracking-wider">{dynamicSettings.systemLanguage === 'bn' ? 'ইনভেন্টরি মূল্য' : 'Inventory Value'}</span>
-                            <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                              {dynamicSettings.currency || '৳'}{totalWhValue.toLocaleString()}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              <CentralWarehouse products={products} user={user} setNotification={setNotification} />
             )}
 
             {activeTab === 'barcode' && (
@@ -7992,6 +9879,9 @@ export default function App() {
                 onUpdate={handleUpdateNote} 
                 onDelete={handleDeleteNote}
                 settings={dynamicSettings}
+                setNotification={setNotification}
+                googleToken={googleToken}
+                setGoogleToken={setGoogleToken}
               />
             )}
             {activeTab === 'warranty' && isPremiumUnlocked && (
@@ -7999,6 +9889,37 @@ export default function App() {
                 products={products} 
                 settings={dynamicSettings} 
                 warrantyRecords={warrantyRecords}
+                user={user}
+                setNotification={setNotification}
+              />
+            )}
+            {activeTab === 'mobile_electronics' && (
+              <MobileElectronicsView 
+                products={products}
+                customers={customers}
+                sales={sales}
+                onAddProduct={handleAddProduct}
+                onAddCustomer={handleAddCustomer}
+                settings={dynamicSettings}
+                user={user}
+                setNotification={setNotification}
+              />
+            )}
+            {activeTab === 'pharmacy_module' && (
+              <PharmacyModuleView 
+                products={products}
+                onAddProduct={handleAddProduct}
+                settings={dynamicSettings}
+                user={user}
+                setNotification={setNotification}
+              />
+            )}
+            {activeTab === 'dealership_module' && (
+              <DealershipModuleView 
+                products={products}
+                customers={customers}
+                onAddProduct={handleAddProduct}
+                settings={dynamicSettings}
                 user={user}
                 setNotification={setNotification}
               />
@@ -8029,7 +9950,6 @@ export default function App() {
                 onDeleteSupplier={handleDeleteSupplier}
               />
             )}
-            {activeTab === 'activation_code' && <ActivationCodePage />}
             {activeTab === 'accounting' && isPremiumUnlocked && (
               <Accounting 
                 sales={sales} 
@@ -8058,7 +9978,7 @@ export default function App() {
             )}
 
 
-            {activeTab === 'messaging_gateway' && user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com' && (
+            {activeTab === 'messaging_gateway' && (user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com' || user?.role === 'admin' || user?.role === 'master_admin') && (
               <MessagingGateway 
                 shopSettings={shopSettings}
                 onSaveSettings={handleSaveSettings}
@@ -8067,6 +9987,21 @@ export default function App() {
               />
             )}
 
+
+            {['hrm_dashboard', 'staff_directory', 'attendance_tracker', 'payroll_disbursal', 'leave_planner', 'system_login', 'employment_contracts'].includes(activeTab) && (
+              <HRM
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                employees={employees}
+                onAddEmployee={handleAddEmployee}
+                onUpdateEmployee={handleUpdateEmployee}
+                onDeleteEmployee={handleDeleteEmployee}
+                user={user}
+                settings={shopSettings}
+                setNotification={setNotification}
+                branches={branches}
+              />
+            )}
 
             {activeTab === 'settings' && user?.role === 'admin' && (
               <SettingsPanel 
@@ -8094,9 +10029,178 @@ export default function App() {
                 onRestore={handleRestoreRecycleItem} 
               />
             )}
+                </>
+              )}
             </motion.div>
           </AnimatePresence>
         </main>
+
+        {/* Offline Transactions Sync & Audit Modal */}
+        <AnimatePresence>
+          {showSyncAuditModal && (
+            <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => {
+                  if (!isManualSyncing) setShowSyncAuditModal(false);
+                }}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0, y: 30 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 30 }}
+                className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 overflow-hidden"
+              >
+                <div className="h-2.5 w-full bg-gradient-to-r from-amber-500 via-orange-500 to-indigo-600"></div>
+                
+                <div className="p-8">
+                  {/* Title and Icon */}
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 bg-amber-50 dark:bg-indigo-950/40 text-amber-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center shadow-inner">
+                        <Database className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                          {systemLang === 'bn' ? 'অফলাইন ট্রানজ্যাকশন অডিট সিঙ্ক' : 'Offline Saved Transactions Audit'}
+                        </h3>
+                        <p className="text-xs text-gray-400 dark:text-slate-500 font-bold uppercase tracking-widest leading-none mt-1">
+                          {systemLang === 'bn' ? 'ডাটাবেজ সিঙ্ক ও ক্যাশ অডিট প্যানেল' : 'Database Cashing & Sync Console'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => !isManualSyncing && setShowSyncAuditModal(false)}
+                      disabled={isManualSyncing}
+                      className="p-2.5 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-xl transition-colors text-gray-400 dark:text-slate-500 disabled:opacity-30 cursor-pointer"
+                    >
+                      <X className="w-6 h-6" />
+                    </button>
+                  </div>
+
+                  <p className="text-sm text-gray-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
+                    {systemLang === 'bn' 
+                      ? 'অফলাইন মোডে থাকাকালীন আপনার কাস্টমার ট্রানজ্যাকশনগুলো সুরক্ষিতভাবে ব্রাউজার ক্যাশে সংরক্ষিত হয়েছিল। নিচে সংরক্ষিত তালিকাটি রিভিউ (অডিট) করুন এবং ইন্টারনেট চালু থাকলে অবিলম্বে মূল সার্ভারে যুক্ত করতে সিঙ্ক করুন।' 
+                      : 'While operating in offline mode, your customer transactions and logs were safely cached locally. Please review the audit ledger below and trigger manual synchronization when a reliable internet connection is available.'}
+                  </p>
+
+                  {/* Audit Ledger List */}
+                  <div className="max-h-60 overflow-y-auto mb-8 border border-gray-100 dark:border-slate-800 rounded-2xl divide-y divide-gray-50 dark:divide-slate-800 bg-gray-50/30 dark:bg-slate-950/20">
+                    {syncQueue.length === 0 ? (
+                      <div className="p-12 text-center text-sm font-medium text-gray-400 dark:text-slate-500">
+                        {systemLang === 'bn' ? 'কোনো পেন্ডিং অফলাইন ট্রানজ্যাকশন নেই!' : 'No pending offline transactions found.'}
+                      </div>
+                    ) : (
+                      syncQueue.map((item, index) => {
+                        let typeLabel = '';
+                        let typeColorClass = '';
+                        let description = '';
+
+                        if (item.type === 'sale') {
+                          typeLabel = systemLang === 'bn' ? 'বিক্রয়' : 'Sale';
+                          typeColorClass = 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400';
+                          description = `${systemLang === 'bn' ? 'গ্রাহক' : 'Customer'}: ${item.data.saleData?.customerName || item.data.saleData?.customerId || (systemLang === 'bn' ? 'সাধারণ কাস্টমার' : 'Walk-in')} • ${systemLang === 'bn' ? 'মোট বিল' : 'Final Bill'}: ${fC(item.data.saleData?.finalAmount)}`;
+                        } else if (item.type === 'payment') {
+                          typeLabel = systemLang === 'bn' ? 'বকেয়া গ্রহণ' : 'Payment Collection';
+                          typeColorClass = 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400';
+                          description = `${systemLang === 'bn' ? 'গ্রাহক আইডি' : 'Customer ID'}: ${item.data.customerId} • ${systemLang === 'bn' ? 'পরিশোধিত' : 'Paid'}: ${fC(item.data.amount)}`;
+                        } else if (item.type === 'customer') {
+                          typeLabel = systemLang === 'bn' ? 'নতুন কাস্টমার' : 'New Customer';
+                          typeColorClass = 'bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-400';
+                          description = `${systemLang === 'bn' ? 'নাম' : 'Name'}: ${item.data.customerData?.name} ${item.data.customerData?.phone ? `(${item.data.customerData?.phone})` : ''}`;
+                        } else if (item.type === 'customer_update') {
+                          typeLabel = systemLang === 'bn' ? 'প্রোফাইল আপডেট' : 'Profile Update';
+                          typeColorClass = 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400';
+                          description = `${systemLang === 'bn' ? 'কাস্টমার আইডি' : 'Customer ID'}: ${item.data.customerId} ${item.data.customerData?.name ? `• ${item.data.customerData?.name}` : ''}`;
+                        }
+
+                        return (
+                          <div key={item.id || index} className="p-4 flex items-center justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider ${typeColorClass}`}>
+                                  {typeLabel}
+                                </span>
+                                <span className="text-[10px] font-bold text-gray-400 dark:text-slate-500 font-mono">
+                                  {new Date(item.timestamp || Date.now()).toLocaleTimeString()}
+                                </span>
+                              </div>
+                              <p className="text-xs font-bold text-gray-700 dark:text-slate-300 truncate font-sans">
+                                {description}
+                              </p>
+                            </div>
+                            <div className="shrink-0 flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                              <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest">
+                                {systemLang === 'bn' ? 'অপেক্ষমাণ' : 'Pending'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Manual trigger section & connection checks */}
+                  <div className="bg-amber-50/50 dark:bg-slate-950/35 border border-amber-200/50 dark:border-slate-800/80 rounded-2xl p-5 mb-8 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <h4 className="text-sm font-black text-gray-800 dark:text-white leading-tight">
+                        {systemLang === 'bn' ? 'সংযোগ এবং সার্ভার অডিট প্রোটোকল' : 'Connection & Integrity Verification'}
+                      </h4>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-1 font-medium leading-relaxed font-sans">
+                        {isOnline 
+                          ? (systemLang === 'bn' ? 'একটি কার্যকর ইন্টারনেট সংযোগ সনাক্ত করা হয়েছে। সিঙ্ক বাটনে ক্লিক করার মাধ্যমে ব্রাউজার ডেটার নির্ভুলতা যাচাই (অডিট) করে অবিলম্বে ফায়ারস্টোরে আপডেট সম্পন্ন হবে।' : 'A valid internet connection is detected. Clicking sync will instantly audit and upload the transactions safely to active Firestore collections.')
+                          : (systemLang === 'bn' ? 'সিস্টেম বর্তমানে অফলাইনে রয়েছে। ম্যানুয়াল সিঙ্ক কেবল তখনই ট্রিগার করা সম্ভব যখন ডটটি সবুজ বা সংযোগ সনাক্ত হবে।' : 'No active network path detected. Manual synchronization is frozen until server connection is restored.')}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col sm:flex-row items-center justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => !isManualSyncing && setShowSyncAuditModal(false)}
+                      disabled={isManualSyncing}
+                      className="px-6 py-4 bg-gray-50 dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-755 text-gray-650 dark:text-slate-300 font-bold text-sm rounded-2xl transition-all w-full sm:w-auto disabled:opacity-50 cursor-pointer"
+                    >
+                      {systemLang === 'bn' ? 'বন্ধ করুন' : 'Close Auditor'}
+                    </button>
+                    
+                    <motion.button
+                      whileHover={isOnline && !isManualSyncing ? { scale: 1.05 } : {}}
+                      whileTap={isOnline && !isManualSyncing ? { scale: 0.95 } : {}}
+                      type="button"
+                      disabled={!isOnline || syncQueue.length === 0 || isManualSyncing}
+                      onClick={triggerManualSync}
+                      className={`px-8 py-4 text-white font-black rounded-2xl text-sm transition-all flex items-center justify-center gap-3 w-full sm:w-auto cursor-pointer shadow-lg ${
+                        isOnline && syncQueue.length > 0 && !isManualSyncing
+                          ? 'bg-gradient-to-r from-amber-500 to-indigo-600 hover:shadow-xl shadow-amber-200/40 dark:shadow-none'
+                          : 'bg-gray-300 dark:bg-slate-800 text-gray-400 dark:text-slate-500 cursor-not-allowed shadow-none'
+                      }`}
+                    >
+                      {isManualSyncing ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin text-white" />
+                          <span>{systemLang === 'bn' ? 'অডিট ও সিঙ্ক হচ্ছে...' : 'Auditing & Syncing...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-5 h-5" />
+                          <span>{systemLang === 'bn' ? 'অবিলম্বে সিঙ্ক শুরু করুন' : 'Verify & Sync Immediately'}</span>
+                        </>
+                      )}
+                    </motion.button>
+                  </div>
+
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
         <AnimatePresence>
           {isCustomerModalOpen && (
@@ -8216,6 +10320,7 @@ export default function App() {
           <BarcodeScanner 
             onScan={handleScan} 
             onClose={() => setIsScannerOpen(false)} 
+            isBn={dynamicSettings.systemLanguage === 'bn'}
           />
         )}
 
@@ -8243,6 +10348,18 @@ export default function App() {
                   <Printer className="w-5 h-5" />
                   Print Receipt
                 </button>
+                {dynamicSettings.businessType === 'Restaurant' && (
+                  <button 
+                    onClick={() => {
+                      printInvoice(lastCompletedSale, dynamicSettings, { isKOT: true });
+                      setShowReceiptModal(false);
+                    }}
+                    className="w-full py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 transition-all flex items-center justify-center gap-2"
+                  >
+                    <ChefHat className="w-5 h-5" />
+                    Print KOT (Kitchen Ticket)
+                  </button>
+                )}
                 {lastCompletedSale.customerPhone && (
                   <button 
                     onClick={() => {
@@ -8286,6 +10403,53 @@ export default function App() {
             onDeleteStockRecord={handleDeleteStockRecord}
           />
         )}
+
+        <AnimatePresence>
+          {isTrialExpiredModalOpen && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="bg-white rounded-[2rem] w-full max-w-md shadow-2xl overflow-hidden flex flex-col"
+              >
+                <div className="p-8 border-b border-gray-100 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-black text-rose-600 tracking-tight flex items-center gap-2">
+                      <AlertCircle className="w-6 h-6" /> Trial Expired
+                    </h3>
+                    <p className="text-xs text-gray-500 font-bold mt-1">
+                      {dynamicSettings.systemLanguage === 'bn' ? "ফ্রি ট্রায়াল শেষ হয়েছে" : "Your 90-Day Free Trial has ended."}
+                    </p>
+                  </div>
+                  <button onClick={() => setIsTrialExpiredModalOpen(false)} className="p-2 bg-rose-50 text-rose-500 hover:text-rose-600 rounded-xl transition-all">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-8 pb-10 flex flex-col items-center justify-center text-center">
+                  <div className="w-20 h-20 bg-rose-50 border-4 border-white rounded-full flex items-center justify-center shadow-lg relative mb-6">
+                    <MessageSquare className="w-8 h-8 text-rose-500" />
+                    <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-600 text-white font-black text-[10px] rounded-full flex items-center justify-center border-2 border-white shadow-sm">!</span>
+                  </div>
+                  <h4 className="text-lg font-black text-gray-900 mb-2">
+                    {dynamicSettings.systemLanguage === 'bn' ? "WhatsApp অটো মেসেজ ফিচার লকড!" : "WhatsApp Automation Locked!"}
+                  </h4>
+                  <p className="text-sm font-semibold text-gray-500 leading-relaxed max-w-[280px]">
+                    {dynamicSettings.systemLanguage === 'bn' 
+                      ? "আপনার অ্যাকাউণ্টের ৯০ দিনের ফ্রি ট্রায়াল শেষ হয়েছে। অটোমেটিক মেসেজ পাঠাতে প্ল্যান আপগ্রেড করুন বা সাপোর্ট টিমের সাথে যোগাযোগ করুন।" 
+                      : "Your account's 90-day free trial has expired. To continue using automated WhatsApp messaging, please upgrade your plan."}
+                  </p>
+                  <button
+                    onClick={() => setIsTrialExpiredModalOpen(false)}
+                    className="mt-8 px-10 py-4 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-[0_10px_30px_rgba(244,63,94,0.3)] hover:shadow-[0_12px_40px_rgba(244,63,94,0.4)] transition-all active:scale-[0.98]"
+                  >
+                    {dynamicSettings.systemLanguage === 'bn' ? "বুঝতে পেরেছি" : "Got it"}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     </ErrorBoundary>
   );
@@ -8293,7 +10457,7 @@ export default function App() {
 
 // --- Sub-components ---
 
-function BarcodeScanner({ onScan, onClose }: { onScan: (data: string) => void; onClose: () => void }) {
+function BarcodeScanner({ onScan, onClose, isBn }: { onScan: (data: string) => void; onClose: () => void; isBn?: boolean }) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState('');
 
@@ -8331,7 +10495,7 @@ function BarcodeScanner({ onScan, onClose }: { onScan: (data: string) => void; o
         );
       } catch (err: any) {
         console.error("Camera scanner error:", err);
-        setErrorMsg(err?.message || "Could not access the camera. Please type the barcode manually.");
+        setErrorMsg(err?.message || (isBn ? "ক্যামেরা অ্যাক্সেস করা যায়নি। অনুগ্রহ করে ম্যানুয়ালি নিচে কোড টাইপ করুন।" : "Could not access the camera. Please type the barcode manually."));
       }
     };
 
@@ -8344,7 +10508,7 @@ function BarcodeScanner({ onScan, onClose }: { onScan: (data: string) => void; o
         }
       }
     };
-  }, [onScan, onClose]);
+  }, [onScan, onClose, isBn]);
 
   const handleManualSubmit = () => {
     if (manualCode.trim()) {
@@ -8358,45 +10522,78 @@ function BarcodeScanner({ onScan, onClose }: { onScan: (data: string) => void; o
       <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl">
         <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
           <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            <ScanLine className="w-6 h-6 text-indigo-600" />
-            Scan Barcode/QR
+            <ScanLine className="w-6 h-6 text-indigo-600 animate-pulse" />
+            {isBn ? "বারকোড / কিউআর স্ক্যানার" : "Barcode & QR Scanner"}
           </h3>
-          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors" id="close-scanner-modal-btn">
+            <X className="w-5 h-5 flex shrink-0 text-gray-500" />
           </button>
         </div>
         
         <div className="relative bg-black min-h-64 flex flex-col items-center justify-center text-white">
           <div id="reader" className="w-full h-64"></div>
           {errorMsg && (
-            <div className="absolute inset-0 bg-gray-900/90 flex flex-col items-center justify-center p-6 text-center">
+            <div className="absolute inset-0 bg-gray-900/95 flex flex-col items-center justify-center p-6 text-center z-10">
               <AlertTriangle className="w-12 h-12 text-amber-500 mb-2" />
               <p className="text-sm font-bold max-w-xs">{errorMsg}</p>
+              <p className="text-xs text-gray-400 mt-2">
+                {isBn 
+                  ? "নিচে ম্যানুয়ালি বারকোড বা কোড টাইপ করে সাবমিট করতে পারেন।" 
+                  : "You can type the barcode code manually in the input field below."}
+              </p>
             </div>
           )}
         </div>
 
         <div className="p-6 bg-gray-50 flex flex-col gap-4 text-center">
-          <p className="text-xs text-gray-500 font-medium">Position the barcode within the camera frame or enter it below:</p>
-          <div className="flex gap-2">
-            <input 
-              type="text"
-              placeholder="Enter Barcode manually..."
-              value={manualCode}
-              onChange={(e) => setManualCode(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleManualSubmit();
-                }
-              }}
-              className="flex-1 px-4 py-3 bg-white border border-gray-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-            />
-            <button 
-              onClick={handleManualSubmit}
-              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-md"
-            >
-              Submit
-            </button>
+          <div className="text-left bg-indigo-50 border border-indigo-100/60 p-3.5 rounded-2xl">
+            <h4 className="text-xs font-black text-indigo-900 flex items-center gap-1.5 uppercase tracking-wide">
+              <span>📷</span> {isBn ? "মোবাইল ক্যামেরা ও ওয়েবক্যাম স্ক্যানার" : "Camera & Web Cam Scanner"}
+            </h4>
+            <p className="text-[10px] text-indigo-700 font-medium mt-1">
+              {isBn 
+                ? "আপনার মোবাইল বা ল্যাপটপের ক্যামেরা ব্যবহার করে বারকোডটি ফ্রেমের মাঝে আনুন। এটি স্বয়ংক্রিয়ভাবে স্ক্যান করে আইটেমটি যুক্ত করবে।" 
+                : "Bring the barcode closer to your phone's camera lens or laptop webcam. It will instantly scan and add."}
+            </p>
+          </div>
+
+          <div className="text-left bg-emerald-50 border border-emerald-100/40 p-3.5 rounded-2xl">
+            <h4 className="text-xs font-black text-emerald-900 flex items-center gap-1.5 uppercase tracking-wide">
+              <span>🔌</span> {isBn ? "হাত দিয়ে ব্যবহারের বারকোড স্ক্যানার মেশিন" : "Dedicated USB/Bluetooth Scanner"}
+            </h4>
+            <p className="text-[10px] text-emerald-700 font-medium mt-1">
+              {isBn 
+                ? "যিকোনো বারকোড রিডার মেশিন প্লাগ-অ্যান্ড-প্লে কাজ করবে। নিচে ইনপুট ফিল্ডটি সিলেক্ট করে আপনার মেশিন দিয়ে স্ক্যান করুন।" 
+                : "Plug-and-play USB bar-code scanner works perfectly. Select the input box below and scan your item's code."}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5 text-left mt-1">
+            <label htmlFor="manual-scanned-code-input" className="text-[10px] font-black text-gray-400 uppercase tracking-wider pl-1">
+              {isBn ? "ম্যানুয়াল ইনপুট / স্ক্যান কোড" : "Manual input / Scan Code"}
+            </label>
+            <div className="flex gap-2">
+              <input 
+                id="manual-scanned-code-input"
+                type="text"
+                placeholder={isBn ? "বারকোড বা পণ্যের কোড লিখুন..." : "Enter code or scan here..."}
+                value={manualCode}
+                onChange={(e) => setManualCode(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleManualSubmit();
+                  }
+                }}
+                className="flex-1 px-4 py-3 bg-white border border-gray-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-gray-800 shadow-inner"
+                autoFocus
+              />
+              <button 
+                onClick={handleManualSubmit}
+                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-md"
+              >
+                {isBn ? "সাবমিট" : "Submit"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -9150,7 +11347,7 @@ function Calculator({ settings, isRtl, isSidebarOpen, isDesktop }: { settings: S
 
 function NoteGlobal({ notes, onAdd, onDelete, settings, isRtl, isSidebarOpen, isDesktop }: { 
   notes: Note[], 
-  onAdd: (text: string, color: string, extra?: { priority?: string, dueDate?: string }) => void,
+  onAdd: (text: string, color: string, extra?: { priority?: string, dueDate?: string, title?: string, subject?: string }) => void,
   onDelete: (id: string) => void,
   settings: ShopSettings,
   isRtl: boolean,
@@ -9159,6 +11356,8 @@ function NoteGlobal({ notes, onAdd, onDelete, settings, isRtl, isSidebarOpen, is
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [newNote, setNewNote] = useState('');
+  const [noteTitle, setNoteTitle] = useState('');
+  const [noteSubject, setNoteSubject] = useState('');
   const [selectedColor, setSelectedColor] = useState('bg-yellow-200');
   const [selectedPriority, setSelectedPriority] = useState<'low'|'medium'|'high'>('medium');
   const [dueDate, setDueDate] = useState('');
@@ -9211,6 +11410,24 @@ function NoteGlobal({ notes, onAdd, onDelete, settings, isRtl, isSidebarOpen, is
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50">
                {/* Add Note */}
                <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+                  {/* Title and Subject Fields */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={noteTitle}
+                      onChange={e => setNoteTitle(e.target.value)}
+                      placeholder={settings.systemLanguage === 'bn' ? 'শিরোনাম (ঐচ্ছিক)' : 'Title (Optional)'}
+                      className="w-full text-xs bg-gray-50/50 p-2 rounded-xl border border-gray-100 outline-none font-bold text-gray-700"
+                    />
+                    <input
+                      type="text"
+                      value={noteSubject}
+                      onChange={e => setNoteSubject(e.target.value)}
+                      placeholder={settings.systemLanguage === 'bn' ? 'বিষয় / আইডিয়া' : 'Idea/Subject'}
+                      className="w-full text-xs bg-gray-50/50 p-2 rounded-xl border border-gray-100 outline-none font-bold text-gray-700"
+                    />
+                  </div>
+
                   <div className="relative">
                     <textarea 
                       value={newNote}
@@ -9269,8 +11486,15 @@ function NoteGlobal({ notes, onAdd, onDelete, settings, isRtl, isSidebarOpen, is
                     <button 
                       onClick={() => {
                         if (newNote.trim()) {
-                          onAdd(newNote, selectedColor, { priority: selectedPriority, dueDate: dueDate || undefined });
+                          onAdd(newNote, selectedColor, { 
+                            priority: selectedPriority, 
+                            dueDate: dueDate || undefined,
+                            title: noteTitle.trim() || undefined,
+                            subject: noteSubject.trim() || undefined
+                          });
                           setNewNote('');
+                          setNoteTitle('');
+                          setNoteSubject('');
                           setDueDate('');
                           setSelectedPriority('medium');
                         }
@@ -9297,6 +11521,12 @@ function NoteGlobal({ notes, onAdd, onDelete, settings, isRtl, isSidebarOpen, is
                         key={note.id} 
                         className={`${note.color} p-4 rounded-2xl shadow-sm border border-black/5 flex flex-col gap-2 group relative`}
                       >
+                         {(note.title || note.subject) && (
+                           <div className="border-b border-black/10 pb-1.5 mb-1">
+                             {note.title && <div className="font-extrabold text-gray-900 leading-tight mb-0.5 text-xs">{note.title}</div>}
+                             {note.subject && <div className="text-[9px] text-gray-600/90 font-bold uppercase tracking-wider">{note.subject}</div>}
+                           </div>
+                         )}
                          <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{note.text}</p>
                          <div className="flex justify-between items-center pt-2 mt-auto border-t border-black/5">
                             <span className="text-[10px] text-black/40 font-bold">{format(safeDate(note.timestamp), 'dd MMM, hh:mm a')}</span>
@@ -9317,8 +11547,10 @@ function NoteGlobal({ notes, onAdd, onDelete, settings, isRtl, isSidebarOpen, is
                                  </div>
                                )}
                                <button 
-                                 onClick={() => onDelete(note.id)}
-                                 className="p-1.5 text-black/30 hover:text-red-600 hover:bg-white/50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                 onClick={() => {
+                                   onDelete(note.id);
+                                 }}
+                                 className="p-1.5 text-red-600 hover:bg-white/80 rounded-lg transition-all opacity-80 hover:opacity-100 ml-1"
                                  title="Delete Note"
                                >
                                  <Trash2 className="w-4 h-4" />
@@ -9590,22 +11822,49 @@ function EmployeeManagement({ employees, onAdd, onUpdate, onDelete }: { employee
 }
 
 
-function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: { 
+function NoteView({ 
+  notes, 
+  onAdd, 
+  onDelete, 
+  onUpdate, 
+  settings, 
+  setNotification, 
+  googleToken, 
+  setGoogleToken 
+}: { 
   notes: Note[], 
-  onAdd: (text: string, color: string, extra?: { priority?: string, dueDate?: string }) => void,
+  onAdd: (text: string, color: string, extra?: { priority?: string, dueDate?: string, title?: string, subject?: string }) => void,
   onDelete: (id: string) => void,
-  onUpdate: (id: string, text: string, extra?: { priority?: string, dueDate?: string }) => void,
-  settings: ShopSettings
+  onUpdate: (id: string, text: string, extra?: { priority?: string, dueDate?: string, title?: string, subject?: string }) => void,
+  settings: ShopSettings,
+  setNotification?: any,
+  googleToken?: string | null,
+  setGoogleToken?: any
 }) {
   const [newNote, setNewNote] = useState('');
+  const [noteTitle, setNoteTitle] = useState('');
+  const [noteSubject, setNoteSubject] = useState('');
   const [selectedColor, setSelectedColor] = useState('blue');
   const [selectedPriority, setSelectedPriority] = useState<'low'|'medium'|'high'>('medium');
   const [dueDate, setDueDate] = useState('');
+  const [customTimestamp, setCustomTimestamp] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [editTitle, setEditTitle] = useState('');
+  const [editSubject, setEditSubject] = useState('');
   const [editPriority, setEditPriority] = useState<string>('medium');
   const [editDueDate, setEditDueDate] = useState<string>('');
+  const [editTimestamp, setEditTimestamp] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [confirmDeleteNoteId, setConfirmDeleteNoteId] = useState<string | null>(null);
+
+  // Reminder Notification systems state
+  const [remindersEnabled, setRemindersEnabled] = useState(() => {
+    return localStorage.getItem('reminder_notifications_enabled') !== 'false';
+  });
+  const [notifiedTasks, setNotifiedTasks] = useState<string[]>([]);
+
+  const isBn = settings.systemLanguage === 'bn';
 
   const themes = {
     blue: {
@@ -9661,26 +11920,212 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
 
   const addNote = () => {
     if (newNote.trim()) {
-      onAdd(newNote, selectedColor, { priority: selectedPriority, dueDate: dueDate || undefined });
+      onAdd(newNote, selectedColor, { 
+        priority: selectedPriority, 
+        dueDate: dueDate || undefined,
+        title: noteTitle.trim() || undefined,
+        subject: noteSubject.trim() || undefined,
+        timestamp: customTimestamp || undefined
+      });
       setNewNote('');
+      setNoteTitle('');
+      setNoteSubject('');
       setDueDate('');
+      setCustomTimestamp('');
       setSelectedPriority('medium');
     }
   };
 
-  const startEditing = (id: string, text: string, priority?: string, due?: string) => {
+  const startEditing = (id: string, text: string, priority?: string, due?: string, title?: string, subject?: string, timestamp?: any) => {
     setEditingId(id);
     setEditText(text);
+    setEditTitle(title || '');
+    setEditSubject(subject || '');
     setEditPriority(priority || 'medium');
     setEditDueDate(due || '');
+    if (timestamp) {
+      const d = safeDate(timestamp);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      setEditTimestamp(`${hh}:${mm}`);
+    } else {
+      setEditTimestamp('');
+    }
   };
 
   const saveEdit = () => {
     if (editingId) {
-      onUpdate(editingId, editText, { priority: editPriority, dueDate: editDueDate || undefined });
+      onUpdate(editingId, editText, { 
+        priority: editPriority, 
+        dueDate: editDueDate || undefined,
+        title: editTitle.trim(),
+        subject: editSubject.trim(),
+        timestamp: editTimestamp || undefined
+      });
       setEditingId(null);
+      setEditTitle('');
+      setEditSubject('');
+      setEditTimestamp('');
     }
   };
+
+  const handleConnectGoogle = async () => {
+    try {
+      if (setNotification) {
+        setNotification({ 
+          message: isBn ? 'গুগল সংযুক্ত করা হচ্ছে...' : 'Connecting to Google Workspace...', 
+          type: 'info' 
+        });
+      }
+      const res = await signInWithPopup(auth, googleProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(res);
+      if (credential?.accessToken) {
+        setCachedAccessToken(credential.accessToken);
+        if (setGoogleToken) {
+          setGoogleToken(credential.accessToken);
+        }
+        if (setNotification) {
+          setNotification({
+            message: isBn ? 'গুগল ওয়ার্কস্পেস সফলভাবে সংযুক্ত হয়েছে!' : 'Google Workspace connected successfully!',
+            type: 'success'
+          });
+        }
+      } else {
+        throw new Error('No access token received.');
+      }
+    } catch (error: any) {
+      console.error("DETAILED GOOGLE OAUTH ERROR IN CONNECT:", error);
+      const isPopupClosed = 
+        error?.code === 'auth/popup-closed-by-user' || 
+        error?.code === 'auth/cancelled-popup-request' ||
+        (error?.message && (error.message.includes('popup-closed-by-user') || error.message.includes('cancelled-popup-request')));
+
+      if (isPopupClosed) {
+        if (setNotification) setNotification({ message: 'Login popup closed.', type: 'info' });
+      } else {
+        if (setNotification) {
+          setNotification({
+            message: `Google connection failed: ${error?.message || 'Unknown error'} (Code: ${error?.code || 'N/A'})`,
+            type: 'error'
+          });
+        }
+      }
+    }
+  };
+
+  const playChime = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // pleasant D5 note
+      gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.18);
+    } catch (err) {
+      console.warn("Audio chime play error:", err);
+    }
+  };
+
+  const toggleReminders = () => {
+    const nextVal = !remindersEnabled;
+    setRemindersEnabled(nextVal);
+    localStorage.setItem('reminder_notifications_enabled', String(nextVal));
+    if (setNotification) {
+      setNotification({
+        message: nextVal 
+          ? (isBn ? 'রিমাইন্ডার নোটিফিকেশন সক্রিয় করা হয়েছে!' : 'Reminder Notifications enabled!')
+          : (isBn ? 'রিমাইন্ডার নোটিফিকেশন নিষ্ক্রিয় করা হয়েছে।' : 'Reminder Notifications disabled.'),
+        type: nextVal ? 'success' : 'info'
+      });
+    }
+  };
+
+  // Google Push Helper to synchronize an existing note manually on click
+  const handlePushToGoogle = async (note: Note) => {
+    if (!googleToken) {
+      if (setNotification) setNotification({ message: isBn ? 'দয়া করে আগে গুগল কানেক্ট করুন' : 'Please connect Google first', type: 'error' });
+      return;
+    }
+    try {
+      if (setNotification) setNotification({ message: isBn ? 'গুগল টাস্ক ও ক্যালেন্ডারে সিঙ্ক হচ্ছে...' : 'Syncing with Google...', type: 'info' });
+      
+      const startDate = note.dueDate ? new Date(note.dueDate) : new Date();
+      const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+      
+      const taskBody = {
+        title: note.text,
+        notes: `Priority: ${note.priority || 'medium'} | Reminders synced with Intel Ledger.`
+      };
+      if (note.dueDate) {
+        (taskBody as any).due = new Date(note.dueDate).toISOString();
+      }
+      
+      const tRes = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${googleToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(taskBody)
+      });
+      let gTaskId = '';
+      if (tRes.ok) {
+        const tData = await tRes.json();
+        gTaskId = tData.id;
+      }
+
+      const eventBody = {
+        summary: note.text,
+        description: `Intel Ledger Task. Priority: ${note.priority || 'medium'}.`,
+        start: { dateTime: startDate.toISOString(), timeZone: "Asia/Dhaka" },
+        end: { dateTime: endDate.toISOString(), timeZone: "Asia/Dhaka" },
+        reminders: {
+          useDefault: false,
+          overrides: [
+            { method: "popup", minutes: 30 },
+            { method: "popup", minutes: 1440 }
+          ]
+        }
+      };
+      const eRes = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${googleToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(eventBody)
+      });
+      let gEventId = '';
+      if (eRes.ok) {
+        const eData = await eRes.json();
+        gEventId = eData.id;
+      }
+
+      if (gTaskId || gEventId) {
+        onUpdate(note.id, note.text, { 
+          priority: note.priority, 
+          dueDate: note.dueDate, 
+          googleTaskId: gTaskId || undefined, 
+          googleEventId: gEventId || undefined 
+        } as any);
+        if (setNotification) {
+          setNotification({ message: isBn ? 'গুগল এর সাথে সফলভাবে সিঙ্ক সম্পন্ন হয়েছে!' : 'Successfully synced with Google Workspace!', type: 'success' });
+        }
+      } else {
+        throw new Error('Failed to create synced resources.');
+      }
+    } catch (err) {
+      console.error(err);
+      if (setNotification) setNotification({ message: isBn ? 'গুগল সিঙ্ক বিফল হয়েছে।' : 'Google Sync failed.', type: 'error' });
+    }
+  };
+
+  // Reminder notifications are handled globally at the root App component for absolute reliability across all tabs and menus.
 
   const filteredNotes = notes.filter(n => n.text.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -9707,7 +12152,9 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
             <h2 className="text-3xl font-black text-gray-900 uppercase tracking-tight">Intelligence Ledger</h2>
             <div className="flex items-center gap-2 mt-2">
               <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Digital Knowledge Base & Notes</p>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                {isBn ? 'ডিজিটাল নলেজ বেস ও রিমাইন্ডার হাব' : 'Digital Knowledge Base & Reminder Hub'}
+              </p>
             </div>
           </div>
         </div>
@@ -9717,7 +12164,7 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
             <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 group-focus-within:text-indigo-500 transition-colors" />
             <input 
               type="text"
-              placeholder="Search in ledger..."
+              placeholder={isBn ? 'খুঁজুন...' : 'Search in ledger...'}
               className="w-full pl-12 pr-6 py-4 bg-gray-50/50 border-none rounded-2xl text-xs font-bold focus:ring-2 focus:ring-indigo-500 transition-all outline-none placeholder:text-gray-400"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -9729,6 +12176,111 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         {/* Note Composer Side */}
         <div className="lg:col-span-1 space-y-6 lg:sticky lg:top-24">
+          {/* Google Integration & Reminders Deck Card */}
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white p-6 rounded-[2.5rem] shadow-[0_10px_40px_-15px_rgba(0,0,0,0.08)] border border-gray-100 ring-1 ring-black/[0.02]"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                <BellRing className="w-4 h-4 text-indigo-500" />
+                {isBn ? 'গুগল সিঙ্ক ও রিমাইন্ডার' : 'Google Sync & Reminders'}
+              </h3>
+            </div>
+
+            {/* Google Sync Status */}
+            <div className="mb-5 p-4 rounded-2xl bg-gray-50 border border-gray-100/50">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-gray-500">{isBn ? 'গুগল ওয়ার্কস্পেস:' : 'Google Workspace:'}</span>
+                {googleToken ? (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-600 border border-emerald-100">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                    {isBn ? 'সংযুক্ত' : 'Connected'}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-600 border border-amber-100">
+                    {isBn ? 'অফলাইন' : 'Not Linked'}
+                  </span>
+                )}
+              </div>
+
+              {googleToken ? (
+                <div className="mt-2 space-y-1">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                    <span>Google Tasks Sync</span>
+                    <span className="text-emerald-500">Active</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                    <span>Google Calendar Sync</span>
+                    <span className="text-emerald-500">Active</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3">
+                  <button
+                    onClick={handleConnectGoogle}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-white border border-gray-200 hover:border-indigo-200 rounded-xl text-xs font-bold shadow-sm text-gray-700 hover:text-indigo-600 transition-all"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M22.5 12.27c0-.78-.07-1.53-.2-2.25H12v4.26h5.9c-.25 1.34-1 2.47-2.14 3.23v2.68h3.45c2.02-1.86 3.19-4.6 3.19-7.92z" fill="#4285F4"/>
+                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.45-2.68c-.96.64-2.18 1.02-3.83 1.02-2.95 0-5.45-2-6.34-4.69H2.07v2.77C3.89 20.25 7.69 23 12 23z" fill="#34A853"/>
+                      <path d="M5.66 13.99c-.23-.69-.36-1.42-.36-2.18s.13-1.49.36-2.18V6.86H2.07c-.83 1.66-1.3 3.52-1.3 5.49s.47 3.83 1.3 5.49l3.59-2.85z" fill="#FBBC05"/>
+                      <path d="M12 5.09c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 1.77 14.96 1 12 1 7.69 1 3.89 3.75 2.07 7.42l3.59 2.85c.89-2.69 3.39-4.69 6.31-4.69z" fill="#EA4335"/>
+                    </svg>
+                    {isBn ? 'গুগল কানেক্ট করুন' : 'Connect with Google'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Reminder Toggle Switch Option */}
+            <div className="flex items-center justify-between p-3 rounded-2xl bg-indigo-50/40 border border-indigo-100/50">
+              <div>
+                <span className="block text-xs font-black text-gray-800 uppercase tracking-tight">
+                  {isBn ? 'রিমাইন্ডার নোটিফিকেশন' : 'Reminder Notifications'}
+                </span>
+                <span className="block text-[10px] text-gray-400 font-bold mt-1 uppercase tracking-wider">
+                  {isBn ? 'সক্রিয় অবস্থায় নোটিফিকেশন আসবে' : 'Alert notifications with chime'}
+                </span>
+              </div>
+              <button 
+                onClick={toggleReminders}
+                className={`w-11 h-6 rounded-full transition-colors relative duration-300 outline-none flex items-center ${remindersEnabled ? 'bg-indigo-600' : 'bg-gray-200'}`}
+              >
+                <span className={`w-4 h-4 bg-white rounded-full shadow-sm absolute transition-transform duration-300 ${remindersEnabled ? 'translate-x-5' : 'translate-x-1'}`}></span>
+              </button>
+            </div>
+            
+            {/* List of upcoming alarm nodes */}
+            {notes.filter(n => {
+              if (!n.dueDate) return false;
+              const dueTime = new Date(n.dueDate);
+              return dueTime.getTime() > Date.now() - 3600000 * 24;
+            }).length > 0 && (
+              <div className="mt-5 pt-4 border-t border-gray-100">
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-3">
+                  {isBn ? 'আসন্ন সময়সীমা (Queue)' : 'Upcoming Deadlines'}
+                </span>
+                <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                  {notes.filter(n => {
+                    if (!n.dueDate) return false;
+                    const dueTime = new Date(n.dueDate);
+                    return dueTime.getTime() > Date.now() - 3600000 * 24;
+                  }).slice(0, 4).map(ur => (
+                    <div key={ur.id} className="flex items-center justify-between p-2.5 rounded-xl bg-gray-50 text-[10px] font-bold text-gray-600 border border-gray-100">
+                      <span className="truncate max-w-[130px]">{ur.text}</span>
+                      <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 font-mono text-[9px]">
+                        {ur.dueDate ? format(new Date(ur.dueDate), 'dd MMM, hh:mm a') : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </motion.div>
+
+          {/* New Thought Composer Card */}
           <motion.div 
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -9739,6 +12291,33 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
                <div onClick={toggleVoiceSearch} className={`p-2 rounded-xl cursor-pointer transition-all ${isListening ? 'bg-rose-50 text-rose-500' : 'bg-gray-50 text-gray-400 hover:text-indigo-600'}`}>
                  <Mic className={`w-4 h-4 ${isListening ? 'animate-pulse' : ''}`} />
                </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1.5 pl-1">
+                  {isBn ? 'শিরোনাম (ঐচ্ছিক)' : 'Title (Optional)'}
+                </label>
+                <input
+                  type="text"
+                  value={noteTitle}
+                  onChange={e => setNoteTitle(e.target.value)}
+                  placeholder={isBn ? 'নোট টাইটেল লিখুন...' : 'Write note title...'}
+                  className="w-full bg-gray-50/50 p-2.5 text-xs font-bold rounded-xl border border-gray-100 outline-none text-gray-700 placeholder:text-gray-300"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1.5 pl-1">
+                  {isBn ? 'বিষয় / আইডিয়া' : 'Idea / Subject'}
+                </label>
+                <input
+                  type="text"
+                  value={noteSubject}
+                  onChange={e => setNoteSubject(e.target.value)}
+                  placeholder={isBn ? 'বিষয়বস্তু...' : 'E.g. Marketing, Sales...'}
+                  className="w-full bg-gray-50/50 p-2.5 text-xs font-bold rounded-xl border border-gray-100 outline-none text-gray-700 placeholder:text-gray-300"
+                />
+              </div>
             </div>
 
             <div className="relative">
@@ -9762,13 +12341,13 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
               </AnimatePresence>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mt-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
               <div>
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1.5 pl-1">Priority</label>
                 <select 
                   value={selectedPriority} 
                   onChange={(e) => setSelectedPriority(e.target.value as 'low'|'medium'|'high')}
-                  className="w-full bg-gray-50/50 p-2 text-xs font-bold rounded-xl border border-gray-100 outline-none"
+                  className="w-full bg-gray-50/50 p-2.5 text-xs font-bold rounded-xl border border-gray-100 outline-none"
                 >
                   <option value="low">Low Priority</option>
                   <option value="medium">Medium Priority</option>
@@ -9781,8 +12360,37 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
                   type="date" 
                   value={dueDate} 
                   onChange={e => setDueDate(e.target.value)}
-                  className="w-full bg-gray-50/50 p-2 text-xs font-bold rounded-xl border border-gray-100 outline-none text-gray-600"
+                  className="w-full bg-gray-50/50 p-2.5 text-xs font-bold rounded-xl border border-gray-100 outline-none text-gray-600"
                 />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1.5 pl-1">
+                  {isBn ? "সময়" : "Time"}
+                </label>
+                <input 
+                  type="time" 
+                  value={customTimestamp} 
+                  onChange={e => setCustomTimestamp(e.target.value)}
+                  className="w-full bg-gray-50/50 hover:bg-gray-50 p-2.5 text-xs font-bold rounded-xl border border-gray-200 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none text-gray-600 font-mono transition-colors"
+                />
+                <div className="mt-1 flex items-center">
+                  {settings.alarmType === 'google' ? (
+                    googleToken ? (
+                      <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 flex items-center gap-1">
+                        <span className="w-1 h-1 bg-emerald-500 rounded-full animate-ping"></span>
+                        Google Sync Active
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
+                        ⚠️ Pending Sync
+                      </span>
+                    )
+                  ) : (
+                    <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                      🔊 Browser Alarm Only
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -9855,48 +12463,100 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
                           <FileText className="w-5 h-5" />
                         </div>
                         <div className="flex flex-col items-end">
-                          <span className="text-[9px] font-black text-gray-300 uppercase tracking-widest">Generated On</span>
+                          <span className="text-[9px] font-black text-gray-300 uppercase tracking-widest">{isBn ? 'তৈরি করা হয়েছে' : 'Generated On'}</span>
                           <span className="text-[10px] font-bold text-gray-500 tabular-nums">
                             {format(safeDate(n.timestamp), 'dd MMM yyyy')} • {format(safeDate(n.timestamp), 'hh:mm a')}
                           </span>
-                          {(n.priority || n.dueDate) && (
-                            <div className="flex gap-2 mt-2">
-                              {n.priority && (
-                                <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest ${
-                                  n.priority === 'high' ? 'bg-red-50 text-red-600 border border-red-100' :
-                                  n.priority === 'low' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
-                                  'bg-amber-50 text-amber-600 border border-amber-100'
-                                }`}>
-                                  {n.priority}
-                                </span>
-                              )}
-                              {n.dueDate && (
-                                <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest bg-gray-50 text-gray-500 border border-gray-100 flex items-center gap-1">
-                                  <Clock className="w-2.5 h-2.5" /> Due {format(new Date(n.dueDate), 'MMM dd')}
-                                </span>
-                              )}
-                            </div>
-                          )}
+                          <div className="flex flex-wrap gap-2 mt-2 justify-end">
+                            {n.priority && (
+                              <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest ${
+                                n.priority === 'high' ? 'bg-red-50 text-red-600 border border-red-100' :
+                                n.priority === 'low' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
+                                'bg-amber-50 text-amber-600 border border-amber-100'
+                              }`}>
+                                {n.priority}
+                              </span>
+                            )}
+                            {n.dueDate && (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest bg-gray-50 text-gray-500 border border-gray-100 flex items-center gap-1">
+                                <Clock className="w-2.5 h-2.5" /> {isBn ? 'শেষ সময়:' : 'Due:'} {format(new Date(n.dueDate), 'MMM dd')}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Google Workspace Connection Sync Badge & Push Button */}
+                          <div className="mt-2.5">
+                            {n.googleTaskId || n.googleEventId ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 border border-emerald-100">
+                                <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="currentColor">
+                                  <path d="M22.5 12.27c0-.78-.07-1.53-.2-2.25H12v4.26h5.9c-.25 1.34-1 2.47-2.14 3.23v2.68h3.45c2.02-1.86 3.19-4.6 3.19-7.92z"/>
+                                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.45-2.68c-.96.64-2.18 1.02-3.83 1.02-2.95 0-5.45-2-6.34-4.69H2.07v2.77C3.89 20.25 7.69 23 12 23z"/>
+                                </svg>
+                                {isBn ? 'গুগল সিঙ্কড' : 'Synced'}
+                              </span>
+                            ) : (
+                              googleToken && (
+                                <button
+                                  onClick={() => handlePushToGoogle(n)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-widest bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white border border-indigo-100 transition-all shadow-sm active:scale-95"
+                                  title="Sync immediately to Google Workspace Tasks and Calendar"
+                                >
+                                  {isBn ? 'গুগল সিঙ্ক করুন ⚡' : 'Push to Google ⚡'}
+                                </button>
+                              )
+                            )}
+                          </div>
                         </div>
                       </div>
 
                       {editingId === n.id ? (
                         <div className="space-y-4">
-                          <textarea 
-                            value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
-                            className="w-full min-h-[120px] bg-gray-50/50 rounded-2xl p-4 outline-none resize-none text-[15px] font-bold text-gray-800 leading-relaxed border border-gray-100"
-                            autoFocus
-                          />
                           <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest pl-1 mb-1 block">
+                                {isBn ? 'শিরোনাম (ঐচ্ছিক)' : 'Title (Optional)'}
+                              </label>
+                              <input
+                                type="text"
+                                value={editTitle}
+                                onChange={(e) => setEditTitle(e.target.value)}
+                                placeholder={isBn ? 'শিরোনাম...' : 'Title...'}
+                                className="w-full bg-gray-50/50 rounded-xl p-2.5 outline-none text-xs font-bold text-gray-800 border border-gray-100"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest pl-1 mb-1 block">
+                                {isBn ? 'বিষয় / আইডিয়া' : 'Idea / Subject'}
+                              </label>
+                              <input
+                                type="text"
+                                value={editSubject}
+                                onChange={(e) => setEditSubject(e.target.value)}
+                                placeholder={isBn ? 'বিষয়...' : 'Subject...'}
+                                className="w-full bg-gray-50/50 rounded-xl p-2.5 outline-none text-xs font-bold text-gray-800 border border-gray-100"
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest pl-1 block">
+                              {isBn ? 'মূল নোট' : 'Note Details'}
+                            </label>
+                            <textarea 
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              className="w-full min-h-[120px] bg-gray-50/50 rounded-2xl p-4 outline-none resize-none text-[15px] font-bold text-gray-800 leading-relaxed border border-gray-100"
+                              autoFocus
+                            />
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <select 
                               value={editPriority} 
                               onChange={(e) => setEditPriority(e.target.value as 'low'|'medium'|'high')}
                               className="w-full bg-gray-50/50 p-2 text-xs font-bold rounded-xl border border-gray-100 outline-none"
                             >
-                              <option value="low">Low Priority</option>
-                              <option value="medium">Medium Priority</option>
-                              <option value="high">High Priority</option>
+                              <option value="low">{isBn ? 'স্বল্প অগ্রাধিকার' : 'Low'}</option>
+                              <option value="medium">{isBn ? 'মাঝারি অগ্রাধিকার' : 'Medium'}</option>
+                              <option value="high">{isBn ? 'উচ্চ অগ্রাধিকার' : 'High'}</option>
                             </select>
                             <input 
                               type="date" 
@@ -9904,12 +12564,27 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
                               onChange={e => setEditDueDate(e.target.value)}
                               className="w-full bg-gray-50/50 p-2 text-xs font-bold rounded-xl border border-gray-100 outline-none text-gray-600"
                             />
+                            <input 
+                              type="time" 
+                              value={editTimestamp} 
+                              onChange={e => setEditTimestamp(e.target.value)}
+                              className="w-full bg-gray-50/50 p-2 text-xs font-bold rounded-xl border border-gray-100 outline-none text-gray-600 font-mono"
+                              title={isBn ? 'নোটের সময় ও অ্যালার্ম সংশোধন' : 'Edit Note Time & Alarm'}
+                            />
                           </div>
                         </div>
                       ) : (
-                        <p className="text-[15px] font-bold text-gray-800 whitespace-pre-wrap leading-relaxed tracking-tight">
-                          {n.text}
-                        </p>
+                        <div className="space-y-3">
+                          {(n.title || n.subject) && (
+                            <div className="border-b border-gray-100 pb-2 mb-2">
+                              {n.title && <h4 className="text-sm font-black text-gray-900 leading-tight mb-0.5 tracking-tight">{n.title}</h4>}
+                              {n.subject && <span className="text-[10px] text-indigo-600 font-extrabold uppercase tracking-wider">{n.subject}</span>}
+                            </div>
+                          )}
+                          <p className="text-[15px] font-bold text-gray-800 whitespace-pre-wrap leading-relaxed tracking-tight">
+                            {n.text}
+                          </p>
+                        </div>
                       )}
                     </div>
 
@@ -9919,7 +12594,7 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
                          <span className="text-[9px] font-black text-gray-400 uppercase tracking-[0.2em]">{themeKey} Segment</span>
                       </div>
 
-                      <div className="flex items-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all translate-y-2 group-hover:translate-y-0">
+                      <div className="flex items-center gap-2 opacity-100 transition-all">
                         {editingId === n.id ? (
                           <motion.button 
                             whileHover={{ scale: 1.1 }}
@@ -9933,19 +12608,34 @@ function NoteView({ notes, onAdd, onDelete, onUpdate, settings }: {
                           <motion.button 
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.9 }}
-                            onClick={() => startEditing(n.id, n.text, n.priority, n.dueDate)} 
+                            onClick={() => startEditing(n.id, n.text, n.priority, n.dueDate, n.title, n.subject, n.timestamp)} 
                             className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all shadow-sm"
                           >
                             <Edit className="w-4 h-4" />
                           </motion.button>
                         )}
                         <motion.button 
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => onDelete(n.id)} 
-                          className="p-3 bg-rose-50 text-rose-600 rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm"
+                           whileHover={{ scale: 1.1 }}
+                           whileTap={{ scale: 0.9 }}
+                           onClick={() => {
+                             if (confirmDeleteNoteId === n.id) {
+                               onDelete(n.id);
+                               setConfirmDeleteNoteId(null);
+                             } else {
+                               setConfirmDeleteNoteId(n.id);
+                             }
+                           }} 
+                           className={`p-3 rounded-xl transition-all shadow-sm flex items-center gap-1.5 font-bold uppercase text-[10px] tracking-wider ${
+                             confirmDeleteNoteId === n.id 
+                               ? "bg-rose-600 text-white shadow-lg shadow-rose-200" 
+                               : "bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white"
+                           }`}
+                           title={confirmDeleteNoteId === n.id ? (isBn ? "নিশ্চিত করুন?" : "Confirm?") : (isBn ? "মুছে ফেলুন" : "Delete")}
                         >
                           <Trash2 className="w-4 h-4" />
+                          {confirmDeleteNoteId === n.id && (
+                            <span>{isBn ? "নিশ্চিত?" : "Confirm?"}</span>
+                          )}
                         </motion.button>
                       </div>
                     </div>
@@ -10425,18 +13115,34 @@ function BarcodePage({ products, settings, user, setNotification }: { products: 
     }
   };
 
-  const handlePrint = (value: string, type: 'barcode' | 'qr', quantity: number = 1) => {
+  const handlePrint = (value: string, type: 'barcode' | 'qr', quantity: number = 1, isA4Grid: boolean = false) => {
     const printWindow = window.open('', '_blank', 'width=800,height=600');
     if (!printWindow) return;
     
     let contents = '';
     if (type === 'barcode') {
-       for(let i=0; i<quantity; i++) {
-         contents += `<div class="content-wrapper"><svg id="barcode-${i}"></svg></div>`;
+       if (isA4Grid) {
+         contents += `<div class="a4-grid">`;
+         for(let i=0; i<quantity; i++) {
+           contents += `<div class="a4-label-box"><svg id="barcode-${i}"></svg></div>`;
+         }
+         contents += `</div>`;
+       } else {
+         for(let i=0; i<quantity; i++) {
+           contents += `<div class="content-wrapper"><svg id="barcode-${i}"></svg></div>`;
+         }
        }
     } else {
-       for(let i=0; i<quantity; i++) {
-         contents += `<div class="content-wrapper"><canvas id="qr-${i}"></canvas></div>`;
+       if (isA4Grid) {
+         contents += `<div class="a4-grid">`;
+         for(let i=0; i<quantity; i++) {
+           contents += `<div class="a4-label-box"><canvas id="qr-${i}"></canvas></div>`;
+         }
+         contents += `</div>`;
+       } else {
+         for(let i=0; i<quantity; i++) {
+           contents += `<div class="content-wrapper"><canvas id="qr-${i}"></canvas></div>`;
+         }
        }
     }
 
@@ -10446,13 +13152,26 @@ function BarcodePage({ products, settings, user, setNotification }: { products: 
           <title>Print Label</title>
           <style>
             @media print {
-              @page { size: 50mm 25mm; margin: 0; }
-              body { margin: 0; padding: 0; width: 50mm; height: 25mm; }
-              .content-wrapper { page-break-after: always; }
+              ${isA4Grid ? `
+                @page { size: A4; margin: 10mm; }
+                body { margin: 0; padding: 0; background: #fff; }
+                .a4-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6mm; }
+                .a4-label-box { border: 1px dashed #ddd; padding: 4mm; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-inside: avoid; height: 35mm; }
+              ` : `
+                @page { size: 50mm 25mm; margin: 0; }
+                body { margin: 0; padding: 0; width: 50mm; height: 25mm; background: #fff; }
+                .content-wrapper { page-break-after: always; }
+              `}
             }
             body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 0; background: #fff; }
-            .content-wrapper { width: 50mm; height: 25mm; display: flex; align-items: center; justify-content: center; overflow: hidden; page-break-after: always; }
-            svg, canvas { max-width: 48mm; max-height: 23mm; object-fit: contain; }
+            ${isA4Grid ? `
+              .a4-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6mm; padding: 10mm; }
+              .a4-label-box { border: 1px dashed #ddd; padding: 4mm; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 35mm; page-break-inside: avoid; }
+              svg, canvas { max-width: 55mm; max-height: 30mm; object-fit: contain; }
+            ` : `
+              .content-wrapper { width: 50mm; height: 25mm; display: flex; align-items: center; justify-content: center; overflow: hidden; page-break-after: always; }
+              svg, canvas { max-width: 48mm; max-height: 23mm; object-fit: contain; }
+            `}
           </style>
           <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.0/dist/JsBarcode.all.min.js"></script>
           <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
@@ -10907,18 +13626,18 @@ function BarcodePage({ products, settings, user, setNotification }: { products: 
                             <motion.button 
                                whileHover={{ scale: 1.05 }}
                                whileTap={{ scale: 0.95 }}
-                               onClick={() => handlePrint(generatedValue, 'barcode', 1)}
-                               className="px-10 py-4 bg-white border border-gray-100 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-gray-50 transition-all shadow-sm"
+                               onClick={() => handlePrint(generatedValue, 'barcode', 1, false)}
+                               className="px-8 py-4 bg-white border border-gray-100 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-gray-50 transition-all shadow-sm"
                             >
-                               <Printer className="w-4 h-4 text-violet-600" /> Print Single
+                               <Printer className="w-4 h-4 text-violet-600" /> Print Single Label (50x25mm)
                             </motion.button>
                             <motion.button 
                                whileHover={{ scale: 1.05 }}
                                whileTap={{ scale: 0.95 }}
-                               onClick={() => handlePrint(generatedValue, 'barcode', 10)}
-                               className="px-10 py-4 bg-violet-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-violet-700 transition-all shadow-xl shadow-violet-200"
+                               onClick={() => handlePrint(generatedValue, 'barcode', 9, true)}
+                               className="px-8 py-4 bg-violet-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-violet-700 transition-all shadow-xl shadow-violet-200"
                             >
-                               <Printer className="w-4 h-4" /> Print Batch ×10
+                               <Printer className="w-4 h-4" /> Print A4 Label Sheet ×9 (3x3 Grid)
                             </motion.button>
                           </div>
                         </motion.div>
@@ -10993,12 +13712,24 @@ function BarcodePage({ products, settings, user, setNotification }: { products: 
                                   whileTap={{ scale: 0.9 }}
                                   onClick={() => {
                                     const qty = Number((document.getElementById(`qty-${p.id}`) as HTMLInputElement)?.value) || 1;
-                                    handlePrint(p.barcode || '', 'barcode', qty);
+                                    handlePrint(p.barcode || '', 'barcode', qty, false);
                                   }} 
                                   className="p-3 bg-violet-600 text-white rounded-xl hover:bg-violet-700 transition-all shadow-lg shadow-violet-200"
-                                  title="Commit to print"
+                                  title="Print Single 50x25mm Labels"
                                 >
                                   <Printer className="w-4 h-4" />
+                                </motion.button>
+                                <motion.button 
+                                  whileHover={{ scale: 1.1 }}
+                                  whileTap={{ scale: 0.9 }}
+                                  onClick={() => {
+                                    const qty = Number((document.getElementById(`qty-${p.id}`) as HTMLInputElement)?.value) || 1;
+                                    handlePrint(p.barcode || '', 'barcode', qty, true);
+                                  }} 
+                                  className="p-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all shadow-sm"
+                                  title="Print A4 Label Sheet (Grid)"
+                                >
+                                  <FileText className="w-4 h-4 text-violet-600" />
                                 </motion.button>
                               </div>
                               <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-12 bg-violet-600 rounded-l-full transition-all scale-y-0 group-hover:scale-y-100 opacity-60"></div>
@@ -11894,53 +14625,6 @@ function SupplierPage({ products, settings, suppliers, onAddSupplier, onUpdateSu
 
 }
 
-function ActivationCodePage() {
-  const theme = {
-    primary: 'indigo-600',
-    bg: 'bg-indigo-50',
-    gradient: 'from-indigo-600 to-violet-600',
-    shadow: 'shadow-indigo-200'
-  };
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="max-w-4xl mx-auto space-y-12 py-12"
-    >
-      <div className="text-center space-y-6">
-        <div className="w-24 h-24 bg-white rounded-[2.5rem] shadow-xl border border-indigo-100 flex items-center justify-center mx-auto ring-4 ring-indigo-50 transition-transform hover:rotate-12 duration-500">
-           <Zap className="w-12 h-12 text-indigo-600" />
-        </div>
-        <h2 className="text-5xl font-black text-gray-900 uppercase tracking-tighter italic">Activation Node</h2>
-        <p className="text-[12px] font-black text-gray-400 uppercase tracking-[0.3em]">Initialize high-level system protocols via license matrix</p>
-      </div>
-
-      <div className="bg-white p-12 rounded-[4rem] shadow-[0_30px_80px_-20px_rgba(79,70,229,0.15)] border border-gray-100 relative overflow-hidden group">
-         <div className={`absolute top-0 left-0 w-full h-2 bg-gradient-to-r ${theme.gradient}`}></div>
-         
-         <div className="space-y-10 relative z-10">
-            <div className="space-y-4">
-               <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-2">License Authentication Key</label>
-               <div className="relative group/input">
-                  <ShieldCheck className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400 w-6 h-6 transition-colors group-focus-within/input:text-indigo-600" />
-                  <input 
-                    type="text" 
-                    placeholder="XXXX-XXXX-XXXX-XXXX"
-                    className="w-full pl-16 pr-8 py-7 bg-gray-50/50 border-2 border-transparent rounded-[2rem] text-2xl font-black font-mono tracking-[0.2em] uppercase focus:bg-white focus:border-indigo-500 transition-all outline-none"
-                  />
-               </div>
-            </div>
-
-            <button className="w-full bg-black text-white py-8 rounded-[2rem] font-black text-[14px] uppercase tracking-[0.4em] hover:bg-indigo-600 transform active:scale-[0.98] transition-all shadow-2xl flex items-center justify-center gap-4 group/btn">
-               Verify System Integrity
-               <ChevronRight className="w-5 h-5 transition-transform group-hover/btn:translate-x-2" />
-            </button>
-         </div>
-      </div>
-    </motion.div>
-  );
-}
 function WarrantyPage({ products, settings, warrantyRecords = [], user, setNotification }: { 
   products: Product[], 
   settings: ShopSettings, 
@@ -12068,6 +14752,7 @@ function WarrantyPage({ products, settings, warrantyRecords = [], user, setNotif
       await updateDoc(productRef, {
         stock: increment(-sellQty)
       });
+      await updateBranchStock(sellingProduct.id, activeBranchId, -sellQty);
 
       // Write Stock record log
       await addDoc(collection(db, 'stockRecords'), {
@@ -12715,7 +15400,12 @@ function POS({
   customerSuggestion,
   isCustomerVoiceListening,
   setIsCustomerVoiceListening,
-  isCheckingOut
+  isCheckingOut,
+  setCart,
+  employees,
+  setIsScannerOpen,
+  setScannerMode,
+  activeBranchId
 }: { 
   products: Product[],
   customers: Customer[],
@@ -12750,8 +15440,36 @@ function POS({
   customerSuggestion?: string,
   isCustomerVoiceListening?: boolean,
   setIsCustomerVoiceListening?: (l: boolean) => void,
-  isCheckingOut: boolean
+  isCheckingOut: boolean,
+  setCart?: React.Dispatch<React.SetStateAction<CartItem[]>>,
+  employees?: Employee[],
+  setIsScannerOpen?: (v: boolean) => void,
+  setScannerMode?: (mode: 'cart' | 'product') => void,
+  activeBranchId?: string
 }) {
+  const isRestaurant = settings.businessType === 'Restaurant';
+  const tables = useMemo(() => {
+    if (!activeBranchId || activeBranchId === 'all') return [];
+    if (settings.branchTables?.[activeBranchId]) {
+      return settings.branchTables[activeBranchId] as string[];
+    }
+    return settings.tables && settings.tables.length > 0
+      ? (settings.tables as string[])
+      : ['Table 1', 'Table 2', 'Table 3', 'Table 4', 'Table 5', 'Table 6', 'Table 7', 'Table 8', 'Table 9', 'Table 10'];
+  }, [settings.branchTables, settings.tables, activeBranchId]);
+
+  const tableStatuses = useMemo(() => {
+    if (!activeBranchId || activeBranchId === 'all') return {};
+    return settings.branchTableStatuses?.[activeBranchId] || settings.tableStatuses || {};
+  }, [settings.branchTableStatuses, settings.tableStatuses, activeBranchId]);
+
+  const busyTables = useMemo(() => {
+    if (!sales || !activeBranchId || activeBranchId === 'all') return [];
+    return sales
+      .filter(s => s.kitchenStatus && s.kitchenStatus !== 'Served' && s.tableNo && s.branchId === activeBranchId)
+      .map(s => s.tableNo) as string[];
+  }, [sales, activeBranchId]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -12759,6 +15477,45 @@ function POS({
   const theme = PAGE_THEMES.pos;
   const systemLang = settings.systemLanguage || 'en';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
+
+  // Global key listener to auto-focus the POS search input if typing or scanning via physical machine
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      if (activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.tagName === 'SELECT' || 
+        activeEl.getAttribute('contenteditable') === 'true'
+      )) {
+        return;
+      }
+      
+      if (
+        e.key === 'Control' || 
+        e.key === 'Alt' || 
+        e.key === 'Shift' || 
+        e.key === 'Meta' || 
+        e.key === 'Escape' || 
+        e.key === 'Tab' || 
+        e.key === 'Enter' ||
+        e.key === 'ArrowUp' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight'
+      ) {
+        return;
+      }
+
+      const searchInput = document.getElementById('pos-product-search-input') as HTMLInputElement | null;
+      if (searchInput) {
+        searchInput.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   const filteredProducts = useMemo(() => {
     const term = deferredSearchTerm.trim().toLowerCase();
@@ -13023,20 +15780,41 @@ function POS({
             <div className="flex-1 flex items-center gap-2 bg-[#f8faf7] p-1 rounded-2xl md:rounded-[1.5rem] border border-emerald-100/50 shadow-sm hover:shadow-md transition-all group/search">
               <div className="relative flex-1 group">
                 <input 
+                  id="pos-product-search-input"
                   type="text"
-                  placeholder="Scan barcode or type name..."
-                  className="w-full h-11 md:h-12 pl-4 md:pl-6 pr-10 md:pr-12 bg-white/90 border border-emerald-100/50 rounded-xl md:rounded-[1.25rem] text-[11px] md:text-[13px] font-black focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all shadow-sm outline-none text-gray-800 placeholder:text-gray-400 group-hover/search:border-emerald-200"
+                  placeholder={systemLang === 'bn' ? "বারকোড স্ক্যান করুন বা নাম লিখুন..." : "Scan barcode or type name..."}
+                  className={`w-full h-11 md:h-12 pl-4 md:pl-6 ${setIsScannerOpen ? 'pr-20 md:pr-24' : 'pr-10 md:pr-12'} bg-white/90 border border-emerald-100/50 rounded-xl md:rounded-[1.25rem] text-[11px] md:text-[13px] font-black focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all shadow-sm outline-none text-gray-800 placeholder:text-gray-400 group-hover/search:border-emerald-200`}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   onKeyDown={handleKeyDown}
                   autoFocus
                 />
                 <button 
+                  type="button"
                   onClick={toggleVoiceSearch}
-                  className={`absolute right-2 md:right-3 top-1/2 -translate-y-1/2 p-2 md:p-2.5 rounded-lg md:rounded-xl transition-all ${isListening ? 'bg-red-50 text-red-500 animate-pulse' : 'text-gray-400 hover:bg-emerald-50 hover:text-emerald-500'}`}
+                  className={`absolute ${setIsScannerOpen ? 'right-12 md:right-14' : 'right-2 md:right-3'} top-1/2 -translate-y-1/2 p-2 md:p-2.5 rounded-lg md:rounded-xl transition-all ${isListening ? 'bg-red-50 text-red-500 animate-pulse' : 'text-gray-400 hover:bg-emerald-50 hover:text-emerald-500'}`}
                 >
                   <Mic className="w-4 h-4 md:w-5 md:h-5" />
                 </button>
+                {setIsScannerOpen && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      if (setScannerMode) setScannerMode('cart');
+                      setIsScannerOpen(true);
+                      setNotification({
+                        type: 'info',
+                        message: systemLang === 'bn' 
+                          ? 'ক্যামেরা স্ক্যানার চালু হচ্ছে... আপনার প্রোডাক্টের বারকোডটি ক্যামেরার সামনে রাখুন।' 
+                          : 'Opening camera scanner... Position your product barcode in front of the camera.'
+                      });
+                    }}
+                    className="absolute right-2 md:right-3 top-1/2 -translate-y-1/2 p-2 md:p-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg md:rounded-xl transition-all flex items-center justify-center gap-1 shadow-sm border border-emerald-200/50"
+                    title={systemLang === 'bn' ? 'মোবাইল ক্যামেরা/ওয়েবক্যাম স্ক্যানার' : 'Mobile Camera & Webcam Scanner'}
+                  >
+                    <Scan className="w-4 h-4 md:w-5 md:h-5 text-emerald-600" />
+                  </button>
+                )}
                 <AnimatePresence>
                   {voiceFeedback && (
                     <motion.div
@@ -13096,6 +15874,162 @@ function POS({
               </span>
             </h2>
           </div>
+
+          {isRestaurant && (
+            <div className="mb-5 bg-gradient-to-tr from-indigo-50/50 to-slate-50/50 border border-indigo-100/60 p-4 rounded-3xl space-y-3.5 shadow-sm shrink-0">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <h3 className="text-xs font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <ChefHat className="w-4 h-4 text-indigo-500 animate-pulse" /> Dine-in Tables & Waitstaff / টেবিল ও ওয়েটার এসাইন
+                  </h3>
+                  <p className="text-[9px] text-indigo-400 font-bold uppercase tracking-widest">Select a table to tag this KOT check and choose waitstaff</p>
+                </div>
+
+                {/* Waitstaff assignment */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 shrink-0">Waiter / ওয়েটার:</span>
+                  <select
+                    className="bg-white border-2 border-indigo-100/75 rounded-xl px-3 py-1 text-xs font-bold text-gray-700 focus:outline-none focus:border-indigo-500"
+                    value={checkoutData.waiterId || ''}
+                    onChange={(e) => {
+                      const empId = e.target.value;
+                      const emp = employees?.find(em => em.id === empId);
+                      setCheckoutData({
+                        ...checkoutData,
+                        waiterId: empId,
+                        waiterName: emp ? emp.name : ''
+                      });
+                    }}
+                  >
+                    <option value="">-- Assign Waiter --</option>
+                    {employees && employees.map(em => (
+                      <option key={em.id} value={em.id}>{em.name} ({em.designation || 'Staff'})</option>
+                    ))}
+                  </select>
+
+                  {/* One-click register waiter button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const name = window.prompt(settings.systemLanguage === 'bn' ? "নতুন ওয়েটারের নাম লিখুন:" : "Enter new waiter's name:");
+                      if (!name || !name.trim()) return;
+                      const phone = window.prompt(settings.systemLanguage === 'bn' ? "ওয়েটারের মোবাইল নম্বর দিন (ঐচ্ছিক):" : "Enter waiter's phone number (optional):") || 'N/A';
+                      
+                      addDoc(collection(db, 'employees'), {
+                        name: name.trim(),
+                        phone: phone.trim(),
+                        designation: 'Waiter',
+                        salary: 0,
+                        status: 'active',
+                        shopId: user?.shopId || ''
+                      }).then((docRef) => {
+                        setCheckoutData({
+                          ...checkoutData,
+                          waiterId: docRef.id,
+                          waiterName: name.trim()
+                        });
+                      }).catch((err) => {
+                        alert(err.message || 'Error occurred while saving waiter.');
+                      });
+                    }}
+                    className="p-1 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors border border-indigo-200 flex items-center gap-1 text-[10px] font-black uppercase tracking-wider h-8"
+                    title={settings.systemLanguage === 'bn' ? "দ্রুত ওয়েটার যুক্ত করুন" : "Quick Add Waiter/Staff"}
+                  >
+                    <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                    <span>{settings.systemLanguage === 'bn' ? '+ ওয়েটার' : '+ Server'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Floor grid view map */}
+              <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
+                {tables.map(table => {
+                  const isBusy = busyTables.includes(table);
+                  const isReserved = !isBusy && tableStatuses[table] === 'Reserved';
+                  const isSelected = checkoutData.tableNo === table;
+                  
+                  // Label states
+                  const statusLabel = isSelected
+                    ? (settings.systemLanguage === 'bn' ? 'অ্যাক্টিভ' : 'ACTIVE')
+                    : isBusy
+                      ? (settings.systemLanguage === 'bn' ? 'ব্যস্ত' : 'BUSY')
+                      : isReserved
+                        ? (settings.systemLanguage === 'bn' ? 'বুকড' : 'RESERVED')
+                        : (settings.systemLanguage === 'bn' ? 'খালি' : 'FREE');
+
+                  return (
+                    <button
+                      key={table}
+                      type="button"
+                      onClick={() => {
+                        const nextTable = isSelected ? '' : table;
+                        let nextWaiterId = checkoutData.waiterId;
+                        let nextWaiterName = checkoutData.waiterName;
+
+                        if (nextTable && settings.tableWaiters?.[nextTable]) {
+                          const waiterName = settings.tableWaiters[nextTable];
+                          const matchedWaiter = employees?.find(em => em.name === waiterName);
+                          if (matchedWaiter) {
+                            nextWaiterId = matchedWaiter.id;
+                            nextWaiterName = matchedWaiter.name;
+                          } else {
+                            nextWaiterId = '';
+                            nextWaiterName = waiterName;
+                          }
+                        }
+
+                        setCheckoutData({
+                          ...checkoutData,
+                          tableNo: nextTable,
+                          waiterId: nextWaiterId,
+                          waiterName: nextWaiterName
+                        });
+                      }}
+                      className={`py-2 px-1 rounded-xl text-[10px] font-black uppercase tracking-tight text-center relative border transition-all ${
+                        isSelected 
+                          ? 'bg-indigo-600 border-indigo-700 text-white shadow-md shadow-indigo-600/20 scale-[1.03]' 
+                          : isBusy 
+                            ? 'bg-rose-500/15 border-rose-300 text-rose-800 hover:bg-rose-500/25' 
+                            : isReserved
+                              ? 'bg-amber-500/15 border-amber-300 text-amber-800 hover:bg-amber-500/25'
+                              : 'bg-emerald-500/15 border-emerald-300 text-emerald-800 hover:bg-emerald-500/25'
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className="leading-none truncate w-full px-0.5">{table}</span>
+                        <span className={`text-[7px] leading-none ${
+                          isSelected 
+                            ? 'text-indigo-200' 
+                            : isBusy 
+                              ? 'text-rose-500' 
+                              : isReserved
+                                ? 'text-amber-500 animate-pulse'
+                                : 'text-emerald-500'
+                        }`}>
+                          {statusLabel}
+                        </span>
+                        {settings.tableWaiters?.[table] && (
+                          <span className={`text-[6px] max-w-full truncate px-0.5 font-bold ${
+                            isSelected ? 'text-indigo-200' : 'text-slate-500/80 dark:text-slate-400'
+                          }`}>
+                            🤵 {settings.tableWaiters[table].split(' ')[0]}
+                          </span>
+                        )}
+                        {(settings as any).tableBookings?.[table] && isReserved && (
+                          <span className={`text-[6px] max-w-full truncate px-0.5 font-bold ${
+                            isSelected ? 'text-indigo-200' : 'text-amber-700 dark:text-amber-400'
+                          }`}>
+                            🕒 {(settings as any).tableBookings[table].time} 
+                            {(settings as any).tableBookings[table].name ? ` 👤 ${(settings as any).tableBookings[table].name}` : ''}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           
           <div className="flex-1 overflow-y-auto pr-1 md:pr-2 custom-scrollbar pb-6">
             {viewMode === 'grid' ? (
@@ -13207,12 +16141,79 @@ function POS({
               </div>
             </div>
             {cart.length > 0 && (
-              <button 
-                onClick={() => {if(confirm('Clear entire cart?')) cart.forEach(i => removeFromCart(i.id))}}
-                className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button 
+                  title={settings.systemLanguage === 'bn' ? 'খসড়া হিসেবে সেভ করুন (Hold)' : 'Save as Draft (Hold)'}
+                  onClick={async () => {
+                    const notesPrompt = prompt(
+                      settings.systemLanguage === 'bn' 
+                        ? 'খসড়া চলানের জন্য কাস্টমার নাম, টেবিল নং বা বিবরণ দিন (ঐচ্ছিক):' 
+                        : 'Enter draft reference or client details (optional):', 
+                      checkoutData.customerId ? (customers.find(c => c.id === checkoutData.customerId)?.name || '') : ''
+                    );
+                    if (notesPrompt === null) return; // Cancelled
+
+                    try {
+                      // Save to collection 'draft_invoices'
+                      await addDoc(collection(db, 'draft_invoices'), {
+                        shopId: user.shopId,
+                        cart: cart,
+                        discount: discount,
+                        taxRate: taxRate,
+                        customerId: checkoutData.customerId || '',
+                        walkInName: checkoutData.walkInName || '',
+                        walkInPhone: checkoutData.walkInPhone || '',
+                        finalTotal: finalTotal,
+                        createdAt: new Date().toISOString(),
+                        notes: notesPrompt.trim(),
+                        paymentMethod: checkoutData.paymentMethod || 'cash',
+                        orderId: checkoutData.orderId || '',
+                        tableNo: checkoutData.tableNo || '',
+                        waiterId: checkoutData.waiterId || '',
+                        waiterName: checkoutData.waiterName || ''
+                      });
+
+                      // Clear POS cart and inputs
+                      setCart([]);
+                      setDiscount(0);
+                      setTaxRate(0);
+                      setCheckoutData({
+                        customerId: '',
+                        walkInName: '',
+                        walkInPhone: '',
+                        paidAmount: 0,
+                        paymentMethod: 'cash',
+                        orderId: '',
+                        tableNo: '',
+                        waiterId: '',
+                        waiterName: ''
+                      });
+
+                      setNotification({
+                        message: settings.systemLanguage === 'bn' 
+                          ? 'পেন্ডিং কার্টটি চমৎকারভাবে খসড়া চালানে জমা রাখা হয়েছে!' 
+                          : 'Cart successfully held in Draft Invoices!',
+                        type: 'success'
+                      });
+                    } catch (error) {
+                      console.error("Save draft error", error);
+                      setNotification({
+                        message: 'Error holding the cart: ' + error,
+                        type: 'error'
+                      });
+                    }
+                  }}
+                  className="p-2 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-xl transition-all"
+                >
+                  <FileText className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={() => {if(confirm('Clear entire cart?')) setCart([])}}
+                  className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-all"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             )}
           </div>
 
@@ -13278,6 +16279,146 @@ function POS({
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
+
+                    {settings.businessType === 'Restaurant' && (
+                      <div className="space-y-2.5 mt-1 pt-2.5 border-t border-gray-100/60 px-1">
+                        {/* Variant Selection */}
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Variant / সাইজ:</span>
+                          <div className="flex gap-1">
+                            {([
+                              { value: 'Full', label: 'Full / ফুল', priceMod: 1 },
+                              { value: 'Half', label: 'Half / হাফ', priceMod: 0.5 }
+                            ] as const).map(opt => {
+                              const isSelected = (item as any).foodVariant === opt.value || (!((item as any).foodVariant) && opt.value === 'Full');
+                              return (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  onClick={() => {
+                                    if (setCart) {
+                                      setCart(prev => prev.map(c => {
+                                        if (c.id === item.id) {
+                                          const basePrice = item.price;
+                                          const newPrice = basePrice * opt.priceMod;
+                                          return {
+                                            ...c,
+                                            foodVariant: opt.value,
+                                            discountedPrice: newPrice
+                                          };
+                                        }
+                                        return c;
+                                      }));
+                                    }
+                                  }}
+                                  className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase transition-all ${
+                                    isSelected 
+                                      ? 'bg-amber-500 text-white shadow-xs' 
+                                      : 'bg-gray-150 text-gray-400 hover:bg-gray-200 hover:text-gray-600'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Cooking Instruction Input / Bubbles */}
+                        <div className="space-y-1">
+                          <label className="block text-[8px] font-black uppercase text-gray-400 tracking-wider">Special cooking / রান্নার নির্দেশনাবলী:</label>
+                          <input
+                            type="text"
+                            placeholder="যেমন: ঝাল কম হবে, মশলা ছাড়া..."
+                            value={(item as any).cookingInstruction || ''}
+                            onChange={(e) => {
+                              if (setCart) {
+                                const val = e.target.value;
+                                setCart(prev => prev.map(c => c.id === item.id ? { ...c, cookingInstruction: val } : c));
+                              }
+                            }}
+                            className="w-full px-2 py-1 text-[9px] font-bold bg-white border border-gray-100 rounded-lg outline-none focus:border-amber-400 focus:ring-0 shadow-inner"
+                          />
+                          {/* Quick suggestions bubbles */}
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {['ঝাল কম', 'ঝাল ছাড়া', 'মশলা কম', 'পার্সেল', 'কম তেল', 'স্পাইসি', 'পেঁয়াজ ছাড়া'].map((phrase) => (
+                              <button
+                                key={phrase}
+                                type="button"
+                                onClick={() => {
+                                  if (setCart) {
+                                    const currentNotes = (item as any).cookingInstruction || '';
+                                    const newNotes = currentNotes ? `${currentNotes}, ${phrase}` : phrase;
+                                    setCart(prev => prev.map(c => c.id === item.id ? { ...c, cookingInstruction: newNotes } : c));
+                                  }
+                                }}
+                                className="px-1.5 py-0.5 bg-red-50 text-red-500 border border-red-100/50 hover:bg-red-100 rounded text-[8px] font-black transition-colors"
+                              >
+                                + {phrase}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {(settings.businessType === 'Electronics' || (item as any).imeis?.length > 0 || (item as any).serials?.length > 0) && (
+                      <div className="space-y-2 mt-1 pt-2 border-t border-gray-100/60 px-1">
+                        <div className="flex flex-col gap-1">
+                          <label className="block text-[8px] font-black uppercase text-gray-400 tracking-wider">Device IMEI / Serial No:</label>
+                          <div className="flex gap-1.5 animate-fadeIn">
+                            {((item as any).imeis?.length > 0 || (item as any).serials?.length > 0) ? (
+                              <select
+                                value={(item as any).selectedImei || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (setCart) {
+                                    setCart(prev => prev.map(c => c.id === item.id ? { ...c, selectedImei: val, selectedSerial: val } as any : c));
+                                  }
+                                }}
+                                className="text-[9px] bg-white border border-gray-155 rounded px-1 py-0.5 outline-none font-mono text-gray-700 font-bold max-w-[120px]"
+                              >
+                                <option value="">-- Pick registered --</option>
+                                {(item as any).imeis?.map((im: string) => (
+                                  <option key={im} value={im}>{im}</option>
+                                ))}
+                                {(item as any).serials?.map((sr: string) => (
+                                  <option key={sr} value={sr}>{sr}</option>
+                                ))}
+                              </select>
+                            ) : null}
+                            <input
+                              type="text"
+                              placeholder="Type or scan IMEI/Serial..."
+                              value={(item as any).selectedImei || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (setCart) {
+                                  setCart(prev => prev.map(c => c.id === item.id ? { ...c, selectedImei: val, selectedSerial: val } as any : c));
+                                }
+                              }}
+                              className="text-[9px] flex-1 bg-white border border-gray-150 rounded px-1.5 py-0.5 outline-none font-mono font-bold text-gray-800"
+                            />
+                          </div>
+                          {/* Warranty Input */}
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[7.5px] font-black uppercase text-gray-400 tracking-wider">Warranty:</span>
+                            <input
+                              type="text"
+                              placeholder="e.g. 1 Year"
+                              value={(item as any).warranty || item.warranty || '1 Year'}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (setCart) {
+                                  setCart(prev => prev.map(c => c.id === item.id ? { ...c, warranty: val } : c));
+                                }
+                              }}
+                              className="text-[8.5px] bg-white border border-slate-100 rounded px-1.5 py-0.5 outline-none font-bold text-gray-700"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="bg-white rounded-xl shadow-inner border border-gray-100 overflow-hidden mt-0.5">
                        <div className="grid grid-cols-2 bg-gray-50/50 border-b border-gray-100 px-2 md:px-3.5 py-1 md:py-1.5">
@@ -13368,6 +16509,54 @@ function POS({
                    />
                  </div>
               </div>
+
+              {/* Quick Cash Suggestions & Change Return Helper */}
+              {checkoutData.paymentMethod === 'cash' && (
+                <div className="space-y-1.5 p-1 animate-fadeIn">
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setCheckoutData({ ...checkoutData, paidAmount: finalTotal })}
+                      className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 rounded-lg text-[9px] font-black uppercase transition-all border border-emerald-100/50"
+                    >
+                      {systemLang === 'bn' ? 'Exact / ফুল পেইড' : 'Exact Amount'}
+                    </button>
+                    {([10, 20, 50, 100, 500, 1000] as const).map(denom => {
+                      return (
+                        <button
+                          key={denom}
+                          type="button"
+                          onClick={() => {
+                            const currentPaid = checkoutData.paidAmount || 0;
+                            setCheckoutData({ ...checkoutData, paidAmount: currentPaid + denom });
+                          }}
+                          className="px-2 py-1 bg-slate-50 hover:bg-slate-150 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg text-[9px] font-black transition-all border border-slate-200/50"
+                        >
+                          +{settings.currencySymbol || '৳'}{denom}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => setCheckoutData({ ...checkoutData, paidAmount: 0 })}
+                      className="px-2 py-1 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 rounded-lg text-[9px] font-black transition-all border border-rose-100/40 ml-auto"
+                    >
+                      {systemLang === 'bn' ? 'মুছে দিন' : 'Reset'}
+                    </button>
+                  </div>
+
+                  {/* Return Change calculation indicator */}
+                  {(checkoutData.paidAmount || 0) > finalTotal && (
+                    <div className="flex justify-between items-center bg-amber-500/10 dark:bg-amber-950/30 border border-amber-200/50 dark:border-amber-900/40 p-2 rounded-xl text-amber-800 dark:text-amber-300 text-xs font-black shadow-xs">
+                      <span className="flex items-center gap-1.5">
+                        <Coins className="w-3.5 h-3.5 text-amber-500 animate-bounce" />
+                        {systemLang === 'bn' ? 'ফেরত দিন (Change):' : 'Return Change:'}
+                      </span>
+                      <span className="font-mono text-sm tracking-tight">{fC((checkoutData.paidAmount || 0) - finalTotal)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {checkoutData.customerId && (
                 <div className="bg-emerald-50/50 p-2.5 rounded-xl border border-emerald-100/30 space-y-1.5 mt-1">
@@ -13467,9 +16656,11 @@ function Inventory(props: {
   setScannerMode: (mode: 'cart' | 'product') => void,
   setIsScannerOpen: (v: boolean) => void,
   user: any,
-  suppliers: Supplier[]
+  suppliers: Supplier[],
+  activeBranchId: string,
+  branches: any[]
 }) {
-  const { products, categories, stockRecords, sales, onViewHistory, setNotification, isOnline, settings, isSaving, setIsSaving, setScannerMode, setIsScannerOpen, user, suppliers } = props;
+  const { products, categories, stockRecords, sales, onViewHistory, setNotification, isOnline, settings, isSaving, setIsSaving, setScannerMode, setIsScannerOpen, user, suppliers, activeBranchId, branches } = props;
   const systemLang = settings.systemLanguage || 'en';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
   const [productSortBy, setProductSortBy] = useState<string>('serial');
@@ -13504,6 +16695,16 @@ function Inventory(props: {
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [bulkStockData, setBulkStockData] = useState<Record<string, { quantity: number; batchNumber: string; expiryDate: string }>>({});
   const handleBulkImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (activeBranchId === 'all') {
+      setNotification({
+        message: systemLang === 'bn' 
+          ? 'বাল্ক ইম্পোর্ট করতে অনুগ্রহ করে প্রথমে একটি নির্দিষ্ট ব্রাঞ্চ সিলেক্ট করুন!' 
+          : 'Please select a specific branch first to do bulk import!',
+        type: 'error'
+      });
+      if (e.target) e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -13555,6 +16756,14 @@ function Inventory(props: {
               batch.update(doc(db, 'products', existingProduct.id), {
                 stock: newStock
               });
+              const bStockDocId = `bs_${existingProduct.id}_${activeBranchId}`;
+              batch.set(doc(db, 'branchStocks', bStockDocId), {
+                id: bStockDocId,
+                productId: existingProduct.id,
+                branchId: activeBranchId,
+                quantity: increment(stockChange),
+                shopId: user.shopId
+              }, { merge: true });
               report.updated++;
             } else {
               // Add
@@ -13579,9 +16788,18 @@ function Inventory(props: {
                 department: (row.Department || row.department || '').trim(),
                 warehouse: (row.Warehouse || row.warehouse || '').trim(),
                 serialNumber: products.length + report.added + 1,
-                shopId: user.shopId
+                shopId: user.shopId,
+                branchId: activeBranchId
               };
               batch.set(newProductRef, productData);
+              const bStockDocId = `bs_${newProductRef.id}_${activeBranchId}`;
+              batch.set(doc(db, 'branchStocks', bStockDocId), {
+                id: bStockDocId,
+                productId: newProductRef.id,
+                branchId: activeBranchId,
+                quantity: stockChange,
+                shopId: user.shopId
+              });
               productMap.set(name.toLowerCase(), { id: newProductRef.id, ...productData } as Product);
               report.added++;
             }
@@ -13857,6 +17075,15 @@ Return the result as JSON with a "category" field containing exactly one string 
 
   const handleAddStock = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (activeBranchId === 'all') {
+      setNotification({
+        message: systemLang === 'bn' 
+          ? 'স্টক রিফিল করতে অনুগ্রহ করে প্রথমে একটি নির্দিষ্ট ব্রাঞ্চ সিলেক্ট করুন!' 
+          : 'Please select a specific branch first to refill stock!',
+        type: 'error'
+      });
+      return;
+    }
     if (!addingStockProduct) return;
     
     const form = e.target as HTMLFormElement;
@@ -13880,7 +17107,8 @@ Return the result as JSON with a "category" field containing exactly one string 
         batchNumber: formData.get('batchNumber') as string || '',
         location: formData.get('location') as string || '',
         note: formData.get('note') as string || 'Manual stock add',
-        shopId: user.shopId
+        shopId: user.shopId,
+        branchId: activeBranchId
       };
 
       await addDoc(collection(db, 'stockRecords'), stockData);
@@ -13895,6 +17123,7 @@ Return the result as JSON with a "category" field containing exactly one string 
       }
 
       await updateDoc(doc(db, 'products', addingStockProduct.id), updateData);
+      await updateBranchStock(addingStockProduct.id, activeBranchId, quantity);
 
       setNotification({ message: "Stock added successfully", type: 'success' });
       setAddingStockProduct(null);
@@ -13934,6 +17163,16 @@ Return the result as JSON with a "category" field containing exactly one string 
   };
 
   const handleUploadCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (activeBranchId === 'all') {
+      setNotification({
+        message: systemLang === 'bn' 
+          ? 'সিএসভি আপলোড করতে অনুগ্রহ করে প্রথমে একটি নির্দিষ্ট ব্রাঞ্চ সিলেক্ট করুন!' 
+          : 'Please select a specific branch first to upload CSV!',
+        type: 'error'
+      });
+      if (e.target) e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (file) {
       if (!window.confirm("Are you sure? This will DELETE all existing inventory and replace it with this file's content.\n\nআপনি কি নিশ্চিত? এটি আপনার বর্তমান সমস্ত ইনভেন্টরি মুছে ফেলবে এবং এই ফাইল থেকে নতুন ডাটা যোগ করবে।")) {
@@ -14009,7 +17248,8 @@ Return the result as JSON with a "category" field containing exactly one string 
                     department: (row.Department || row.department || '').trim(),
                     warehouse: (row.Warehouse || row.warehouse || '').trim(),
                     serialNumber: !isNaN(serialFromCSV) ? serialFromCSV : (report.success + 1),
-                    shopId: user.shopId
+                    shopId: user.shopId,
+                    branchId: activeBranchId
                   };
 
                   const newDocRef = doc(collection(db, 'products'));
@@ -14050,6 +17290,15 @@ Return the result as JSON with a "category" field containing exactly one string 
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (activeBranchId === 'all') {
+      setNotification({
+        message: systemLang === 'bn' 
+          ? 'প্রোডাক্ট যোগ বা পরিবর্তন করতে অনুগ্রহ করে প্রথমে একটি নির্দিষ্ট ব্রাঞ্চ সিলেক্ট করুন!' 
+          : 'Please select a specific branch first to add or edit products!',
+        type: 'error'
+      });
+      return;
+    }
     if (isSaving) return;
     setIsSaving(true);
     
@@ -14096,9 +17345,13 @@ Return the result as JSON with a "category" field containing exactly one string 
         const newProduct = {
           ...productData,
           shopId: user.shopId,
-          serialNumber: maxSerial + 1
+          serialNumber: maxSerial + 1,
+          branchId: activeBranchId
         };
-        await addDoc(collection(db, 'products'), newProduct);
+        const docRef = await addDoc(collection(db, 'products'), newProduct);
+        if (productData.stock > 0) {
+          await updateBranchStock(docRef.id, activeBranchId, productData.stock);
+        }
         setNotification({ message: "Product added successfully!", type: 'success' });
       }
       setIsModalOpen(false);
@@ -14114,6 +17367,15 @@ Return the result as JSON with a "category" field containing exactly one string 
 
   const handleBulkAddStock = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (activeBranchId === 'all') {
+      setNotification({
+        message: systemLang === 'bn' 
+          ? 'বাল্ক স্টক আপডেট করতে অনুগ্রহ করে প্রথমে একটি নির্দিষ্ট ব্রাঞ্চ সিলেক্ট করুন!' 
+          : 'Please select a specific branch first to bulk update stock!',
+        type: 'error'
+      });
+      return;
+    }
     const selectedProducts = products.filter(p => selectedProductIds.includes(p.id));
     
     try {
@@ -14131,7 +17393,8 @@ Return the result as JSON with a "category" field containing exactly one string 
           expiryDate: data.expiryDate || '',
           batchNumber: data.batchNumber || '',
           location: product.location || '',
-          note: 'Bulk stock add'
+          note: 'Bulk stock add',
+          branchId: activeBranchId
         };
 
         await addDoc(collection(db, 'stockRecords'), stockRecord);
@@ -14144,6 +17407,7 @@ Return the result as JSON with a "category" field containing exactly one string 
         }
 
         await updateDoc(doc(db, 'products', product.id), updateData);
+        await updateBranchStock(product.id, activeBranchId, data.quantity);
       }
 
       setNotification({ message: `Bulk stock updated for ${selectedProducts.length} products`, type: 'success' });
@@ -15880,20 +19144,32 @@ function SalesHistory({ sales, customers, onEdit, onDelete, settings, isOnline }
                   </div>
                 </div>
 
-                <div className="flex gap-4 pt-4">
-                  <button 
-                    onClick={() => printInvoice(selectedSale, settings)}
-                    className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
-                  >
-                    <Printer className="w-5 h-5" />
-                    Print
-                  </button>
+                <div className="flex flex-col gap-2 pt-4">
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => printInvoice(selectedSale, settings)}
+                      className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Printer className="w-5 h-5" />
+                      Print Bill
+                    </button>
+                    {settings.businessType === 'Restaurant' && (
+                      <button 
+                        onClick={() => printInvoice(selectedSale, settings, { isKOT: true })}
+                        className="flex-1 py-3 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-600 transition-all flex items-center justify-center gap-2 whitespace-nowrap"
+                        title="Print Kitchen Order Ticket"
+                      >
+                        <ChefHat className="w-5 h-5" />
+                        Print KOT
+                      </button>
+                    )}
+                  </div>
                   <button 
                     onClick={() => downloadInvoicePDF(selectedSale, settings)}
-                    className="flex-1 py-3 bg-gray-100 text-gray-900 font-bold rounded-xl hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
+                    className="w-full py-3 bg-gray-100 text-gray-900 font-bold rounded-xl hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
                   >
                     <Download className="w-5 h-5" />
-                    Download
+                    Download PDF
                   </button>
                 </div>
               </div>
@@ -16485,7 +19761,12 @@ function Customers({
   duePayments,
   recycleBin,
   isOnline,
-  syncQueue
+  syncQueue,
+  triggerManualSync,
+  isManualSyncing,
+  setShowSyncAuditModal,
+  branches,
+  activeBranchId
 }: { 
   customers: Customer[], 
   sales: Sale[],
@@ -16497,7 +19778,12 @@ function Customers({
   duePayments: DuePayment[],
   recycleBin: RecycleItem[],
   isOnline: boolean,
-  syncQueue: any[]
+  syncQueue: any[],
+  triggerManualSync?: () => Promise<void>,
+  isManualSyncing?: boolean,
+  setShowSyncAuditModal?: (show: boolean) => void,
+  branches: any[],
+  activeBranchId: string
 }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Partial<Customer> | null>(null);
@@ -16506,6 +19792,75 @@ function Customers({
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [historyTab, setHistoryTab] = useState<'transactions' | 'payments' | 'edits'>('transactions');
   const [dateFilter, setDateFilter] = useState<'3m' | '6m' | '1y' | '2y' | 'all'>('all');
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
+  const [selectedCustomerBranchId, setSelectedCustomerBranchId] = useState<string>(activeBranchId || 'all');
+
+  useEffect(() => {
+    setSelectedCustomerBranchId(activeBranchId || 'all');
+  }, [activeBranchId]);
+
+  const getCustomerDue = (c: Customer, targetBranchId: string) => {
+    if (targetBranchId === 'all') {
+      return c.currentDue || 0;
+    }
+    
+    const createdBranch = c.createdBranchId || c.branchId || (branches && branches[0]?.id) || 'b1';
+    
+    const totalSalesDueAll = sales
+      .filter(s => s.customerId === c.id)
+      .reduce((sum, s) => sum + (s.dueAmount || 0), 0);
+      
+    const totalPaymentsPaidAll = duePayments
+      .filter(p => p.customerId === c.id)
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+      
+    const initialDueVal = c.initialDue !== undefined 
+      ? c.initialDue 
+      : ((c.currentDue || 0) - totalSalesDueAll + totalPaymentsPaidAll);
+      
+    const initialDueForBranch = (createdBranch === targetBranchId) ? initialDueVal : 0;
+    
+    const salesDueForBranch = sales
+      .filter(s => s.customerId === c.id && s.branchId === targetBranchId)
+      .reduce((sum, s) => sum + (s.dueAmount || 0), 0);
+      
+    const paymentsPaidForBranch = duePayments
+      .filter(p => p.customerId === c.id && p.branchId === targetBranchId)
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+      
+    return initialDueForBranch + salesDueForBranch - paymentsPaidForBranch;
+  };
+  
+  const [isSyncingContacts, setIsSyncingContacts] = useState(false);
+  const [syncProgressMsg, setSyncProgressMsg] = useState('');
+
+  const handleSyncGoogleContacts = async (silent = false) => {
+    setIsSyncingContacts(true);
+    try {
+      const res = await syncGoogleContacts(user.shopId, customers, setSyncProgressMsg, silent);
+      if (res.downloaded > 0 || res.uploaded > 0) {
+        setNotification({ 
+          message: `Contact Sync: Downloaded ${res.downloaded} new contacts. Uploaded ${res.uploaded} app customers.`, 
+          type: 'success' 
+        });
+      } else if (!silent) {
+        setNotification({ message: 'All contacts are already in sync.', type: 'info' });
+      }
+    } catch (error: any) {
+      if (!silent) {
+        setNotification({ message: error.message || 'Error syncing Google Contacts', type: 'error' });
+      }
+    } finally {
+      setIsSyncingContacts(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isSyncingContacts && user) {
+      // Background silent sync if caching token is present
+      handleSyncGoogleContacts(true);
+    }
+  }, [user.shopId]);
 
   const allCustomers = useMemo(() => {
     const pendingCustomers = syncQueue
@@ -16534,28 +19889,29 @@ function Customers({
     );
   }, [allCustomers, searchTerm]);
 
-  const sendCustomerWhatsApp = async (customer: Customer, lang: 'en' | 'bn') => {
-    let message = "";
-    
-    if (shopSettings.aiWhatsAppEnabled) {
-      const aiMsg = await generatePersonalizedMessage(customer, null, 'reminder', lang, shopSettings);
-      if (aiMsg) message = aiMsg;
+  const [messageModalState, setMessageModalState] = useState<{isOpen: boolean, customer: Customer | null, message: string}>({ isOpen: false, customer: null, message: "" });
+
+  const sendCustomerWhatsApp = async (customer?: Customer) => {
+    if (customer) {
+      const bDue = getCustomerDue(customer, activeBranchId);
+      const defaultBnMessage = `প্রিয় ${customer.name || 'গ্রাহক'}, ${shopSettings.name || 'আমাদের শপ'}-এ আপনার বর্তমান বকেয়া বিল ${bDue || 0} টাকা। অনুগ্রহ করে দ্রুত পরিশোধ করার জন্য অনুরোধ করা হলো। ধন্যবাদ!`;
+      const defaultEnMessage = `Dear ${customer.name || 'Customer'}, your current due balance at ${shopSettings.name || 'our shop'} is ${shopSettings.currencySymbol} ${bDue || 0}. Please coordinate payment at your earliest convenience. Thank you!`;
+      setMessageModalState({ isOpen: true, customer, message: shopSettings.systemLanguage === 'bn' ? defaultBnMessage : defaultEnMessage });
+      return;
     }
 
-    if (!message) {
-      const template = lang === 'bn' 
-        ? (shopSettings.waTemplateBengali || "প্রিয় {{customerName}}, {{shopName}}-এ আপনার বকেয়া {{dueAmount}} টাকা। অনুগ্রহ করে সময়মতো পরিশোধ করুন।") 
-        : (shopSettings.waTemplateEnglish || "Dear {{customerName}}, your due amount at {{shopName}} is {{dueAmount}}. Please pay on time.");
-      
-      // Basic variable substitution
-      message = template
-        .replace('{{customerName}}', customer.name || 'Customer')
-        .replace('{{shopName}}', shopSettings.name || 'Shop')
-        .replace('{{dueAmount}}', (customer.currentDue || 0).toString());
+    if (!messageModalState.customer || !messageModalState.message) {
+      setMessageModalState({ isOpen: false, customer: null, message: "" });
+      return;
     }
-
-    const cleanPhone = (customer.phone || '').replace(/\D/g, '');
-    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
+    setNotification({ message: shopSettings.systemLanguage === 'bn' ? 'বার্তা পাঠানো হচ্ছে...' : 'Sending message...', type: 'info' });
+    const res = await callWhatsAppApi(messageModalState.customer.phone, messageModalState.message, shopSettings, 'reminder-' + Date.now());
+    if (res.success) {
+      setNotification({ message: shopSettings.systemLanguage === 'bn' ? 'হোয়াটসঅ্যাপে মেসেজ সফলভাবে পাঠানো হয়েছে!' : 'WhatsApp message sent successfully!', type: 'success' });
+    } else {
+      setNotification({ message: (shopSettings.systemLanguage === 'bn' ? 'বার্তা পাঠানো সম্ভব হয়নি: ' : 'Failed to send message: ') + (res.error || 'Server error'), type: 'error' });
+    }
+    setMessageModalState({ isOpen: false, customer: null, message: "" });
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -16570,15 +19926,20 @@ function Customers({
       fatherName: formData.get('fatherName') as string,
       houseName: formData.get('houseName') as string,
       currentDue: Number(formData.get('currentDue') || 0),
+      initialDue: Number(formData.get('currentDue') || 0),
       dueDate: formData.get('dueDate') as string || '',
       points: Number(formData.get('points') || 0),
       totalSpent: Number(formData.get('totalSpent') || 0),
+      photoUrl: photoBase64 || editingCustomer?.photoUrl || '',
     };
 
     try {
       if (editingCustomer?.id) {
         if (isOnline) {
-          await updateDoc(doc(db, 'customers', editingCustomer.id), customerData);
+          await updateDoc(doc(db, 'customers', editingCustomer.id), {
+            ...customerData,
+            initialDue: editingCustomer.initialDue !== undefined ? editingCustomer.initialDue : customerData.initialDue
+          });
           await addDoc(collection(db, 'customer_logs'), {
             shopId: user.shopId,
             customerId: editingCustomer.id,
@@ -16592,7 +19953,10 @@ function Customers({
         } else {
           await addToSyncQueue('customer_update', {
             customerId: editingCustomer.id,
-            customerData,
+            customerData: {
+              ...customerData,
+              initialDue: editingCustomer.initialDue !== undefined ? editingCustomer.initialDue : customerData.initialDue
+            },
             logData: {
               shopId: user.shopId,
               customerId: editingCustomer.id,
@@ -16610,6 +19974,7 @@ function Customers({
         const customId = `cust_${Date.now()}`;
         const newCustomerData = {
           ...customerData,
+          createdBranchId: activeBranchId || 'b1',
           shopId: user.shopId,
           serialNumber: Date.now()
         };
@@ -16630,6 +19995,11 @@ function Customers({
       }
       setIsModalOpen(false);
       setEditingCustomer(null);
+      setPhotoBase64(null);
+
+      if (isOnline) {
+        handleSyncGoogleContacts(true).catch(() => {});
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'customers');
     }
@@ -16644,6 +20014,7 @@ function Customers({
     const amount = Number(formData.get('amount'));
     const method = formData.get('method') as 'cash' | 'bkash' | 'nagad' | 'bank';
     const note = formData.get('note') as string;
+    const paymentBranchId = formData.get('paymentBranchId') as string;
 
     if (amount <= 0) return;
 
@@ -16656,6 +20027,7 @@ function Customers({
         method,
         note,
         shopId: user.shopId,
+        branchId: paymentBranchId || activeBranchId || 'b1',
         receivedBy: user?.displayName || user?.username || 'Admin'
       };
 
@@ -16685,11 +20057,6 @@ function Customers({
       handleFirestoreError(error, OperationType.WRITE, 'due_payments');
       setNotification({ message: "Failed to collect payment", type: 'error' });
     }
-  };
-
-  const openWhatsApp = (phone: string) => {
-    const cleanPhone = (phone || '').replace(/\D/g, '');
-    window.open(`https://wa.me/${cleanPhone}`, '_blank');
   };
 
   const getFilteredData = (data: any[]) => {
@@ -16764,7 +20131,7 @@ function Customers({
               `).join('')}
             </tbody>
           </table>
-          <div class="footer">Software by StratPro Solutions | Printed on ${new Date().toLocaleString()}</div>
+          <div class="footer">Software by StratPro Solutions | Printed on ${formatDateTimeByPreference(new Date(), shopSettings)}</div>
           <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 500); };</script>
         </body>
       </html>
@@ -16811,6 +20178,12 @@ function Customers({
               <span className="text-[10px] font-black text-purple-600 uppercase tracking-widest leading-none">Intelligence Ledger</span>
               <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{customers.length} Profiles Registered</span>
+              {syncProgressMsg && (
+                <>
+                  <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                  <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest animate-pulse">{syncProgressMsg}</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -16823,11 +20196,46 @@ function Customers({
             </p>
           </div>
           <div className="h-12 w-px bg-gray-100 hidden md:block"></div>
+          
+          {syncQueue && syncQueue.length > 0 && (
+            <motion.button 
+              whileHover={{ scale: 1.05, translateY: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowSyncAuditModal?.(true)}
+              className="px-8 py-4 bg-amber-500 text-white rounded-[1.5rem] font-black shadow-lg shadow-amber-200 dark:shadow-none hover:bg-amber-600 transition-all flex items-center gap-3 transform uppercase tracking-widest text-xs h-full cursor-pointer"
+              title={shopSettings.systemLanguage === 'bn' ? "সংরক্ষিত অফলাইন ডাটা অডিট ও সিঙ্ক করুন" : "Audit & sync offline saved operations"}
+            >
+              <RefreshCw className={`w-5 h-5 ${isManualSyncing ? 'animate-spin' : ''}`} />
+              <span>
+                {isManualSyncing 
+                  ? (shopSettings.systemLanguage === 'bn' ? 'সিঙ্ক হচ্ছে...' : 'Syncing...') 
+                  : (shopSettings.systemLanguage === 'bn' ? `অডিট সিঙ্ক (${syncQueue.length})` : `Audit Sync (${syncQueue.length})`)}
+              </span>
+            </motion.button>
+          )}
+
+          <motion.button 
+            whileHover={{ scale: 1.05, translateY: -2 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => handleSyncGoogleContacts(false)}
+            disabled={isSyncingContacts}
+            className={`px-8 py-4 bg-white border-2 border-blue-100 text-blue-600 rounded-[1.5rem] font-black shadow-sm hover:shadow-xl hover:border-blue-200 transition-all flex items-center gap-3 transform uppercase tracking-widest text-xs h-full disabled:opacity-50`}
+            title="Sync with Google Contacts"
+          >
+            {isSyncingContacts ? (
+              <RefreshCw className="w-5 h-5 animate-spin text-blue-600" />
+            ) : (
+              <img src="https://upload.wikimedia.org/wikipedia/commons/c/c2/Google_Contacts_icon_%282022%29.svg" alt="Google Contacts" className="w-5 h-5" />
+            )}
+            <span className="hidden lg:inline">{isSyncingContacts ? 'Syncing...' : 'Sync Contacts'}</span>
+          </motion.button>
+
           <motion.button 
             whileHover={{ scale: 1.05, translateY: -2 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => {
               setEditingCustomer(null);
+              setPhotoBase64(null);
               setIsModalOpen(true);
             }}
             className={`px-8 py-4 bg-gradient-to-r ${theme.gradient} text-white rounded-[1.5rem] font-black shadow-xl ${theme.shadow} hover:shadow-2xl transition-all flex items-center gap-3 transform uppercase tracking-widest text-xs h-full`}
@@ -16925,11 +20333,15 @@ function Customers({
                           <div className="flex flex-col items-center">
                             <motion.div 
                               whileHover={{ scale: 1.1, rotate: 5 }}
-                              className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center border-2 border-white shadow-md transition-all group-hover:shadow-purple-100 group-hover:border-purple-100"
+                              className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center border-2 border-white shadow-md transition-all group-hover:shadow-purple-100 group-hover:border-purple-100 overflow-hidden"
                             >
-                               <span className="text-xl font-black text-gray-400 group-hover:text-purple-600 transition-colors uppercase tabular-nums">
-                                 {customer.name?.charAt(0) || 'C'}
-                               </span>
+                               {customer.photoUrl ? (
+                                 <img src={customer.photoUrl} alt="Customer" className="w-full h-full object-cover" />
+                               ) : (
+                                 <span className="text-xl font-black text-gray-400 group-hover:text-purple-600 transition-colors uppercase tabular-nums">
+                                   {customer.name?.charAt(0) || 'C'}
+                                 </span>
+                               )}
                             </motion.div>
                           </div>
                         </td>
@@ -16941,16 +20353,16 @@ function Customers({
                                 <Phone className="w-3 h-3 text-purple-600" />
                                 <span className="text-[11px] font-bold text-gray-500 tabular-nums">{customer.phone}</span>
                               </div>
-                              <a
-                                href={`https://wa.me/88${customer.phone}?text=Hello%20${encodeURIComponent(customer.name)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  sendCustomerWhatsApp(customer);
+                                }}
                                 className="flex items-center gap-1.5 px-2 py-1 bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] rounded-lg transition-colors border border-[#25D366]/20"
                               >
                                 <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
                                 <span className="text-[10px] font-bold">Message</span>
-                              </a>
+                              </button>
                               {customer.address && (
                                 <div className="flex items-center gap-1.5">
                                   <div className="w-1 h-1 bg-gray-200 rounded-full"></div>
@@ -16966,7 +20378,7 @@ function Customers({
                                     <span className="px-3 py-1 bg-orange-50 text-orange-600 rounded-full text-[10px] font-black uppercase tracking-widest border border-orange-100">
                                        {format(safeDate(customer.dueDate), 'dd MMM yyyy')}
                                     </span>
-                                    {isPast(safeDate(customer.dueDate)) && customer.currentDue > 0 && (
+                                    {isPast(safeDate(customer.dueDate)) && getCustomerDue(customer, activeBranchId) > 0 && (
                                         <span className="text-[8px] font-black text-rose-500 uppercase animate-pulse">Overdue</span>
                                     )}
                                 </div>
@@ -16976,19 +20388,28 @@ function Customers({
                         </td>
                         <td className="px-8 py-7 text-right">
                           <div className="flex flex-col items-end">
-                            <span className={`text-xl font-black font-mono tracking-tighter tabular-nums ${customer.currentDue > 0 ? 'text-rose-500' : 'text-gray-900'}`}>
-                              {fC(customer.currentDue)}
-                            </span>
-                            <span className="text-[9px] font-black text-gray-300 uppercase tracking-widest mt-1">Outstanding</span>
+                            {(() => {
+                              const branchDue = getCustomerDue(customer, activeBranchId);
+                              return (
+                                <>
+                                  <span className={`text-xl font-black font-mono tracking-tighter tabular-nums ${branchDue > 0 ? 'text-rose-500' : branchDue < 0 ? 'text-emerald-500' : 'text-gray-900'}`}>
+                                    {fC(branchDue)}
+                                  </span>
+                                  <span className="text-[9px] font-black text-gray-300 uppercase tracking-widest mt-1">
+                                    {activeBranchId === 'all' ? 'Total Outstanding' : 'Branch Outstanding'}
+                                  </span>
+                                </>
+                              );
+                            })()}
                           </div>
                         </td>
                         <td className="px-8 py-7">
                           <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                            {customer.currentDue > 0 && (
+                            {getCustomerDue(customer, activeBranchId) > 0 && (
                               <motion.button 
                                 whileHover={{ scale: 1.1 }}
                                 whileTap={{ scale: 0.9 }}
-                                onClick={() => sendCustomerWhatsApp(customer, shopSettings.printLanguage || 'en')}
+                                onClick={() => sendCustomerWhatsApp(customer)}
                                 className="p-3 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-600 hover:text-white transition-all shadow-sm"
                                 title="Send reminder"
                               >
@@ -16998,7 +20419,7 @@ function Customers({
                             <motion.button 
                               whileHover={{ scale: 1.1 }}
                               whileTap={{ scale: 0.9 }}
-                              onClick={() => { setEditingCustomer(customer); setIsModalOpen(true); }}
+                              onClick={() => { setEditingCustomer(customer); setPhotoBase64(null); setIsModalOpen(true); }}
                               className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all shadow-sm"
                               title="Edit profile"
                             >
@@ -17146,6 +20567,28 @@ function Customers({
                     </div>
 
                     <div className="space-y-2">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Customer Photo</label>
+                      <div className="flex items-center gap-4">
+                        {(photoBase64 || editingCustomer?.photoUrl) ? (
+                          <img src={photoBase64 || editingCustomer?.photoUrl} alt="Customer" className="w-16 h-16 rounded-2xl object-cover border-2 border-purple-100" />
+                        ) : (
+                          <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 border border-dashed border-gray-300">
+                            <Camera className="w-6 h-6" />
+                          </div>
+                        )}
+                        <input type="file" accept="image/*" className="text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 transition-all cursor-pointer outline-none" onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              const base64 = await fileToBase64(file);
+                              setPhotoBase64(base64);
+                            } catch (err) {}
+                          }
+                        }} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Primary Address</label>
                       <textarea name="address" defaultValue={editingCustomer?.address || ''} placeholder="Full detailed address..." className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none h-24 resize-none" />
                     </div>
@@ -17169,7 +20612,7 @@ function Customers({
                   </div>
 
                   <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex gap-4">
-                    <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-4 bg-gray-50 text-gray-400 font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-gray-100 transition-all">Cancel</button>
+                    <button type="button" onClick={() => { setIsModalOpen(false); setEditingCustomer(null); setPhotoBase64(null); }} className="flex-1 py-4 bg-gray-50 text-gray-400 font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-gray-100 transition-all">Cancel</button>
                     <button type="submit" className={`flex-1 py-4 bg-gradient-to-r ${theme.gradient} text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-lg shadow-purple-100 hover:shadow-purple-200 transition-all`}>
                       {editingCustomer ? 'Update Entry' : 'Create Customer'}
                     </button>
@@ -17194,8 +20637,12 @@ function Customers({
               
               <div className="p-8 border-b border-gray-100 flex items-center justify-between bg-white">
                 <div className="flex items-center gap-4">
-                  <div className={`w-14 h-14 ${theme.bg} rounded-2xl flex items-center justify-center shadow-inner`}>
-                    <HistoryIcon className={`w-8 h-8 text-${theme.primary}`} />
+                  <div className={`w-14 h-14 ${theme.bg} rounded-2xl flex items-center justify-center shadow-inner overflow-hidden`}>
+                    {selectedCustomerForHistory.photoUrl ? (
+                      <img src={selectedCustomerForHistory.photoUrl} alt="Customer" className="w-full h-full object-cover" />
+                    ) : (
+                      <HistoryIcon className={`w-8 h-8 text-${theme.primary}`} />
+                    )}
                   </div>
                   <div>
                     <h3 className="text-2xl font-black text-gray-900 tracking-tight">{selectedCustomerForHistory.name}</h3>
@@ -17209,6 +20656,16 @@ function Customers({
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  <select 
+                    value={selectedCustomerBranchId} 
+                    onChange={(e) => setSelectedCustomerBranchId(e.target.value)}
+                    className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl text-xs font-black uppercase tracking-widest text-purple-700 focus:ring-2 focus:ring-purple-500 shadow-sm outline-none cursor-pointer"
+                  >
+                    <option value="all">All Branches (সব শাখা)</option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
                   <motion.button 
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
@@ -17252,6 +20709,33 @@ function Customers({
               </div>
 
               <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                {/* Branch-wise Due Ledger Overview */}
+                <div className="mb-8 bg-purple-50/30 rounded-3xl p-6 border border-purple-100/50">
+                  <h4 className="text-[10px] font-black text-purple-700 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-purple-600" />
+                    Branch-wise Due Ledger (শাখা ভিত্তিক বকেয়া খতিয়ান)
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Global Balance (সব শাখা)</p>
+                      <p className={`text-xl font-black font-mono tracking-tighter mt-2 ${selectedCustomerForHistory.currentDue > 0 ? 'text-rose-600' : selectedCustomerForHistory.currentDue < 0 ? 'text-emerald-600' : 'text-gray-500'}`}>
+                        {fC(selectedCustomerForHistory.currentDue)}
+                      </p>
+                    </div>
+                    {branches.map(b => {
+                      const bDue = getCustomerDue(selectedCustomerForHistory, b.id);
+                      return (
+                        <div key={b.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between">
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest truncate">{b.name}</p>
+                          <p className={`text-xl font-black font-mono tracking-tighter mt-2 ${bDue > 0 ? 'text-rose-600' : bDue < 0 ? 'text-emerald-600' : 'text-gray-500'}`}>
+                            {fC(bDue)}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {historyTab === 'transactions' && (
                   <div className="space-y-6">
                     {(() => {
@@ -17262,7 +20746,9 @@ function Customers({
                           .map(item => ({ ...(item.data as Sale), isDeleted: true }))
                       ];
                       
-                      const filteredSales = getFilteredData(rawSales).sort((a,b) => safeDate(b.timestamp).getTime() - safeDate(a.timestamp).getTime());
+                      const filteredSales = getFilteredData(rawSales)
+                        .filter(s => selectedCustomerBranchId === 'all' || s.branchId === selectedCustomerBranchId)
+                        .sort((a,b) => safeDate(b.timestamp).getTime() - safeDate(a.timestamp).getTime());
 
                       if (filteredSales.length === 0) {
                         return (
@@ -17329,6 +20815,7 @@ function Customers({
                   <div className="space-y-6">
                     {(() => {
                       const filteredPay = getFilteredData(duePayments.filter(p => p.customerId === selectedCustomerForHistory.id))
+                        .filter(p => selectedCustomerBranchId === 'all' || p.branchId === selectedCustomerBranchId)
                         .sort((a,b) => safeDate(b.timestamp).getTime() - safeDate(a.timestamp).getTime());
 
                       if (filteredPay.length === 0) {
@@ -17476,6 +20963,59 @@ function Customers({
       </AnimatePresence>
 
       <AnimatePresence>
+        {messageModalState.isOpen && messageModalState.customer && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl relative overflow-hidden"
+            >
+              <div className="p-8 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-2xl font-black text-gray-900 tracking-tight">WhatsApp Message</h3>
+                  <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">
+                    To: {messageModalState.customer.name}
+                  </p>
+                </div>
+                <button onClick={() => setMessageModalState({ isOpen: false, customer: null, message: "" })} className="p-3 bg-gray-50 text-gray-400 hover:text-gray-600 rounded-2xl transition-all">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-6">
+                <div>
+                  <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest block mb-2">Message Content</label>
+                  <textarea
+                    value={messageModalState.message}
+                    onChange={(e) => setMessageModalState({ ...messageModalState, message: e.target.value })}
+                    className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none min-h-[150px] resize-y"
+                    placeholder="Type your message here..."
+                  />
+                </div>
+              </div>
+
+              <div className="p-8 bg-gray-50 flex gap-4 border-t border-gray-100 shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => setMessageModalState({ isOpen: false, customer: null, message: "" })}
+                  className="flex-1 py-4 bg-white border border-gray-200 text-gray-400 font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-gray-100 transition-all shadow-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => sendCustomerWhatsApp()}
+                  className={`flex-[1.5] flex justify-center items-center gap-2 py-4 bg-[#25D366] text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-[0_10px_30px_rgba(37,211,102,0.3)] hover:shadow-[0_10px_40px_rgba(37,211,102,0.4)] transition-all`}
+                >
+                  <MessageSquare className="w-4 h-4" /> Send Message
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {isPaymentModalOpen && selectedCustomerForHistory && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
             <motion.div
@@ -17537,6 +21077,19 @@ function Customers({
                   </div>
   
                   <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Receive at Branch (কোন শাখায় পরিশোধ হয়েছে)</label>
+                    <select 
+                      name="paymentBranchId" 
+                      defaultValue={activeBranchId !== 'all' ? activeBranchId : (selectedCustomerForHistory.createdBranchId || selectedCustomerForHistory.branchId || 'b1')}
+                      className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500 shadow-inner outline-none cursor-pointer"
+                    >
+                      {branches.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Notes & References (Optional)</label>
                     <input name="note" className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-500 shadow-inner outline-none" placeholder="e.g. Received via WhatsApp proof..." />
                   </div>
@@ -17557,7 +21110,20 @@ function Customers({
   );
 }
 
-function DailyClosingView({ sales, expenses, dailyClosings, duePayments, settings, user, onDelete, setNotification }: { 
+function DailyClosingView({ 
+  sales, 
+  expenses, 
+  dailyClosings, 
+  duePayments, 
+  settings, 
+  user, 
+  onDelete, 
+  setNotification,
+  activeBranchId,
+  branches,
+  googleToken,
+  onCreateRecurringEvent
+}: { 
   sales: Sale[], 
   expenses: Expense[], 
   dailyClosings: DailyClosing[], 
@@ -17565,52 +21131,87 @@ function DailyClosingView({ sales, expenses, dailyClosings, duePayments, setting
   settings: ShopSettings, 
   user?: any, 
   onDelete: (closing: DailyClosing) => void,
-  setNotification: (n: { message: string, type: 'success' | 'error' | 'info' } | null) => void 
+  setNotification: (n: { message: string, type: 'success' | 'error' | 'info' } | null) => void,
+  activeBranchId: string,
+  branches: any[],
+  googleToken?: string | null,
+  onCreateRecurringEvent?: (title: string, timeStr: string) => Promise<string | undefined>
 }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [closingToDelete, setClosingToDelete] = useState<DailyClosing | null>(null);
+  const [customClosingTime, setCustomClosingTime] = useState<string>('');
   const today = format(new Date(), 'yyyy-MM-dd');
+  const isBn = settings.systemLanguage === 'bn';
+  const isAllBranch = activeBranchId === 'all';
 
-  // Find the last closing timestamp to define the current session
+  const branchSales = useMemo(() => {
+    if (isAllBranch) return [];
+    return sales.filter(s => s.branchId === activeBranchId);
+  }, [sales, activeBranchId, isAllBranch]);
+
+  const branchExpenses = useMemo(() => {
+    if (isAllBranch) return [];
+    return expenses.filter(e => e.branchId === activeBranchId);
+  }, [expenses, activeBranchId, isAllBranch]);
+
+  const branchDuePayments = useMemo(() => {
+    if (isAllBranch) return [];
+    return duePayments.filter(p => p.branchId === activeBranchId);
+  }, [duePayments, activeBranchId, isAllBranch]);
+
+  const filteredClosings = useMemo(() => {
+    if (isAllBranch) return dailyClosings;
+    return dailyClosings.filter(d => d.branchId === activeBranchId);
+  }, [dailyClosings, activeBranchId, isAllBranch]);
+
+  // Find the last closing timestamp to define the current session for this branch
   const lastClosingDate = useMemo(() => {
-    if (!dailyClosings || dailyClosings.length === 0) return null;
-    const sorted = [...dailyClosings].sort((a, b) => safeDate(b.timestamp).getTime() - safeDate(a.timestamp).getTime());
+    if (!filteredClosings || filteredClosings.length === 0) return null;
+    const sorted = [...filteredClosings].sort((a, b) => safeDate(b.timestamp).getTime() - safeDate(a.timestamp).getTime());
     return safeDate(sorted[0].timestamp).getTime();
-  }, [dailyClosings]);
+  }, [filteredClosings]);
   
   // Calculate stats for the current session (since last closing)
-  // We filter by 'today' as well to keep the context of "Daily Closing"
-  // but if user wants it purely session-based regardless of date, we'd remove the 'today' check.
-  // Given it's called 'DailyClosing', keeping the today check is safer to avoid multi-day aggregation in a single report.
-  const todaySales = sales.filter(s => {
-    const ts = safeDate(s.timestamp);
-    const tsTime = ts.getTime();
-    const isSameDay = format(ts, 'yyyy-MM-dd') === today;
-    const isAfterLastClosing = !lastClosingDate || tsTime > lastClosingDate;
-    return isSameDay && isAfterLastClosing;
-  });
+  const todaySales = useMemo(() => {
+    if (isAllBranch) return [];
+    return branchSales.filter(s => {
+      const ts = safeDate(s.timestamp);
+      const tsTime = ts.getTime();
+      const isSameDay = format(ts, 'yyyy-MM-dd') === today;
+      const isAfterLastClosing = !lastClosingDate || tsTime > lastClosingDate;
+      return isSameDay && isAfterLastClosing;
+    });
+  }, [branchSales, lastClosingDate, today, isAllBranch]);
   
-  const totalSales = todaySales.reduce((sum, s) => sum + s.finalAmount, 0);
-  const cashSales = todaySales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + s.paidAmount, 0);
-  const dueSales = todaySales.reduce((sum, s) => sum + s.dueAmount, 0);
+  const totalSales = useMemo(() => todaySales.reduce((sum, s) => sum + s.finalAmount, 0), [todaySales]);
+  const cashSales = useMemo(() => todaySales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + s.paidAmount, 0), [todaySales]);
+  const dueSales = useMemo(() => todaySales.reduce((sum, s) => sum + s.dueAmount, 0), [todaySales]);
   
-  const todayCollections = duePayments.filter(p => {
-    const ts = safeDate(p.timestamp);
-    const tsTime = ts.getTime();
-    const isSameDay = format(ts, 'yyyy-MM-dd') === today;
-    const isAfterLastClosing = !lastClosingDate || tsTime > lastClosingDate;
-    return isSameDay && isAfterLastClosing;
-  }).reduce((sum, p) => sum + p.amount, 0);
+  const todayCollections = useMemo(() => {
+    if (isAllBranch) return 0;
+    return branchDuePayments.filter(p => {
+      const ts = safeDate(p.timestamp);
+      const tsTime = ts.getTime();
+      const isSameDay = format(ts, 'yyyy-MM-dd') === today;
+      const isAfterLastClosing = !lastClosingDate || tsTime > lastClosingDate;
+      return isSameDay && isAfterLastClosing;
+    }).reduce((sum, p) => sum + p.amount, 0);
+  }, [branchDuePayments, lastClosingDate, today, isAllBranch]);
 
-  const cashReceived = todaySales.reduce((sum, s) => sum + s.paidAmount, 0) + todayCollections;
+  const cashReceived = useMemo(() => {
+    return todaySales.reduce((sum, s) => sum + s.paidAmount, 0) + todayCollections;
+  }, [todaySales, todayCollections]);
   
-  const todayExpenses = expenses.filter(e => {
-    const ts = safeDate(e.timestamp);
-    const tsTime = ts.getTime();
-    const isSameDay = format(ts, 'yyyy-MM-dd') === today;
-    const isAfterLastClosing = !lastClosingDate || tsTime > lastClosingDate;
-    return isSameDay && isAfterLastClosing;
-  }).reduce((sum, e) => sum + e.amount, 0);
+  const todayExpenses = useMemo(() => {
+    if (isAllBranch) return 0;
+    return branchExpenses.filter(e => {
+      const ts = safeDate(e.timestamp);
+      const tsTime = ts.getTime();
+      const isSameDay = format(ts, 'yyyy-MM-dd') === today;
+      const isAfterLastClosing = !lastClosingDate || tsTime > lastClosingDate;
+      return isSameDay && isAfterLastClosing;
+    }).reduce((sum, e) => sum + e.amount, 0);
+  }, [branchExpenses, lastClosingDate, today, isAllBranch]);
 
   const [denominations, setDenominations] = useState<{ [key: string]: number }>({
     '1000': 0, '500': 0, '200': 0, '100': 0, '50': 0, '20': 0, '10': 0, '5': 0
@@ -17622,6 +21223,7 @@ function DailyClosingView({ sales, expenses, dailyClosings, duePayments, setting
 
   const handleSaveClosing = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAllBranch) return;
     
     // Explicitly generate a unique ID for the closing
     const closingId = `closing-${user?.shopId}-${format(new Date(), 'yyyyMMdd')}-${Date.now()}`;
@@ -17629,6 +21231,7 @@ function DailyClosingView({ sales, expenses, dailyClosings, duePayments, setting
     const closingData: any = {
       id: closingId,
       shopId: user?.shopId,
+      branchId: activeBranchId, // Stamped correctly!
       date: today,
       totalSales,
       cashSales,
@@ -17639,14 +21242,39 @@ function DailyClosingView({ sales, expenses, dailyClosings, duePayments, setting
       bkashBalance,
       denominations,
       notes,
-      timestamp: serverTimestamp()
+      timestamp: customClosingTime ? new Date(customClosingTime).toISOString() : new Date().toISOString()
     };
 
     try {
       await setDoc(doc(db, 'daily_closings', closingId), closingData);
       setNotification({ message: 'Daily closing recorded successfully!', type: 'success' });
+
+      // Trigger automatic recurring Google Calendar reminder event if configured
+      if (settings.alarmType === 'google' && googleToken && onCreateRecurringEvent) {
+        let alarmTime = '';
+        if (customClosingTime) {
+          const d = new Date(customClosingTime);
+          if (!isNaN(d.getTime())) {
+            alarmTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          }
+        } else {
+          const d = new Date();
+          alarmTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        }
+
+        if (alarmTime) {
+          try {
+            await onCreateRecurringEvent(`Daily Closing Reminder - ${settings.name || 'Intel Ledger'}`, alarmTime);
+            console.log("Automatically scheduled Google Calendar recurring reminder event at", alarmTime);
+          } catch (err) {
+            console.error("Auto-scheduling Google Calendar daily closing recurring event failed:", err);
+          }
+        }
+      }
+
       printDailyClosing(closingData, settings, user);
       setIsModalOpen(false);
+      setCustomClosingTime('');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'daily_closings');
       setNotification({ message: 'Failed to save daily closing. Check internet connection.', type: 'error' });
@@ -17674,15 +21302,38 @@ function DailyClosingView({ sales, expenses, dailyClosings, duePayments, setting
           </div>
         </div>
         
-        <motion.button 
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={() => setIsModalOpen(true)}
-          className={`px-8 py-3 bg-gradient-to-r ${theme.gradient} text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-purple-100 flex items-center gap-2`}
-        >
-          <Plus className="w-4 h-4" /> New Closing
-        </motion.button>
+        {isAllBranch ? (
+          <div className="flex items-center gap-2 text-[10px] font-black text-amber-600 bg-amber-50/80 px-4 py-2.5 rounded-2xl border border-amber-100">
+            <Lock className="w-4 h-4 shrink-0" />
+            <span>{isBn ? 'ডেইলি ক্লোজিং করতে একটি নির্দিষ্ট ব্রাঞ্চ সিলেক্ট করুন' : 'Select a branch to perform daily closing'}</span>
+          </div>
+        ) : (
+          <motion.button 
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setIsModalOpen(true)}
+            className={`px-8 py-3 bg-gradient-to-r ${theme.gradient} text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-purple-100 flex items-center gap-2`}
+          >
+            <Plus className="w-4 h-4" /> {isBn ? 'নতুন ডেইলি ক্লোজিং' : 'New Closing'}
+          </motion.button>
+        )}
       </header>
+
+      {isAllBranch && (
+        <div className="flex items-start gap-4 p-6 bg-amber-50/50 border border-dashed border-amber-200/60 rounded-3xl text-amber-800">
+          <AlertCircle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <h4 className="text-sm font-black uppercase tracking-wider">
+              {isBn ? 'ডেইলি ক্লোজিং মোড রিড-অনলি (অল ব্রাঞ্চ ভিউ)' : 'All-Branch Daily Closing Read-Only'}
+            </h4>
+            <p className="text-xs text-amber-700/90 leading-relaxed font-medium">
+              {isBn 
+                ? 'হিসাবের স্বচ্ছতা নিশ্চিত করতে প্রতিটি শাখার ডেইলি ক্লোজিং ও ক্যাশ রিকনসিলিয়েশন আলাদাভাবে করতে হবে। অনুগ্রহ করে ওপরের ড্রপডাউন থেকে নির্দিষ্ট শাখা সিলেক্ট করুন।' 
+                : 'To maintain strict accounting segregation, cash drawers must be reconciled per specific branch. Please select a single branch from the header dropdown to create new closing records.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -17718,14 +21369,14 @@ function DailyClosingView({ sales, expenses, dailyClosings, duePayments, setting
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {dailyClosings.length === 0 ? (
+              {filteredClosings.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-8 py-16 text-center text-gray-400 font-bold uppercase tracking-widest text-xs italic">
                     No reconciliation history found
                   </td>
                 </tr>
               ) : (
-                dailyClosings.sort((a, b) => b.date.localeCompare(a.date)).map(closing => (
+                filteredClosings.sort((a, b) => b.date.localeCompare(a.date)).map(closing => (
                   <tr key={closing.id} className="hover:bg-purple-50/30 transition-all group">
                     <td className="px-8 py-5">
                       <div className="flex items-center gap-3">
@@ -17734,7 +21385,12 @@ function DailyClosingView({ sales, expenses, dailyClosings, duePayments, setting
                         </div>
                         <div>
                           <p className="text-sm font-black text-gray-900 uppercase tracking-tight">{format(new Date(closing.date), 'dd MMM yyyy')}</p>
-                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-lg text-[8px] font-black uppercase tracking-widest border border-emerald-100">Audit Status: CLOSED</span>
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-lg text-[8px] font-black uppercase tracking-widest border border-emerald-100">Audit Status: CLOSED</span>
+                            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-lg text-[8px] font-black uppercase tracking-widest border border-indigo-100">
+                              {branches?.find(b => b.id === closing.branchId)?.name || 'Central/Main'}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -17886,11 +21542,53 @@ function DailyClosingView({ sales, expenses, dailyClosings, duePayments, setting
                       <div className="space-y-2">
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Observational Notes</label>
                         <textarea 
-                          className="w-full px-6 py-5 bg-gray-50 border-none rounded-3xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none h-32 resize-none"
+                          className="w-full px-6 py-4 bg-gray-50 border-none rounded-3xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none h-24 resize-none"
                           placeholder="Note any discrepancies, missed entries, or staff remarks..."
                           value={notes}
                           onChange={(e) => setNotes(e.target.value)}
                         />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Custom Closing Time (ঐচ্ছিক ক্লোজিং সময়)</label>
+                        <input 
+                          type="datetime-local" 
+                          className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none font-mono text-gray-600"
+                          value={customClosingTime}
+                          onChange={async (e) => {
+                            setCustomClosingTime(e.target.value);
+                            if (e.target.value && settings.alarmType === 'google' && googleToken && onCreateRecurringEvent) {
+                              const d = new Date(e.target.value);
+                              if (!isNaN(d.getTime())) {
+                                const alarmTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                                setNotification({ message: 'Syncing Daily Closing Alarm with Google Calendar...', type: 'info' });
+                                const eventId = await onCreateRecurringEvent(`Daily Closing Reminder - ${settings.name || 'Intel Ledger'}`, alarmTime);
+                                if (eventId) {
+                                  setNotification({ message: `Successfully scheduled recurring Closing Reminder at ${alarmTime} on Google Calendar!`, type: 'success' });
+                                } else {
+                                  setNotification({ message: 'Google Calendar Sync failed. Make sure you are logged in.', type: 'error' });
+                                }
+                              }
+                            }
+                          }}
+                        />
+                        <div className="pt-1 px-1 flex items-center justify-between">
+                          {settings.alarmType === 'google' ? (
+                            googleToken ? (
+                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg flex items-center gap-1 border border-emerald-100">
+                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                                Google Calendar Sync Active
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg flex items-center gap-1 border border-amber-100">
+                                ⚠️ Pending Sync (Login to Google)
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg flex items-center gap-1 border border-indigo-100">
+                              🔊 Local Browser Alarm Mode Active
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -109,7 +109,7 @@ service cloud.firestore {
 
     // Generic Shop Data match block (expenses, investments, etc.)
     match /{collection}/{docId} {
-      allow read: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales']) && (
+      allow read: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets']) && (
         isMasterAdmin() || (
           isSignedIn() && (
             resource == null || (
@@ -120,7 +120,7 @@ service cloud.firestore {
         )
       );
       
-      allow create: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales']) && (
+      allow create: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets']) && (
         isMasterAdmin() || (
           isSignedIn() && 
           request.resource != null && 
@@ -129,7 +129,7 @@ service cloud.firestore {
         )
       );
 
-      allow update: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales']) && (
+      allow update: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets']) && (
         isMasterAdmin() || (
           isSignedIn() && 
           resource != null && 
@@ -140,14 +140,44 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales']) && (
+      allow delete: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets']) && (
         isMasterAdmin() || (
           isSignedIn() && 
           resource != null && 
           resource.data.shopId != null && 
           isOwnerOrStaff(resource.data.shopId) && 
-          collection in ['recycleBin', 'daily_closings', 'expenses', 'investments', 'staff_salaries', 'stockRecords', 'branches', 'employees', 'notes', 'customer_logs', 'due_payments', 'warranty_records', 'meet_sessions', 'ai_memories', 'ai_synonyms', 'ai_settings']
+          collection in ['recycleBin', 'daily_closings', 'expenses', 'investments', 'staff_salaries', 'stockRecords', 'branches', 'employees', 'notes', 'customer_logs', 'due_payments', 'warranty_records', 'meet_sessions', 'ai_memories', 'ai_synonyms', 'ai_settings', 'suppliers', 'draft_invoices']
         )
+      );
+    }
+
+    // Support Tickets Match Block
+    match /support_tickets/{docId} {
+      allow read: if isMasterAdmin() || (
+        isSignedIn() && 
+        resource != null && 
+        resource.data.shopId != null && 
+        isOwnerOrStaff(resource.data.shopId)
+      );
+      allow create: if isMasterAdmin() || (
+        isSignedIn() && 
+        request.resource != null && 
+        request.resource.data.shopId != null && 
+        isOwnerOrStaff(request.resource.data.shopId)
+      );
+      allow update: if isMasterAdmin() || (
+        isSignedIn() && 
+        resource != null && 
+        resource.data.shopId != null && 
+        isOwnerOrStaff(resource.data.shopId) &&
+        request.resource != null &&
+        request.resource.data.shopId == resource.data.shopId
+      );
+      allow delete: if isMasterAdmin() || (
+        isSignedIn() && 
+        resource != null && 
+        resource.data.shopId != null && 
+        isOwnerOrStaff(resource.data.shopId)
       );
     }
 

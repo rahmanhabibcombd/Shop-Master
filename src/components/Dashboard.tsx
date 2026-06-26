@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   LayoutDashboard, DollarSign, TrendingUp, AlertCircle, ShoppingCart, 
-  CheckCircle2, Smartphone, MonitorIcon, AlertTriangle, Package, Users, X, Info 
+  CheckCircle2, Smartphone, MonitorIcon, AlertTriangle, Package, Users, X, Info,
+  Pill, Coffee, Truck, Sparkles
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -142,10 +143,12 @@ export interface ShopSettings {
   systemLanguage?: 'en' | 'bn';
   currencySymbol?: string;
   shopName?: string;
+  businessType?: 'Retail' | 'Restaurant' | 'Electronics' | 'Pharmacy' | 'Dealer';
+  name?: string;
 }
 
 interface DashboardProps {
-  settings: ShopSettings;
+  settings: any;
   onDelete?: (closing: DailyClosing) => void;
   onViewProductHistory: (p: any) => void;
   isOnline: boolean;
@@ -154,6 +157,7 @@ interface DashboardProps {
   setPeriod: (p: 'day' | 'week' | 'month' | 'year') => void;
   viewMetric: 'revenue' | 'profit';
   setViewMetric: (v: 'revenue' | 'profit') => void;
+  onSaveSettings?: (s: any) => void;
 }
 
 export function PerformanceChart({ chartData, viewMetric, primaryColor }: { chartData: any[], viewMetric: 'revenue' | 'profit', primaryColor: string }) {
@@ -182,6 +186,74 @@ export function PerformanceChart({ chartData, viewMetric, primaryColor }: { char
   );
 }
 
+const BUSINESS_MODELS = [
+  {
+    id: 'Retail',
+    nameBn: 'মুদি ও খুচরা দোকান',
+    nameEn: 'General Retail Store',
+    descBn: 'সাধারণ খুচরা সেলস, বারকোড ইনভেন্টরি, কাস্টমার পিওএস বিলিং ও ক্যাশ ট্র্যাকিং।',
+    descEn: 'Retail stock tracking, custom barcodes, rapid POS billing and client receipts.',
+    icon: ShoppingCart,
+    color: 'from-indigo-500 to-indigo-600',
+    borderColor: 'border-indigo-150',
+    textColor: 'text-indigo-600',
+    bgColor: 'bg-indigo-50',
+    accentColor: 'indigo'
+  },
+  {
+    id: 'Restaurant',
+    nameBn: 'রেস্টুরেন্ট ও ক্যাফে',
+    nameEn: 'Restaurant & Café',
+    descBn: 'কিচেন ডিসপ্লে সিস্টেম (KDS), কটেজ কেওটি কোড, ওয়েটার বিলিং এবং টেবিল ট্র্যাকিং।',
+    descEn: 'Kitchen ticket monitors, table order mappings, waiter service logs, and fast KOTs.',
+    icon: Coffee,
+    color: 'from-amber-500 to-amber-600',
+    borderColor: 'border-amber-150',
+    textColor: 'text-amber-600',
+    bgColor: 'bg-amber-50',
+    accentColor: 'amber'
+  },
+  {
+    id: 'Electronics',
+    nameBn: 'মোবাইল ও ইলেকট্রনিক্স',
+    nameEn: 'Mobile & Electronics',
+    descBn: 'আইএমইআই (IMEI) ও সিরিয়াল ট্র্যাকিং, প্রোডাক্ট স্পেসিফিকেশন এবং ওয়ারেন্টি লাইফসাইকেল।',
+    descEn: 'IMEI validation, unique physical serialization, hardware spec lists, and warranty lookup.',
+    icon: Smartphone,
+    color: 'from-blue-500 to-blue-600',
+    borderColor: 'border-blue-150',
+    textColor: 'text-blue-600',
+    bgColor: 'bg-blue-50',
+    accentColor: 'blue'
+  },
+  {
+    id: 'Pharmacy',
+    nameBn: 'ঔষধ ও ফার্মেসি',
+    nameEn: 'Pharmacy & Medicine',
+    descBn: 'জেনেরিক নাম সার্চ, কেমিক্যাল ফর্মুলা ইনডেক্স, এক্সপায়ারি সতর্কতা বার্তা ও ব্যাচ ট্র্যাকার।',
+    descEn: 'Generic salt grouping, pharmacy batch matching, shelf tags, and medicine expiry warnings.',
+    icon: Pill,
+    color: 'from-emerald-500 to-emerald-600',
+    borderColor: 'border-emerald-150',
+    textColor: 'text-emerald-600',
+    bgColor: 'bg-emerald-50',
+    accentColor: 'emerald'
+  },
+  {
+    id: 'Dealer',
+    nameBn: 'ডিলারশিপ ও পাইকারি',
+    nameEn: 'Dealership & Wholesale',
+    descBn: 'বাল্ক এবং চালানি ট্র্যাকিং, অঞ্চলভিত্তিক ডিস্ট্রিবিউটর, এজেন্ট লেজার বুক ও হোলসেল রেট।',
+    descEn: 'Bulk delivery Challan Sheets, territory mapping, dispatch agents, and wholesale rates.',
+    icon: Truck,
+    color: 'from-purple-500 to-purple-600',
+    borderColor: 'border-purple-150',
+    textColor: 'text-purple-600',
+    bgColor: 'bg-purple-50',
+    accentColor: 'purple'
+  }
+];
+
 export default function Dashboard({ 
   settings, 
   onViewProductHistory, 
@@ -190,8 +262,34 @@ export default function Dashboard({
   period,
   setPeriod,
   viewMetric,
-  setViewMetric 
+  setViewMetric,
+  onSaveSettings
 }: DashboardProps) {
+
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [switchSuccess, setSwitchSuccess] = useState<string | null>(null);
+
+  const handleModelSwitch = async (modelId: any) => {
+    if (settings?.businessType === modelId) return;
+    setSwitchingTo(modelId);
+    setSwitchSuccess(null);
+    try {
+      if (onSaveSettings) {
+        await onSaveSettings({
+          ...settings,
+          businessType: modelId
+        });
+        setSwitchSuccess(modelId);
+      }
+    } catch (err) {
+      console.error("Error switching workspace model:", err);
+    } finally {
+      setTimeout(() => {
+        setSwitchingTo(null);
+        setTimeout(() => setSwitchSuccess(null), 4000);
+      }, 800);
+    }
+  };
 
   const systemLang = settings?.systemLanguage || 'en';
   const lt = LOCAL_TRANSLATIONS[systemLang === 'bn' ? 'bn' : 'en'];
@@ -575,6 +673,107 @@ export default function Dashboard({
           </p>
         </div>
       </div>
+
+      {/* Dynamic Master Workspace Selector */}
+      <motion.div 
+        variants={itemVariants}
+        className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-8 rounded-[2.5rem] shadow-[0_4px_25px_-5px_rgba(0,0,0,0.03)]"
+      >
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-xl font-black text-slate-900 dark:text-slate-100 uppercase tracking-tight flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-indigo-500 animate-pulse" />
+              {systemLang === 'bn' ? 'অ্যাক্টিভ বিজনেস ওয়ার্কস্পেস এবং সিস্টেম মডেল' : 'Active Business Workstation & System Model'}
+            </h3>
+            <p className="text-xs text-slate-400 mt-1 font-semibold">
+              {systemLang === 'bn' 
+                ? 'স্বতন্ত্র ৫টি বিজনেস ক্যাটাগরির যেকোনো একটি সিলেক্ট করুন। মুহূর্তেই পিওএস, ইনভেন্টরি, থিম এবং ড্যাশবোর্ড সেই মডেলে পরিবর্তিত হয়ে যাবে।' 
+                : 'Select any of the 5 distinct business models to instantly customize the active interfaces, POS views, theme accents, and parameters.'}
+            </p>
+          </div>
+          {switchSuccess && (
+            <div className="bg-emerald-50 text-emerald-800 text-xs font-black py-2 px-4 rounded-xl border border-emerald-100 shadow-sm animate-bounce flex items-center gap-1.5">
+              <span>●</span>
+              {systemLang === 'bn' ? 'ওয়ার্কস্পেস সফলভাবে পরিবর্তিত হয়েছে!' : 'Workspace synchronized successfully!'}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
+          {BUSINESS_MODELS.map((b) => {
+            const isActive = settings?.businessType === b.id;
+            const isSwitching = switchingTo === b.id;
+            const IconComponent = b.icon;
+            
+            const activeBorderColor = isActive ? (
+              b.id === 'Retail' ? 'bg-white dark:bg-slate-950 border-indigo-500 ring-2 ring-indigo-500/20 shadow-[0_15px_30px_-10px_rgba(0,0,0,0.05)] transform translate-y-[-2px]' :
+              b.id === 'Restaurant' ? 'bg-white dark:bg-slate-950 border-amber-500 ring-2 ring-amber-500/20 shadow-[0_15px_30px_-10px_rgba(0,0,0,0.05)] transform translate-y-[-2px]' :
+              b.id === 'Electronics' ? 'bg-white dark:bg-slate-950 border-blue-500 ring-2 ring-blue-500/20 shadow-[0_15px_30px_-10px_rgba(0,0,0,0.05)] transform translate-y-[-2px]' :
+              b.id === 'Pharmacy' ? 'bg-white dark:bg-slate-950 border-emerald-500 ring-2 ring-emerald-500/20 shadow-[0_15px_30px_-10px_rgba(0,0,0,0.05)] transform translate-y-[-2px]' :
+              'bg-white dark:bg-slate-950 border-purple-500 ring-2 ring-purple-500/20 shadow-[0_15px_30px_-10px_rgba(0,0,0,0.05)] transform translate-y-[-2px]'
+            ) : 'bg-slate-50/50 dark:bg-slate-900/40 border-slate-100/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-white dark:hover:bg-slate-950 hover:shadow-md hover:translate-y-[-1px]';
+
+            const activeBadgeStyle = isActive ? (
+              b.id === 'Retail' ? 'bg-indigo-100 dark:bg-slate-800 text-indigo-700 dark:text-white border-indigo-200' :
+              b.id === 'Restaurant' ? 'bg-amber-100 dark:bg-slate-800 text-amber-700 dark:text-white border-amber-200' :
+              b.id === 'Electronics' ? 'bg-blue-100 dark:bg-slate-800 text-blue-700 dark:text-white border-blue-200' :
+              b.id === 'Pharmacy' ? 'bg-emerald-100 dark:bg-slate-800 text-emerald-700 dark:text-white border-emerald-200' :
+              'bg-purple-100 dark:bg-slate-800 text-purple-700 dark:text-white border-purple-200'
+            ) : '';
+
+            return (
+              <button
+                key={b.id}
+                onClick={() => handleModelSwitch(b.id)}
+                disabled={isSwitching}
+                className={`relative flex flex-col items-start text-left p-5 rounded-2xl border-2 transition-all duration-300 outline-none select-none h-full ${activeBorderColor}`}
+              >
+                {/* Visual Accent Border */}
+                {isActive && (
+                  <span className={`absolute top-0 left-0 w-full h-1.5 rounded-t-lg bg-gradient-to-r ${b.color}`}></span>
+                )}
+
+                {/* Card Icon Header */}
+                <div className="flex items-center justify-between w-full mb-3 mt-1">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm transition-colors ${
+                    isActive 
+                      ? `bg-gradient-to-br ${b.color} text-white` 
+                      : `${b.bgColor} ${b.textColor} dark:bg-slate-800`
+                  }`}>
+                    {isSwitching ? (
+                      <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                    ) : (
+                      <IconComponent className="w-5 h-5" />
+                    )}
+                  </div>
+                  
+                  {isActive && (
+                    <span className={`text-[9.5px] font-black uppercase tracking-wider px-2 py-0.5 rounded border ${activeBadgeStyle}`}>
+                      {systemLang === 'bn' ? 'সচল (Active)' : 'Active'}
+                    </span>
+                  )}
+                </div>
+
+                {/* Model Title & Description */}
+                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 transition-colors uppercase tracking-tight">
+                  {systemLang === 'bn' ? b.nameBn : b.nameEn}
+                </h4>
+                <p className="text-[11px] text-slate-400 dark:text-slate-400 font-medium leading-relaxed mt-1.5 flex-grow">
+                  {systemLang === 'bn' ? b.descBn : b.descEn}
+                </p>
+
+                {/* Workspace Indicator Badge */}
+                <div className="w-full border-t border-slate-100/60 dark:border-slate-800/60 mt-4 pt-3 flex items-center justify-between text-[10px] text-slate-300 dark:text-slate-500 font-bold uppercase tracking-wider">
+                  <span>{systemLang === 'bn' ? 'মডেল ধরন' : 'SYSTEM TYPE'}</span>
+                  <span className={isActive ? `${b.textColor} font-black` : ""}>
+                    {b.id}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </motion.div>
 
       {/* Expiry alerts banner */}
       {expiringProducts.length > 0 && (

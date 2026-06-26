@@ -1221,8 +1221,44 @@ export const PageManagement: React.FC<PageManagementProps> = ({
                             <td className="p-4">
                               <div className="flex items-center justify-center gap-2">
                                 <button
-                                  onClick={() => {
-                                    window.open(`https://wa.me/${query.phone.replace(/[^0-9]/g, '')}?text=Hi ${query.name}, we received your query: "${query.subject}"...`);
+                                  onClick={async () => {
+                                    const createdDate = (shopSettings as any)?.createdAt ? new Date((shopSettings as any).createdAt) : new Date();
+                                    const trialEnd = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000);
+                                    const isPremium = (shopSettings as any)?.plan && (shopSettings as any).plan !== 'free';
+                                    if (!isPremium && trialEnd.getTime() < new Date().getTime()) {
+                                      alert("আপনার ফ্রি ট্রায়াল (৯০ দিন) শেষ হয়েছে। WhatsApp অটো মেসেজ ফিচার ব্যবহার করতে আপনার প্যাকেজ আপগ্রেড করুন।");
+                                      return;
+                                    }
+
+                                    const payload = {
+                                      shopId: (shopSettings as any)?.id || 'pos-merchant',
+                                      sale: {
+                                        id: 'query-' + query.id,
+                                        customerPhone: query.phone.replace(/[^0-9]/g, ''),
+                                        message: `Hi ${query.name}, we received your query: "${query.subject}"\nOur team is reviewing it.`
+                                      },
+                                      gatewayConfig: {
+                                        default_route: 'whatsapp',
+                                        zender_api_key: (shopSettings as any)?.waLinkSecret || (shopSettings as any)?.zender_api_key || (shopSettings as any)?.waToken || '4fe17fcfe73d5035f55b9144fa10e07443659005',
+                                        zender_whatsapp_device_id: (shopSettings as any)?.zender_whatsapp_device_id || (shopSettings as any)?.zender_device_id || '',
+                                        zender_endpoint_url: 'https://app.sellerscampus.com/api/v1'
+                                      }
+                                    };
+                                    try {
+                                      alert("মেসেজ পাঠানো হচ্ছে...");
+                                      const response = await fetch('/api/gateways/dispatch', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify(payload)
+                                      });
+                                      if(response.ok) {
+                                        const dt = await response.json();
+                                        if(dt.success) alert('বার্তা পাঠানো হয়েছে!');
+                                        else alert(dt.error || 'Failed');
+                                      }
+                                    } catch(e) {
+                                      alert('বার্তা পাঠানো সম্ভব হয়নি।');
+                                    }
                                   }}
                                   className="px-2 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
                                   title="WhatsApp Reply"

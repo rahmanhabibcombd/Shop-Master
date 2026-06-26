@@ -21,9 +21,10 @@ interface SellerOrdersViewProps {
   products?: any[];
   lang: 'en' | 'bn' | 'ar';
   onLoadToPOS: (order: any) => void;
+  onPrintInvoice?: (order: any) => void;
 }
 
-export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS }: SellerOrdersViewProps) {
+export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS, onPrintInvoice }: SellerOrdersViewProps) {
   const isBn = lang === 'bn';
   const [editingOrder, setEditingOrder] = useState<any | null>(null);
   const [selectedProductToAdd, setSelectedProductToAdd] = useState<string>('');
@@ -121,8 +122,20 @@ export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS }: S
     }
   };
 
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+
   const pendingOrders = orders.filter(o => o.status === 'pending');
   const pastOrders = orders.filter(o => o.status !== 'pending');
+
+  const filteredPendingOrders = pendingOrders.filter(order => {
+    if (statusFilter === 'all') return true;
+    return order.status === statusFilter;
+  });
+
+  const filteredPastOrders = pastOrders.filter(order => {
+    if (statusFilter === 'all') return true;
+    return order.status === statusFilter;
+  });
 
   return (
     <div className="space-y-8 font-sans">
@@ -138,9 +151,25 @@ export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS }: S
           </p>
         </div>
 
-        {/* Counter metrics badge */}
-        <div className="flex items-center gap-3">
-          <div className="bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2.5 rounded-2xl flex items-center gap-2 text-sm font-black shadow-sm">
+        {/* Filter and Counter metrics badges */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Status Filter Dropdown */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-gray-500">{isBn ? "ফিল্টার:" : "Filter:"}</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-3 py-2 bg-white border border-gray-200 text-xs font-bold rounded-xl outline-none focus:border-indigo-500 text-gray-700 shadow-sm min-w-[130px]"
+            >
+              <option value="all">{isBn ? "সব অর্ডার" : "All Orders"}</option>
+              <option value="pending">{isBn ? "পেন্ডিং (Pending)" : "Pending"}</option>
+              <option value="approved">{isBn ? "অনুমোদিত (Approved)" : "Approved"}</option>
+              <option value="shipped">{isBn ? "পাঠানো হয়েছে (Shipped)" : "Shipped"}</option>
+              <option value="cancelled">{isBn ? "বাতিল (Cancelled)" : "Cancelled"}</option>
+            </select>
+          </div>
+
+          <div className="bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2.5 rounded-2xl flex items-center gap-2 text-sm font-black shadow-sm justify-center">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
             <span>{pendingOrders.length} {isBn ? "টি পেন্ডিং অর্ডার" : "Pending Order Requests"}</span>
           </div>
@@ -158,20 +187,34 @@ export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS }: S
               <span>{isBn ? "পেন্ডিং রিকোয়েস্ট সমূহ" : "Pending Incoming Orders"}</span>
             </h2>
 
-            {pendingOrders.length === 0 ? (
+            {filteredPendingOrders.length === 0 ? (
               <div className="py-16 text-center text-gray-400 font-bold text-sm bg-gray-50/50 rounded-2xl border border-dashed border-gray-100 flex flex-col items-center justify-center gap-3">
                 <ShoppingBag className="w-10 h-10 text-gray-200" />
-                <span>{isBn ? "কোনো পেন্ডিং অর্ডার রিকোয়েস্ট নেই।" : "No pending order requests found."}</span>
+                <span>{isBn ? "কোনো ম্যাচিং অর্ডার রিকোয়েস্ট নেই।" : "No matching order requests found."}</span>
               </div>
             ) : (
               <div className="divide-y divide-gray-100">
-                {pendingOrders.map(order => (
+                {filteredPendingOrders.map(order => (
                   <div key={order.id} className="py-5 flex flex-col md:flex-row md:items-start justify-between gap-6">
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
                           #{order.orderNumber}
                         </span>
+
+                        {/* Color-coded Status Badge */}
+                        <span className={`text-[10px] h-6 inline-flex items-center px-2 py-0.5 rounded-full font-bold uppercase ${
+                          order.status === 'pending' ? 'bg-amber-100 text-amber-800' :
+                          order.status === 'approved' || order.status === 'confirmed' ? 'bg-emerald-100 text-emerald-800' :
+                          order.status === 'shipped' ? 'bg-sky-100 text-sky-800' :
+                          'bg-rose-100 text-rose-800'
+                        }`}>
+                          {order.status === 'pending' ? (isBn ? 'পেন্ডিং' : 'Pending') :
+                           order.status === 'approved' || order.status === 'confirmed' ? (isBn ? 'অনুমোদিত' : 'Approved') :
+                           order.status === 'shipped' ? (isBn ? 'পাঠানো হয়েছে' : 'Shipped') :
+                           (isBn ? 'বাতিল' : 'Cancelled')}
+                        </span>
+
                         <span className="text-xs font-bold text-gray-400 flex items-center gap-1">
                           <Clock className="w-3.5 h-3.5" />
                           <span>{new Date(order.timestamp).toLocaleString()}</span>
@@ -260,6 +303,17 @@ export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS }: S
                         >
                           ✏️ {isBn ? "সংশোধন করুন" : "Modify Basket"}
                         </button>
+
+                        {onPrintInvoice && (
+                          <button
+                            onClick={() => onPrintInvoice(order)}
+                            className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-100 font-bold text-xs rounded-xl transition-all flex items-center gap-1"
+                            title={isBn ? "চালান প্রিন্ট করুন" : "Print Invoice"}
+                          >
+                            <Receipt className="w-3.5 h-3.5" />
+                            <span>{isBn ? "প্রিন্ট" : "Print"}</span>
+                          </button>
+                        )}
 
                         <button
                           onClick={() => handleUpdateStatus(order.id, 'cancelled')}
@@ -442,11 +496,11 @@ export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS }: S
             ) : (
               <div className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
                 <h3 className="text-sm font-black text-gray-900 mb-4 uppercase tracking-widest">{isBn ? "প্রসেসড বা সম্পন্ন অর্ডার" : "Completed / Past Orders"}</h3>
-                {pastOrders.length === 0 ? (
-                  <p className="text-xs text-gray-400 font-semibold py-8 text-center">{isBn ? "পূর্বে সম্পন্ন কোনো অর্ডার রেকর্ড নেই।" : "No recorded history for past processed orders."}</p>
+                {filteredPastOrders.length === 0 ? (
+                  <p className="text-xs text-gray-400 font-semibold py-8 text-center">{isBn ? "ম্যাচিং কোনো সম্পন্ন অর্ডার রেকর্ড নেই।" : "No matching processed orders found."}</p>
                 ) : (
-                  <div className="space-y-3.5 divide-y divide-gray-55 divide-opacity-40">
-                    {pastOrders.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 10).map((pastOrder, pi) => (
+                  <div className="space-y-3.5 divide-y divide-gray-100">
+                    {filteredPastOrders.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 10).map((pastOrder, pi) => (
                       <div key={pastOrder.id} className="pt-3 flex items-center justify-between text-xs">
                         <div>
                           <p className="font-black text-gray-800">#{pastOrder.orderNumber}</p>
@@ -463,9 +517,20 @@ export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS }: S
                             </div>
                           )}
                         </div>
-                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${pastOrder.status === 'approved' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                          {pastOrder.status === 'approved' ? (isBn ? 'সম্পন্ন' : 'Completed') : (isBn ? 'বাতিল' : 'Cancelled')}
-                        </span>
+                        <div className="flex items-center gap-2 font-sans">
+                          {onPrintInvoice && (
+                            <button
+                              onClick={() => onPrintInvoice(pastOrder)}
+                              className="p-1.5 bg-gray-55 hover:bg-gray-100 text-gray-650 rounded-lg border border-gray-200"
+                              title={isBn ? "প্রিন্ট চালান" : "Print Invoice"}
+                            >
+                              <Receipt className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${pastOrder.status === 'approved' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                            {pastOrder.status === 'approved' ? (isBn ? 'সম্পন্ন' : 'Completed') : (isBn ? 'বাতিল' : 'Cancelled')}
+                          </span>
+                        </div>
                       </div>
                     ))}
                   </div>

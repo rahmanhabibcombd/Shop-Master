@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, History, Users, ShoppingBag, Globe, Truck, ShieldCheck, Zap, KeySquare, StickyNote, Trash2 } from 'lucide-react';
+import { LayoutDashboard, History, Users, ShoppingBag, Globe, Truck, ShieldCheck, Zap, StickyNote, Trash2, Building2 } from 'lucide-react';
 
 interface SalesCrmDashboardProps {
   sales: any[];
@@ -62,12 +62,12 @@ export default function SalesCrmDashboard({ sales, customers, orders, onNavigate
             {[
               { id: 'sales', label: 'Sales Records', desc: 'Audit invoices history', icon: History, color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/20' },
               { id: 'customers', label: 'Customers directory', desc: 'Customer journals & dues', icon: Users, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/20' },
+              { id: 'branch_crm', label: 'Branch Sales & CRM', desc: 'Manage multi-branch sales pipelines', icon: Building2, color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/20' },
               { id: 'customer_orders', label: 'Customer Orders', desc: 'Track pending shop orders', icon: ShoppingBag, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/20' },
               { id: 'online_shop', label: 'Online Shop info', desc: 'Custom branding settings', icon: Globe, color: 'text-sky-600 bg-sky-55 dark:bg-sky-950/20' },
               { id: 'courier', label: 'Courier Services', desc: 'Integrate courier APIs', icon: Truck, color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/20' },
               { id: 'warranty', label: 'Warranty tracker', desc: 'Customer hardware claims', icon: ShieldCheck, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/20' },
               { id: 'service_offer', label: 'Services Catalogue', desc: 'Review services packages', icon: Zap, color: 'text-amber-500 bg-amber-50 dark:bg-amber-950/20' },
-              { id: 'activation_code', label: 'Activation Codes', desc: 'Track product serial keys', icon: KeySquare, color: 'text-indigo-650' },
               { id: 'note', label: 'Sticky Notes', desc: 'Pop-up sticky notice boards', icon: StickyNote, color: 'text-yellow-600 bg-yellow-50 dark:bg-yellow-950/20' }
             ].map(tab => (
               <div
