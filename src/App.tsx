@@ -4674,7 +4674,21 @@ export default function App() {
   });
   const [loading, setLoading] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return localStorage.getItem('shopmaster_active_tab') || 'dashboard';
+    } catch (e) {
+      return 'dashboard';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (activeTab) {
+        localStorage.setItem('shopmaster_active_tab', activeTab);
+      }
+    } catch (e) {}
+  }, [activeTab]);
   const [currentStream, setCurrentStream] = useState<any>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isTrialExpiredModalOpen, setIsTrialExpiredModalOpen] = useState(false);
@@ -6883,6 +6897,7 @@ export default function App() {
     setUser(null);
     resetStateToDefaults();
     localStorage.removeItem('shopmaster_user');
+    localStorage.removeItem('shopmaster_active_tab');
   };
 
   const handleGoogleLogin = async () => {
