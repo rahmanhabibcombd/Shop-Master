@@ -5243,7 +5243,7 @@ export default function App() {
 
   // Real-time Community Notifications Sync
   useEffect(() => {
-    if (!user || !user.uid) return;
+    if (!authChecked || !user || !user.uid) return;
 
     const timeAgo = (dateInput: Date | number) => {
       const seconds = Math.floor((new Date().getTime() - new Date(dateInput).getTime()) / 1000);
@@ -5295,7 +5295,7 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, authChecked]);
 
   // Auth State Sync
   useEffect(() => {
@@ -5783,6 +5783,14 @@ export default function App() {
           }
     }
   }, [user, shopSettings]);
+
+  useEffect(() => {
+    const handleNavigate = () => {
+      setActiveTab('membership');
+    };
+    window.addEventListener('navigateToMembership', handleNavigate);
+    return () => window.removeEventListener('navigateToMembership', handleNavigate);
+  }, []);
 
   function resetStateToDefaults() {
     setIsOnboarded(null);
@@ -8608,7 +8616,7 @@ export default function App() {
                     { id: 'meet_scheduler', icon: Calendar, label: 'Meet Scheduler', roles: ['admin'] },
                     { id: 'release_logs', icon: Activity, label: 'Release Logs', roles: ['admin'] },
                     { id: 'settings', icon: Settings, label: st('settings'), roles: ['admin'] },
-                    { id: 'messaging_gateway', icon: MessageSquare, label: 'Messaging Gateway', roles: ['admin', 'master_admin'] },
+                    { id: 'messaging_gateway', icon: MessageSquare, label: 'Messaging Gateway', roles: ['admin', 'master_admin', 'dealer', 'salesman', 'staff', 'dsr', 'sales_partner', 'manager', 'assistant_manager', 'employee'] },
                   ]
                 }
               ]},
@@ -10096,7 +10104,10 @@ export default function App() {
             )}
 
 
-            {activeTab === 'messaging_gateway' && (user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com' || user?.role === 'admin' || user?.role === 'master_admin') && (
+            {activeTab === 'messaging_gateway' && (
+              user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com' || 
+              ['admin', 'master_admin', 'dealer', 'salesman', 'staff', 'dsr', 'sales_partner', 'manager', 'assistant_manager', 'employee'].includes(user?.role || '')
+            ) && (
               <MessagingGateway 
                 shopSettings={shopSettings}
                 onSaveSettings={handleSaveSettings}
@@ -10557,12 +10568,23 @@ export default function App() {
                       ? "আপনার অ্যাকাউণ্টের ৯০ দিনের ফ্রি ট্রায়াল শেষ হয়েছে। অটোমেটিক মেসেজ পাঠাতে প্ল্যান আপগ্রেড করুন বা সাপোর্ট টিমের সাথে যোগাযোগ করুন।" 
                       : "Your account's 90-day free trial has expired. To continue using automated WhatsApp messaging, please upgrade your plan."}
                   </p>
-                  <button
-                    onClick={() => setIsTrialExpiredModalOpen(false)}
-                    className="mt-8 px-10 py-4 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-[0_10px_30px_rgba(244,63,94,0.3)] hover:shadow-[0_12px_40px_rgba(244,63,94,0.4)] transition-all active:scale-[0.98]"
-                  >
-                    {dynamicSettings.systemLanguage === 'bn' ? "বুঝতে পেরেছি" : "Got it"}
-                  </button>
+                  <div className="mt-8 flex gap-3 w-full px-6">
+                    <button
+                      onClick={() => setIsTrialExpiredModalOpen(false)}
+                      className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition-all active:scale-[0.98]"
+                    >
+                      {dynamicSettings.systemLanguage === 'bn' ? "বন্ধ করুন" : "Close"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsTrialExpiredModalOpen(false);
+                        setActiveTab('membership');
+                      }}
+                      className="flex-1 py-3 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-bold text-xs rounded-xl shadow-lg transition-all active:scale-[0.98]"
+                    >
+                      {dynamicSettings.systemLanguage === 'bn' ? "আপগ্রেড করুন" : "Upgrade Plan"}
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             </div>

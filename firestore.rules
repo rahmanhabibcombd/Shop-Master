@@ -112,7 +112,7 @@ service cloud.firestore {
 
     // Generic Shop Data match block (expenses, investments, etc.)
     match /{collection}/{docId} {
-      allow read: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets', 'community_posts', 'promo_keys']) && (
+      allow read: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets', 'community_posts', 'promo_keys', 'community_notifications', 'community_reports', 'community_banned_users']) && (
         isMasterAdmin() || (
           isSignedIn() && (
             resource == null || (
@@ -123,7 +123,7 @@ service cloud.firestore {
         )
       );
       
-      allow create: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets', 'community_posts', 'promo_keys']) && (
+      allow create: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets', 'community_posts', 'promo_keys', 'community_notifications', 'community_reports', 'community_banned_users']) && (
         isMasterAdmin() || (
           isSignedIn() && 
           request.resource != null && 
@@ -132,7 +132,7 @@ service cloud.firestore {
         )
       );
 
-      allow update: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets', 'community_posts', 'promo_keys']) && (
+      allow update: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets', 'community_posts', 'promo_keys', 'community_notifications', 'community_reports', 'community_banned_users']) && (
         isMasterAdmin() || (
           isSignedIn() && 
           resource != null && 
@@ -143,7 +143,7 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets', 'community_posts', 'promo_keys']) && (
+      allow delete: if !(collection in ['categories', 'products', 'customers', 'customer_orders', 'users', 'settings', 'shops', 'sales', 'support_tickets', 'community_posts', 'promo_keys', 'community_notifications', 'community_reports', 'community_banned_users']) && (
         isMasterAdmin() || (
           isSignedIn() && 
           resource != null && 

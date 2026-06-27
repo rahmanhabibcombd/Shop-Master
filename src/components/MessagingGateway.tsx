@@ -40,6 +40,28 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
 }) => {
   const settings = shopSettings || {};
   const isMasterAdmin = currentUserEmail?.toLowerCase().trim() === 'stratproamz@gmail.com';
+  
+  const isTrialExpired = (() => {
+    if (isMasterAdmin) return false;
+    if (settings.premiumActive) return false;
+    if (settings.plan && settings.plan !== 'free') return false;
+    if (settings.packageType === 'lifetime' || settings.lifetime) return false;
+    
+    if (settings.premiumUntil) {
+      const untilDate = new Date(settings.premiumUntil);
+      if (!isNaN(untilDate.getTime()) && untilDate.getTime() > new Date().getTime()) return false;
+    }
+    
+    // Check 90 days trial limit
+    const createdDate = settings.createdAt ? new Date(settings.createdAt) : new Date();
+    if (!isNaN(createdDate.getTime())) {
+      const trialEnd = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000);
+      if (trialEnd.getTime() < new Date().getTime()) return true;
+    }
+    
+    return false;
+  })();
+
   const [activeSubTab, setActiveSubTab] = useState<'config' | 'templates' | 'broadcast' | 'logs'>('config');
 
   // WhatsApp Configuration State
@@ -248,6 +270,12 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
   };
 
   const handleResync = async () => {
+    if (isTrialExpired) {
+      setOtpError(settings.systemLanguage === 'bn' 
+        ? 'দয়া করে আগে আপনার সাবস্ক্রিপশন আপডেট করুন।' 
+        : 'Please update your subscription package first to unlock WhatsApp connectivity.');
+      return;
+    }
     try {
       setOtpError(null);
       const queryParams = new URLSearchParams({
@@ -279,6 +307,12 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
   };
 
   const handleGenerateOtp = async () => {
+    if (isTrialExpired) {
+      setOtpError(settings.systemLanguage === 'bn' 
+        ? 'দয়া করে আগে আপনার সাবস্ক্রিপশন আপডেট করুন।' 
+        : 'Please update your subscription package first to unlock WhatsApp connectivity.');
+      return;
+    }
     if (!otpPhone) {
       setOtpError('অনুগ্রহ করে একটি মোবাইল নম্বর প্রদান করুন (যেমন: +88017XXXXXXXX)');
       return;
@@ -335,6 +369,12 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
   };
 
   const handleConnectWhatsApp = async () => {
+    if (isTrialExpired) {
+      setOtpError(settings.systemLanguage === 'bn' 
+        ? 'দয়া করে আগে আপনার সাবস্ক্রিপশন আপডেট করুন।' 
+        : 'Please update your subscription package first to unlock WhatsApp connectivity.');
+      return;
+    }
     setIsConnectingWa(true);
     try {
       if (waType === 'walink') {
@@ -748,6 +788,33 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
 
       {/* Primary Container Layout */}
       <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800/80 rounded-[2.5rem] shadow-sm overflow-hidden min-h-[550px] flex flex-col">
+        {isTrialExpired && (
+          <div className="mx-6 mt-6 p-5 bg-amber-50 dark:bg-amber-950/20 border-2 border-amber-200/60 dark:border-amber-900/40 rounded-2xl flex items-start gap-4 shadow-sm animate-fade-in">
+            <div className="p-2 bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-xl">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div className="flex-1 space-y-1">
+              <h4 className="text-sm font-bold text-amber-800 dark:text-amber-300">
+                {settings.systemLanguage === 'bn' ? 'হোয়াটসঅ্যাপ মেসেজিং লক করা আছে' : 'WhatsApp Messaging Service Locked'}
+              </h4>
+              <p className="text-xs text-amber-700/80 dark:text-amber-400/80 font-medium leading-relaxed">
+                {settings.systemLanguage === 'bn' 
+                  ? 'আপনার ৯০ দিনের ফ্রি ট্রায়াল মেয়াদ শেষ হয়েছে। স্বয়ংক্রিয় হোয়াটসঅ্যাপ সার্ভিস ব্যবহার করতে অনুগ্রহ করে আপনার সাবস্ক্রিপশন প্ল্যান আপডেট করুন।'
+                  : 'Your 90-day free trial period has expired. To continue using automated WhatsApp messaging services, please upgrade your subscription plan.'}
+              </p>
+              <div className="pt-2">
+                <button 
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('navigateToMembership'));
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-amber-200 dark:shadow-none cursor-pointer"
+                >
+                  {settings.systemLanguage === 'bn' ? 'সাবস্ক্রিপশন আপডেট করুন' : 'Upgrade Subscription Now'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Navigation Tab Header bar */}
         <div className="border-b border-gray-100 dark:border-slate-800/80 px-6 py-4 flex flex-wrap items-center justify-between gap-4 bg-gray-50/50 dark:bg-slate-950/20">
           <div className="flex items-center gap-3">
