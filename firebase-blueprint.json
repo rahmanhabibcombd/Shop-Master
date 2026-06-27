@@ -354,9 +354,25 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["shopId", "title", "type", "description", "createdAt"]
+    },
+    "WorkspaceSyncStatus": {
+      "title": "WorkspaceSyncStatus",
+      "description": "Google Workspace sync status for a shop",
+      "type": "object",
+      "properties": {
+        "lastSync": { "type": "string", "format": "date-time" },
+        "gmail": { "type": "object" },
+        "calendar": { "type": "object" },
+        "tasks": { "type": "object" }
+      },
+      "required": ["lastSync"]
     }
   },
   "firestore": {
+    "/shops/{shopId}/workspace/{docId}": {
+      "schema": "WorkspaceSyncStatus",
+      "description": "Collection of workspace sync statuses for shop"
+    },
     "/support_tickets/{ticketId}": {
       "schema": "SupportTicket",
       "description": "Collection of customer support tickets, bug reports, and feedback"

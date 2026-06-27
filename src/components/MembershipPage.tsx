@@ -20,11 +20,26 @@ interface PremiumPackage {
   lifetime?: boolean;
 }
 
+const safeDate = (timestamp: any): Date => {
+  if (!timestamp) return new Date();
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') return timestamp.toDate();
+  if (timestamp instanceof Date) return timestamp;
+  if (typeof timestamp === 'number') return new Date(timestamp);
+  if (timestamp.seconds !== undefined) {
+    return new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+  }
+  return new Date(timestamp);
+};
+
 export default function MembershipPage({ shopSettings, user, onRefreshSettings, setNotification }: MembershipPageProps) {
   const [activeTab, setActiveTab] = useState<'packages' | 'status'>('packages');
   const [couponCode, setCouponCode] = useState('');
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
-  const [selectedDuration, setSelectedDuration] = useState<'6m' | '1y' | '2y' | '5y' | 'lifetime'>('1y');
+  const [selectedDuration, setSelectedDuration] = useState<'6m' | '1y' | '2y' | '5y' | 'lifetime'>(() => {
+    if (shopSettings?.packageType) return shopSettings.packageType;
+    if (shopSettings?.lifetime) return 'lifetime';
+    return '1y';
+  });
   const [activating, setActivating] = useState(false);
 
   const packs: Record<string, PremiumPackage> = {
@@ -61,6 +76,8 @@ export default function MembershipPage({ shopSettings, user, onRefreshSettings, 
         premiumUntil: formulaDate.toISOString(),
         packageType: pkgKey,
         packageActivatedAt: serverTimestamp(),
+        plan: chosen.name,
+        lifetime: chosen.lifetime || false
       });
 
       setNotification({
@@ -138,14 +155,33 @@ export default function MembershipPage({ shopSettings, user, onRefreshSettings, 
   };
 
   // Check current status
-  const createdDate = shopSettings.createdAt ? new Date(shopSettings.createdAt) : new Date();
+  const createdDate = shopSettings.createdAt ? safeDate(shopSettings.createdAt) : new Date();
   const trialEndDate = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000);
   const now = new Date();
   const isTrialActive = trialEndDate.getTime() > now.getTime();
   const daysOfTrialLeft = Math.ceil((trialEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
-  const hasSpecificPremium = shopSettings.premiumUntil && new Date(shopSettings.premiumUntil).getTime() > now.getTime();
-  const isCurrentlyPremium = shopSettings.premiumActive || hasSpecificPremium || isTrialActive;
+  const hasSpecificPremium = shopSettings.premiumUntil && safeDate(shopSettings.premiumUntil).getTime() > now.getTime();
+  
+  const hasActivePaidPackage = (shopSettings.plan && shopSettings.plan !== 'free') || 
+    shopSettings.lifetime || 
+    shopSettings.packageType === 'lifetime' || 
+    shopSettings.premiumActive || 
+    hasSpecificPremium;
+
+  const isCurrentlyPremium = hasActivePaidPackage || isTrialActive;
+
+  // Active package details display
+  let activePackageName = 'Normal Package';
+  if (shopSettings.lifetime || shopSettings.packageType === 'lifetime' || shopSettings.plan?.toLowerCase().includes('lifetime')) {
+    activePackageName = 'Lifetime Premium';
+  } else if (shopSettings.packageType && packs[shopSettings.packageType]) {
+    activePackageName = packs[shopSettings.packageType].name;
+  } else if (shopSettings.plan && shopSettings.plan !== 'free') {
+    activePackageName = shopSettings.plan;
+  } else if (isTrialActive) {
+    activePackageName = '90-Day Free Trial';
+  }
 
   return (
     <div className="min-h-screen bg-slate-50/50 dark:bg-slate-950/20 p-4 lg:p-8" id="membership-main-container">
@@ -170,7 +206,7 @@ export default function MembershipPage({ shopSettings, user, onRefreshSettings, 
                 {isCurrentlyPremium ? (
                   <span className="text-emerald-400 flex items-center gap-1.5 font-black text-sm">
                     <CheckCircle className="w-4 h-4" />
-                    {isTrialActive && !shopSettings.premiumActive && !hasSpecificPremium ? '90-Day Free Trial' : 'Premium Active'}
+                    {activePackageName}
                   </span>
                 ) : (
                   <span className="text-amber-500 flex items-center gap-1.5 font-black text-sm">
@@ -181,13 +217,15 @@ export default function MembershipPage({ shopSettings, user, onRefreshSettings, 
               </h2>
             </div>
             <div className="mt-4 pt-4 border-t border-white/5 text-xs text-slate-400 font-semibold leading-relaxed">
-              {isTrialActive && (
-                <span>Your full premium preview expires in <strong>{daysOfTrialLeft} days</strong>. Activate Premium now to avoid service lock.</span>
-              )}
-              {hasSpecificPremium && (
-                <span>Premium expires on: <strong>{new Date(shopSettings.premiumUntil).toLocaleDateString()}</strong>.</span>
-              )}
-              {!isCurrentlyPremium && (
+              {hasActivePaidPackage ? (
+                shopSettings.premiumUntil ? (
+                  <span>Your Premium package is active until: <strong>{safeDate(shopSettings.premiumUntil).toLocaleDateString()}</strong>.</span>
+                ) : (
+                  <span>Your Lifetime Premium access is active. Core updates & Jarvis AI are permanently free!</span>
+                )
+              ) : isTrialActive ? (
+                <span>Your full premium preview (90-Day Free Trial) expires in <strong>{daysOfTrialLeft} days</strong>. Activate Premium now to avoid service lock.</span>
+              ) : (
                 <span>Currently on the lifetime <strong>Normal Package</strong>. Core features remain free forever.</span>
               )}
             </div>
@@ -220,34 +258,47 @@ export default function MembershipPage({ shopSettings, user, onRefreshSettings, 
               {(Object.keys(packs) as Array<keyof typeof packs>).map((key) => {
                 const item = packs[key];
                 const isSelected = selectedDuration === key;
+                const isActivePlan = (shopSettings?.packageType === key) || 
+                                     (key === 'lifetime' && (shopSettings?.lifetime || shopSettings?.plan?.toLowerCase().includes('lifetime')));
                 return (
                   <div
                     key={key}
                     onClick={() => setSelectedDuration(key)}
                     className={`relative cursor-pointer transition-all duration-300 rounded-2xl p-5 border text-left flex flex-col justify-between h-48 group overflow-hidden ${
                       isSelected
-                        ? 'border-indigo-600 dark:border-indigo-400 bg-indigo-50/20 dark:bg-indigo-950/20 ring-1 ring-indigo-505 shadow-md shadow-indigo-105'
+                        ? 'border-indigo-600 dark:border-indigo-400 bg-indigo-50/20 dark:bg-indigo-950/20 ring-1 ring-indigo-500 shadow-md'
+                        : isActivePlan
+                        ? 'border-emerald-500 dark:border-emerald-400 bg-emerald-50/10 dark:bg-emerald-950/10 shadow'
                         : 'border-slate-200/90 hover:border-slate-350 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm hover:shadow'
                     }`}
                   >
-                    {item.popular && (
+                    {isActivePlan ? (
+                      <div className="absolute top-3 right-3 bg-emerald-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow">
+                        Active / সক্রিয়
+                      </div>
+                    ) : item.popular ? (
                       <div className="absolute top-3 right-3 bg-gradient-to-r from-pink-500 to-indigo-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow">
                         Popular
                       </div>
-                    )}
-                    {item.lifetime && (
+                    ) : item.lifetime ? (
                       <div className="absolute top-3 right-3 bg-indigo-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow">
                         Best Value
                       </div>
-                    )}
+                    ) : null}
                     <div>
                       <h3 className="font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{item.name}</h3>
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 font-medium leading-relaxed">{item.desc}</p>
                     </div>
                     <div className="flex items-baseline justify-between mt-4">
                       <span className="text-2xl font-black text-gray-900 dark:text-white font-mono">{item.bdt}</span>
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center border transition-colors ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300'}`}>
-                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center border transition-colors ${
+                        isSelected 
+                          ? 'bg-indigo-600 border-indigo-600 text-white' 
+                          : isActivePlan 
+                          ? 'bg-emerald-600 border-emerald-600 text-white' 
+                          : 'border-slate-300'
+                      }`}>
+                        {(isSelected || isActivePlan) && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                       </div>
                     </div>
                   </div>

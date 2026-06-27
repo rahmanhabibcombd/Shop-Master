@@ -1222,9 +1222,32 @@ export const PageManagement: React.FC<PageManagementProps> = ({
                               <div className="flex items-center justify-center gap-2">
                                 <button
                                   onClick={async () => {
-                                    const createdDate = (shopSettings as any)?.createdAt ? new Date((shopSettings as any).createdAt) : new Date();
+                                    const safeDate = (timestamp: any): Date => {
+                                      if (!timestamp) return new Date();
+                                      if (timestamp.toDate && typeof timestamp.toDate === 'function') return timestamp.toDate();
+                                      if (timestamp instanceof Date) return timestamp;
+                                      if (typeof timestamp === 'number') return new Date(timestamp);
+                                      if (timestamp.seconds !== undefined) {
+                                        return new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+                                      }
+                                      return new Date(timestamp);
+                                    };
+
+                                    const createdDate = (shopSettings as any)?.createdAt ? safeDate((shopSettings as any).createdAt) : new Date();
                                     const trialEnd = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000);
-                                    const isPremium = (shopSettings as any)?.plan && (shopSettings as any).plan !== 'free';
+                                    const isPremium = (() => {
+                                      const s = shopSettings as any;
+                                      if (!s) return false;
+                                      if (s.premiumActive) return true;
+                                      if (s.plan && s.plan !== 'free') return true;
+                                      if (s.packageType === 'lifetime' || s.lifetime) return true;
+                                      if (s.premiumUntil) {
+                                        const untilDate = safeDate(s.premiumUntil);
+                                        if (untilDate.getTime() > new Date().getTime()) return true;
+                                      }
+                                      if (trialEnd.getTime() > new Date().getTime()) return true;
+                                      return false;
+                                    })();
                                     if (!isPremium && trialEnd.getTime() < new Date().getTime()) {
                                       alert("আপনার ফ্রি ট্রায়াল (৯০ দিন) শেষ হয়েছে। WhatsApp অটো মেসেজ ফিচার ব্যবহার করতে আপনার প্যাকেজ আপগ্রেড করুন।");
                                       return;

@@ -2074,9 +2074,24 @@ const printPaymentReceipt = (payment: DuePayment, customerName: string, settings
 
 const callWhatsAppApi = async (phone: string, message: string, settings: ShopSettings, saleId?: string) => {
   // Check trial limits first
-  const createdDate = settings?.createdAt ? new Date(settings.createdAt) : new Date();
+  const createdDate = settings?.createdAt ? safeDate(settings.createdAt) : new Date();
   const trialEnd = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000); // 90 days trial limit
-  const isPremium = settings?.plan && settings.plan !== 'free'; // Ensure they have a premium package
+  
+  const isPremium = (() => {
+    if (!settings) return false;
+    if (settings.premiumActive) return true;
+    if (settings.plan && settings.plan !== 'free') return true;
+    if (settings.packageType === 'lifetime' || (settings as any).lifetime) return true;
+    
+    if (settings.premiumUntil) {
+      const untilDate = safeDate(settings.premiumUntil);
+      if (untilDate.getTime() > new Date().getTime()) return true;
+    }
+    
+    if (trialEnd.getTime() > new Date().getTime()) return true;
+    
+    return false;
+  })();
   
   if (!isPremium && trialEnd.getTime() < new Date().getTime()) {
     window.dispatchEvent(new CustomEvent('showTrialExpiredModal'));
@@ -4387,13 +4402,15 @@ const SidebarNavItem = ({ item, idx, activeTab, setActiveTab, setIsSidebarOpen, 
     if (user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com') return true;
     if (user?.role === 'master_admin' || user?.shopId === 'master') return true;
     if (shopSettings?.premiumActive) return true;
+    if (shopSettings?.plan && shopSettings.plan !== 'free') return true;
+    if (shopSettings?.packageType === 'lifetime' || (shopSettings as any)?.lifetime) return true;
     
     if (shopSettings?.premiumUntil) {
-      const untilDate = new Date(shopSettings.premiumUntil);
+      const untilDate = safeDate(shopSettings.premiumUntil);
       if (untilDate.getTime() > new Date().getTime()) return true;
     }
     
-    const createdDate = shopSettings?.createdAt ? new Date(shopSettings.createdAt) : new Date();
+    const createdDate = shopSettings?.createdAt ? safeDate(shopSettings.createdAt) : new Date();
     const trialEnd = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000);
     if (trialEnd.getTime() > new Date().getTime()) return true;
     
@@ -4852,9 +4869,18 @@ export default function App() {
       if (bestPosition) {
         processPosition(bestPosition);
       } else {
-        cleanup();
-        setIsFetchingLocation(false);
-        setLocationError("লোকেশন সিগন্যাল পেতে রি-কোয়েস্ট টাইমআউট হয়েছে। পুনরায় চেষ্টা করুন।");
+        // Try a low-accuracy lookup as a last resort fallback
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            processPosition(pos);
+          },
+          (err) => {
+            cleanup();
+            setIsFetchingLocation(false);
+            setLocationError("লোকেশন সিগন্যাল পেতে রি-কোয়েস্ট টাইমআউট হয়েছে। পুনরায় চেষ্টা করুন।");
+          },
+          { enableHighAccuracy: false, timeout: 5000, maximumAge: Infinity }
+        );
       }
     }, 15000);
 
@@ -4876,6 +4902,21 @@ export default function App() {
            setLocationError("লোকেশন পারমিশন রিফিউজ করা হয়েছে! আপনি এইসিস্টেমটি লোকেশন পারমিশন ছাড়া কোনমতেই ব্যবহার করতে পারবেন না। অনুগ্রহ করে ব্রাউজার রিলোড দিন এবং অনুমতি প্রদান করুন।");
         } else {
            console.error("WatchPosition error: waiting for better signal...", error);
+           // Fallback immediately on TIMEOUT to get a low accuracy position (highly reliable on desktops and iframes)
+           if (error.code === error.TIMEOUT) {
+             navigator.geolocation.getCurrentPosition(
+               (pos) => {
+                 if (!bestPosition) {
+                   bestPosition = pos;
+                   processPosition(pos);
+                 }
+               },
+               (err) => {
+                 console.error("Fallback getCurrentPosition failed:", err);
+               },
+               { enableHighAccuracy: false, timeout: 5000, maximumAge: Infinity }
+             );
+           }
         }
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
@@ -5644,13 +5685,15 @@ export default function App() {
     if (user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com') return true;
     if (user?.role === 'master_admin' || user?.shopId === 'master') return true;
     if (shopSettings?.premiumActive) return true;
+    if (shopSettings?.plan && shopSettings.plan !== 'free') return true;
+    if (shopSettings?.packageType === 'lifetime' || (shopSettings as any)?.lifetime) return true;
     
     if (shopSettings?.premiumUntil) {
-      const untilDate = new Date(shopSettings.premiumUntil);
+      const untilDate = safeDate(shopSettings.premiumUntil);
       if (untilDate.getTime() > new Date().getTime()) return true;
     }
     
-    const createdDate = shopSettings?.createdAt ? new Date(shopSettings.createdAt) : new Date();
+    const createdDate = shopSettings?.createdAt ? safeDate(shopSettings.createdAt) : new Date();
     const trialEnd = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000);
     if (trialEnd.getTime() > new Date().getTime()) return true;
     
@@ -20225,7 +20268,11 @@ function Customers({
             {isSyncingContacts ? (
               <RefreshCw className="w-5 h-5 animate-spin text-blue-600" />
             ) : (
-              <img src="https://upload.wikimedia.org/wikipedia/commons/c/c2/Google_Contacts_icon_%282022%29.svg" alt="Google Contacts" className="w-5 h-5" />
+              <svg viewBox="0 0 192 192" className="w-5 h-5 shrink-0" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="96" cy="96" r="76" fill="#1a73e8" />
+                <circle cx="96" cy="74" r="26" fill="#ffffff" />
+                <path d="M46 142c0-18 15-34 50-34s50 16 50 34v10H46v-10z" fill="#ffffff" />
+              </svg>
             )}
             <span className="hidden lg:inline">{isSyncingContacts ? 'Syncing...' : 'Sync Contacts'}</span>
           </motion.button>

@@ -21,6 +21,9 @@ service cloud.firestore {
     function isOwnerOrStaff(shopId) {
       return isSignedIn() && (
         request.auth.uid == shopId || 
+        (exists(/databases/$(database)/documents/shops/$(shopId)) && 
+         (get(/databases/$(database)/documents/shops/$(shopId)).data.ownerUid == request.auth.uid || 
+          get(/databases/$(database)/documents/shops/$(shopId)).data.ownerEmail == request.auth.token.email)) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId == shopId)
       );
@@ -232,6 +235,10 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.auth.uid == shopId;
       allow update: if isMasterAdmin() || isOwnerOrStaff(shopId);
       allow delete: if isMasterAdmin();
+    }
+
+    match /shops/{shopId}/workspace/{docId} {
+      allow read, write: if isMasterAdmin() || isOwnerOrStaff(shopId);
     }
     
     match /users/{userId} {
