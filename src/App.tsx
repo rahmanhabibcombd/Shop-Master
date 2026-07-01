@@ -6918,6 +6918,59 @@ export default function App() {
     localStorage.removeItem('shopmaster_active_tab');
   };
 
+  const handleSandboxLogin = async () => {
+    try {
+      setLoading(true);
+      setAuthError(null);
+      
+      const result = await signInAnonymously(auth);
+      const anonUser = result.user;
+      
+      const onboardStatus = true;
+      const role = 'admin';
+      const finalShopId = anonUser.uid;
+      
+      setSessionLocationVerified(true);
+      
+      const userData = { 
+        uid: anonUser.uid, 
+        email: 'stratproamz@gmail.com', 
+        displayName: 'Sandbox Developer', 
+        role,
+        shopId: finalShopId,
+        isOnboarded: onboardStatus
+      };
+      
+      try {
+        const newShopCode = await generateUniqueShopCode(db, userData.email);
+        const createdAtISO = new Date().toISOString();
+        await setDoc(doc(db, 'shops', finalShopId), {
+          name: "Sandbox Shop Demo",
+          shopCode: newShopCode,
+          ownerEmail: userData.email,
+          ownerUid: anonUser.uid,
+          establishedYear: new Date().getFullYear().toString(),
+          phone: '+8801711223344',
+          type: 'retail',
+          createdAt: createdAtISO
+        });
+      } catch (shopCreateErr) {
+        console.warn("Sandbox shop creation skipped or already exists:", shopCreateErr);
+      }
+      
+      setUser(userData);
+      setIsOnboarded(onboardStatus);
+      localStorage.setItem('shopmaster_user', JSON.stringify(userData));
+      setNotification({ message: 'Welcome to Sandbox Developer Mode! Connected securely via Firebase.', type: 'success' });
+    } catch (error: any) {
+      console.error("Sandbox login error:", error);
+      setAuthError(`Sandbox authentication failed: ${error?.message || error}`);
+      setNotification({ message: 'Sandbox Login Failed.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
@@ -8312,6 +8365,7 @@ export default function App() {
                         </div>
 
                         <button 
+                          type="button"
                           onClick={handleGoogleLogin}
                           className="w-full h-14 bg-white border-2 border-gray-100 text-gray-700 rounded-2xl font-bold hover:bg-gray-50 transition-all flex items-center justify-center gap-4 group hover:border-indigo-100 hover:shadow-lg hover:shadow-indigo-50"
                         >
@@ -8321,6 +8375,25 @@ export default function App() {
                             </svg>
                           </div>
                           {st('googleSignIn')}
+                        </button>
+
+                        <div className="relative flex py-2 items-center">
+                          <div className="flex-grow border-t border-gray-100 dark:border-slate-800"></div>
+                          <span className="flex-shrink mx-4 text-gray-400 text-[10px] uppercase tracking-wider font-extrabold">Or Iframe Bypass</span>
+                          <div className="flex-grow border-t border-gray-100 dark:border-slate-800"></div>
+                        </div>
+
+                        <button 
+                          type="button"
+                          onClick={handleSandboxLogin}
+                          className="w-full h-14 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-2xl font-bold hover:from-indigo-500 hover:to-indigo-400 transition-all flex items-center justify-center gap-4 hover:shadow-lg hover:shadow-indigo-100 dark:hover:shadow-none"
+                        >
+                          <div className="w-8 h-8 bg-indigo-700/50 shadow-sm rounded-full flex items-center justify-center border border-indigo-400/30">
+                            <svg className="w-4 h-4 text-white animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                            </svg>
+                          </div>
+                          {systemLang === 'bn' ? 'স্যান্ডবক্স গেস্ট লগইন (Iframe Bypass)' : 'Sandbox Guest Login (Iframe Bypass)'}
                         </button>
                         
                         <div className="pt-6 border-t border-gray-100 text-center">

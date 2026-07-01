@@ -23,6 +23,13 @@ export default defineConfig(({mode}) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
+            if (id.includes('src/components/')) {
+              const parts = id.split('src/components/');
+              if (parts[1]) {
+                const componentName = parts[1].replace(/\.(tsx|ts)$/, '').split('/')[0];
+                return `comp-${componentName.toLowerCase()}`;
+              }
+            }
             if (id.includes('node_modules')) {
               if (id.includes('recharts') || id.includes('d3')) {
                 return 'vendor-charts';

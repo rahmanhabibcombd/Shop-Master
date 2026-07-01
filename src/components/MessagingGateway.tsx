@@ -85,15 +85,12 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
 
   const [isConnectingWa, setIsConnectingWa] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
-  const [qrWidgetUrl, setQrWidgetUrl] = useState('');
+  const [qrString, setQrString] = useState('');
   const [showSuccessNotification, setShowSuccessNotification] = useState(false);
   const [successMessageDetails, setSuccessMessageDetails] = useState('');
 
-  // WhatsApp OTP / Phone Linking States
-  const [otpPhone, setOtpPhone] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [isGeneratingOtp, setIsGeneratingOtp] = useState(false);
-  const [otpError, setOtpError] = useState<string | null>(null);
+
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   // Test Connection States
   const [testPhone, setTestPhone] = useState('');
@@ -132,53 +129,62 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
     prevStatusRef.current = whatsappStatus;
   }, [whatsappStatus]);
 
-  React.useEffect(() => {
-    if ((waType === 'zender' || waType === 'walink') && (zenderDeviceId || zenderWaDeviceId)) {
-      const activeId = zenderDeviceId || zenderWaDeviceId;
-      // Immediate checks
-      const verifyConnectionState = async () => {
-        try {
-          const queryParams = new URLSearchParams({
-            endpoint_url: zenderEndpointUrl,
-            api_key: waType === 'walink' ? waLinkSecret : zenderApiKey,
-            device_id: activeId
-          });
-          const res = await fetch(`/api/gateways/status?${queryParams.toString()}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.status === 'connected') {
-              setWhatsappStatus('connected');
-              if (data.real_device_id && data.real_device_id !== zenderDeviceId) {
-                  setZenderDeviceId(data.real_device_id);
-                  setZenderWaDeviceId(data.real_device_id);
-                  onSaveSettings({ ...settings, whatsapp_status: 'connected', zender_whatsapp_device_id: data.real_device_id, zender_device_id: data.real_device_id });
-              }
-            } else if (data.status === 'disconnected' || data.status === 'logout') {
-              setWhatsappStatus('disconnected');
-              if (prevStatusRef.current === 'connected') {
-                // Device was logged out!
-                setOtpError('⚠️ হোয়াটসঅ্যাপ সেশনটি ডিসকানেক্ট বা লগআউট করা হয়েছে।');
-                onSaveSettings({ ...settings, whatsapp_status: 'disconnected' });
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('Failed checking initial gateway state (this is normal if server is booting up):', e);
-        }
-      };
-      verifyConnectionState();
-      
-      // Periodically poll every 10 seconds to keep system database in sync (faster response to unlinks)
-      const statusInterval = setInterval(verifyConnectionState, 10000);
-      return () => clearInterval(statusInterval);
+  const fetchCurrentConnectionStatus = React.useCallback(async () => {
+    if (waType !== 'zender' && waType !== 'walink') return;
+    
+    // STRICT REAL-DATA POLLING: Only check if we have an active saved device ID
+    const activeId = zenderWaDeviceId || zenderDeviceId;
+    if (!activeId) {
+      setWhatsappStatus('disconnected');
+      return;
     }
-  }, [waType, zenderDeviceId, zenderWaDeviceId, zenderEndpointUrl, zenderApiKey, waLinkSecret]);
+    
+    try {
+      const queryParams = new URLSearchParams({
+        endpoint_url: zenderEndpointUrl,
+        api_key: waType === 'walink' ? waLinkSecret : zenderApiKey,
+        device_id: activeId,
+        resync: 'true'
+      });
+      const res = await fetch(`/api/gateways/status?${queryParams.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'connected' || data.status === 'REAL_CONNECTED') {
+          setWhatsappStatus('connected');
+          const finalId = data.real_device_id || activeId;
+          if (finalId !== zenderWaDeviceId || finalId !== zenderDeviceId) {
+              setZenderDeviceId(finalId);
+              setZenderWaDeviceId(finalId);
+              onSaveSettings({ ...settings, whatsapp_status: 'connected', zender_whatsapp_device_id: finalId, zender_device_id: finalId });
+          }
+        } else if (data.status === 'disconnected' || data.status === 'logout' || data.status === 'unlinked') {
+          setWhatsappStatus('disconnected');
+          setZenderWaDeviceId('');
+          setZenderDeviceId('');
+          if (prevStatusRef.current === 'connected') {
+            // Device was logged out!
+            setConnectionError('⚠️ হোয়াটসঅ্যাপ সেশনটি ডিসকানেক্ট বা লগআউট করা হয়েছে।');
+          }
+          onSaveSettings({ ...settings, whatsapp_status: 'disconnected', zender_whatsapp_device_id: '', zender_device_id: '' });
+        }
+      }
+    } catch (e) {
+      console.warn('Failed checking initial gateway state (this is normal if server is booting up):', e);
+    }
+  }, [waType, zenderWaDeviceId, zenderDeviceId, settings, zenderEndpointUrl, zenderApiKey, waLinkSecret, onSaveSettings]);
+
+  React.useEffect(() => {
+    fetchCurrentConnectionStatus();
+    
+    // Periodically poll every 10 seconds to keep system database in sync (faster response to unlinks)
+    const statusInterval = setInterval(fetchCurrentConnectionStatus, 10000);
+    return () => clearInterval(statusInterval);
+  }, [fetchCurrentConnectionStatus]);
 
   const handleWhatsAppConnected = (deviceId: string, apiPhone?: string) => {
     setWhatsappStatus('connected');
     setShowQrModal(false);
-    setOtpCode(''); // Auto-close inline QR code too
-    setOtpError(null);
+    setConnectionError(null);
     setZenderWaDeviceId(deviceId);
     setZenderDeviceId(deviceId);
     
@@ -195,7 +201,7 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
     });
 
     const shopName = settings.shopName || settings.name || 'ShopMaster';
-    const targetPhone = apiPhone || otpPhone || settings.phone;
+    const targetPhone = apiPhone || settings.phone;
 
     setSuccessMessageDetails(
       targetPhone 
@@ -271,213 +277,141 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
 
   const handleResync = async () => {
     if (isTrialExpired) {
-      setOtpError(settings.systemLanguage === 'bn' 
+      setConnectionError(settings.systemLanguage === 'bn' 
         ? 'দয়া করে আগে আপনার সাবস্ক্রিপশন আপডেট করুন।' 
         : 'Please update your subscription package first to unlock WhatsApp connectivity.');
       return;
     }
-    try {
-      setOtpError(null);
-      const queryParams = new URLSearchParams({
-        endpoint_url: zenderEndpointUrl,
-        api_key: waType === 'walink' ? waLinkSecret : zenderApiKey,
-        device_id: zenderWaDeviceId || zenderDeviceId || `z_wa_${settings.id || 'merchant'}`,
-        resync: 'true'
-      });
-      const res = await fetch(`/api/gateways/status?${queryParams.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status === 'connected' || data.status === 'REAL_CONNECTED') {
-          handleWhatsAppConnected(data.real_device_id || zenderWaDeviceId || zenderDeviceId, data.phone);
-        } else {
-          setOtpError('No active connection found. Requesting a new linking code...');
-          // Auto generate QR code
-          setTimeout(() => {
-            if (otpPhone) {
-              handleGenerateOtp();
-            } else {
-               setOtpError('No active connection found. Please enter your mobile number and generate a new connection.');
-            }
-          }, 1500);
-        }
-      }
-    } catch (err: any) {
-      setOtpError('Failed to resync connection.');
-    }
+    setConnectionError(null);
+    await fetchCurrentConnectionStatus();
   };
 
-  const handleGenerateOtp = async () => {
+
+  const handleConnectWhatsApp = async () => {
     if (isTrialExpired) {
-      setOtpError(settings.systemLanguage === 'bn' 
+      setConnectionError(settings.systemLanguage === 'bn' 
         ? 'দয়া করে আগে আপনার সাবস্ক্রিপশন আপডেট করুন।' 
         : 'Please update your subscription package first to unlock WhatsApp connectivity.');
       return;
     }
-    if (!otpPhone) {
-      setOtpError('অনুগ্রহ করে একটি মোবাইল নম্বর প্রদান করুন (যেমন: +88017XXXXXXXX)');
-      return;
-    }
-    setIsGeneratingOtp(true);
-    setOtpError(null);
-    setOtpCode('');
+    setIsConnectingWa(true);
+    setConnectionError(null);
     try {
       let currentToken = waType === 'zender' ? zenderApiKey : waLinkSecret;
       if (!currentToken || currentToken.includes('your_sellerscampus')) {
         currentToken = '4fe17fcfe73d5035f55b9144fa10e07443659005';
       }
 
-      const response = await fetch('/api/gateways/whatsapp/connect-otp', {
+      // Always use the walink endpoint which extracts the raw payload and generates a REAL QR barcode
+      const response = await fetch('/api/gateways/whatsapp/connect-walink', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          phone: otpPhone,
-          token: currentToken
+          secret: currentToken
         })
       });
 
-      const data = await response.json();
-      if (response.ok && data.success) {
-        let cleanQr = data.code || '';
-        cleanQr = cleanQr.replace(/_SellersCampus_SecureLink_.*?$/, '');
-        cleanQr = cleanQr.replace(/^,+/, '');
-        setOtpCode(cleanQr);
-        setWhatsappStatus('disconnected');
-        
-        const deviceId = data.deviceId || `z_wa_otp_${Math.floor(Math.random() * 100000)}`;
-        setZenderWaDeviceId(deviceId);
-
-        // Reset connected status and wait for real-time polling to finish
-        onSaveSettings({
-          ...settings,
-          waGatewayType: waType,
-          waLinkSecret: waLinkSecret,
-          whatsapp_status: 'disconnected',
-          zender_whatsapp_device_id: deviceId
-        });
-        
-        startStatusPolling(deviceId);
-      } else {
-        setOtpError(data.error || 'ওটিপি কোড জেনারেট করা সম্ভব হয়নি। নম্বরটি সঠিক এবং সচল কিনা পরীক্ষা করুন।');
+      const rawText = await response.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(rawText);
+      } catch (e) {
+        throw new Error(`Invalid JSON from server. Status: ${response.status}. Body: ${rawText.substring(0, 100)}...`);
       }
-    } catch (err: any) {
-      setOtpError(err.message || 'নেটওয়ার্ক ত্রুটি ঘটেছে। পুনরায় চেষ্টা করুন।');
-    } finally {
-      setIsGeneratingOtp(false);
-    }
-  };
-
-  const handleConnectWhatsApp = async () => {
-    if (isTrialExpired) {
-      setOtpError(settings.systemLanguage === 'bn' 
-        ? 'দয়া করে আগে আপনার সাবস্ক্রিপশন আপডেট করুন।' 
-        : 'Please update your subscription package first to unlock WhatsApp connectivity.');
-      return;
-    }
-    setIsConnectingWa(true);
-    try {
-      if (waType === 'walink') {
-        const response = await fetch('/api/gateways/whatsapp/connect-walink', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            secret: waLinkSecret
-          })
-        });
-
-        const data = await response.json();
-        
-        if (response.ok && data.success) {
-          setZenderWaDeviceId(data.device_id);
-          setZenderDeviceId(data.device_id);
-          setQrWidgetUrl(data.widget_url);
-          setShowQrModal(true);
-          setWhatsappStatus('disconnected');
-          startStatusPolling(data.device_id);
-        } else {
-          setOtpError('REAL API CONNECTION FAILED: ' + (data.error || 'Server error, check console.'));
-        }
-        setIsConnectingWa(false);
-        return;
-      }
-
-      const newDeviceId = `z_wa_${settings.id || 'dev'}_${Math.floor(Date.now() / 1000)}_${Math.floor(Math.random() * 1000)}`;
       
-      const response = await fetch('/api/gateways/whatsapp/connect', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          shopId: settings.id || 'pos-merchant-master',
-          endpoint_url: zenderEndpointUrl,
-          api_key: zenderApiKey,
-          device_id: newDeviceId
-        })
-      });
+      if (response.ok && data.success) {
+        let cleanQR = data.rawQrString || ''; // Raw string from backend
 
-      if (response.ok) {
-        const data = await response.json();
+        // THE QR SANITIZATION LOGIC
+        cleanQR = cleanQR.replace(/^[\s,]+/, ''); // Remove leading comma and spaces
+        if (cleanQR.includes("_SellersCampus_SecureLink_")) {
+            cleanQR = cleanQR.split("_SellersCampus_SecureLink_")[0]; // Strip tracking payload
+        }
+        if (cleanQR.includes("2@")) {
+            cleanQR = cleanQR.substring(cleanQR.indexOf("2@")); // Lock starting point
+        }
+        // END QR SANITIZATION LOGIC
+
         setZenderWaDeviceId(data.device_id);
         setZenderDeviceId(data.device_id);
-        setQrWidgetUrl(data.widget_url);
+        setQrString(cleanQR);
         setShowQrModal(true);
         setWhatsappStatus('disconnected');
         startStatusPolling(data.device_id);
       } else {
-        setOtpError('Could not initialize SellersCampus session. Check central server is running.');
+        if (data.status === 403 || response.status === 403) {
+          setConnectionError(`SellersCampus API Error: ${data.message || data.error || 'Permission denied by provider'}`);
+          setShowQrModal(false);
+          setQrString('');
+          setWhatsappStatus('disconnected');
+        } else {
+          setConnectionError('REAL API CONNECTION FAILED: ' + (data.message || data.error || 'Server error, check console.'));
+        }
       }
     } catch (err: any) {
       console.error('Zender connect exception:', err);
-      setOtpError('Failed connecting Zender endpoint: ' + err.message);
+      setConnectionError('Failed connecting Zender endpoint: ' + err.message);
     } finally {
       setIsConnectingWa(false);
     }
   };
 
   const handleUnlinkWhatsApp = async () => {
-    if (window.confirm('Are you sure you want to unlink and release your active WhatsApp session? This cannot be undone.')) {
-      try {
-        setWhatsappStatus('disconnected');
-        
-        // Terminate Zender session
-        await fetch('/api/gateways/unlink', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            endpoint_url: zenderEndpointUrl,
-            api_key: waType === 'walink' ? waLinkSecret : zenderApiKey,
-            device_id: zenderWaDeviceId || zenderDeviceId
-          })
-        });
+    // Replaced window.confirm with a direct call as confirm is blocked in sandboxed iframes
+    try {
+      setConnectionError('Disconnecting... Please wait.');
+      
+      // Terminate Zender session
+      const res = await fetch('/api/gateways/unlink', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          endpoint_url: zenderEndpointUrl,
+          api_key: waType === 'walink' ? waLinkSecret : zenderApiKey,
+          device_id: zenderWaDeviceId || zenderDeviceId
+        })
+      });
 
-        setZenderWaDeviceId('');
-        setZenderDeviceId('');
-        setOtpCode('');
-        setDefaultRoute('whatsapp');
-        
-        onSaveSettings({
-          ...settings,
-          waGatewayType: 'walink',
-          waLinkSecret: 'your_sellerscampus_zender_master_api_key_here',
-          zender_whatsapp_device_id: '',
-          zender_endpoint_url: 'https://app.sellerscampus.com/api/v1',
-          zender_api_key: 'your_sellerscampus_zender_master_api_key_here',
-          zender_device_id: '',
-          whatsapp_status: 'disconnected',
-          default_route: 'whatsapp'
-        });
-
-        setOtpError('WhatsApp session unlinked successfully. You must scan again to re-link.');
-      } catch (err) {
-        console.error('Error during Zender unlink:', err);
-        setOtpError('Disconnection finalized locally.');
+      const data = await res.json();
+      if (!data.success && !res.ok) {
+         throw new Error(data.message || 'Failed to unlink on server');
       }
+
+      if ((window as any)._waPollInterval) {
+        clearInterval((window as any)._waPollInterval);
+        (window as any)._waPollInterval = null;
+      }
+      setWhatsappStatus('disconnected');
+      setZenderWaDeviceId('');
+      setZenderDeviceId('');
+      setDefaultRoute('whatsapp');
+      
+      onSaveSettings({
+        ...settings,
+        zender_whatsapp_device_id: '',
+        zender_device_id: '',
+        whatsapp_status: 'disconnected'
+      });
+      
+      setConnectionError('WhatsApp session unlinked successfully. You must scan again to re-link.');
+    } catch (err) {
+      console.error('Error during Zender unlink:', err);
+      setConnectionError('Disconnection finalized locally.');
+      
+      setWhatsappStatus('disconnected');
+      setZenderWaDeviceId('');
+      setZenderDeviceId('');
+      
+      onSaveSettings({
+        ...settings,
+        zender_whatsapp_device_id: '',
+        zender_device_id: '',
+        whatsapp_status: 'disconnected'
+      });
     }
   };
 
@@ -486,6 +420,12 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
       setTestMsgError('অনুগ্রহ করে টেস্ট করার জন্য একটি মোবাইল নম্বর প্রদান করুন');
       return;
     }
+    
+    if (whatsappStatus !== 'connected') {
+       setTestMsgError('⚠️ হোয়াটসঅ্যাপ অ্যাকাউন্ট যুক্ত করা নেই। টেস্ট মেসেজ পাঠাতে আগে কানেক্ট করুন।');
+       return;
+    }
+    
     setTestSending(true);
     setTestMsgStatus(null);
     setTestMsgError(null);
@@ -746,35 +686,6 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
             <Users className="w-6 h-6" />
           </div>
         </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800/85 p-5 rounded-2xl shadow-sm flex items-center justify-between">
-          <div>
-            <span className="text-xs font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest block mb-0.5">WhatsApp Route</span>
-            <span className="text-sm font-black text-emerald-600 dark:text-emerald-450 tracking-wide uppercase inline-flex items-center gap-1.5 mt-1">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              API Node Client
-            </span>
-          </div>
-          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-xl">
-            <MessageSquare className="w-6 h-6" />
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800/85 p-5 rounded-2xl shadow-sm flex items-center justify-between">
-          <div>
-            <span className="text-xs font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest block mb-0.5">SMS Gateway</span>
-            <span className="text-sm font-black text-gray-500 dark:text-slate-400 tracking-wide uppercase block mt-1">
-              {smsType === 'none' ? 'Disabled' : smsType.toUpperCase()}
-            </span>
-          </div>
-          <div className="p-3 bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 rounded-xl">
-            <Smartphone className="w-6 h-6" />
-          </div>
-        </div>
-
         <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800/85 p-5 rounded-2xl shadow-sm flex items-center justify-between">
           <div>
             <span className="text-xs font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest block mb-0.5">Total Logs</span>
@@ -809,257 +720,55 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
                   }}
                   className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-amber-200 dark:shadow-none cursor-pointer"
                 >
-                  {settings.systemLanguage === 'bn' ? 'সাবস্ক্রিপশন আপডেট করুন' : 'Upgrade Subscription Now'}
+                  {settings.systemLanguage === 'bn' ? 'সাবস্ক্রিপশন আপডেট করুন' : 'Upgrade Subscription'}
                 </button>
               </div>
             </div>
           </div>
         )}
-        {/* Navigation Tab Header bar */}
-        <div className="border-b border-gray-100 dark:border-slate-800/80 px-6 py-4 flex flex-wrap items-center justify-between gap-4 bg-gray-50/50 dark:bg-slate-950/20">
+
+        {/* Navigation Tabs Header */}
+        <div className="px-6 pt-6 pb-2 border-b border-gray-100 dark:border-slate-850 flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-xl shadow-md">
-              <Bot className="w-4 h-4" />
+            <div className="p-2 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 rounded-xl">
+              <Settings className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-md font-bold text-gray-900 dark:text-white tracking-tight">Messaging Gateway Console</h2>
-              <span className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Active Owner: {currentUserEmail}</span>
+              <h2 className="text-lg font-black text-gray-900 dark:text-white tracking-tight leading-none">Gateway Preferences</h2>
+              <p className="text-[11px] text-gray-500 font-medium mt-1">Configure automated communication endpoints</p>
             </div>
           </div>
           
-          {isMasterAdmin && (
-            <div className="flex gap-1.5 p-1 bg-gray-100/70 dark:bg-slate-800 rounded-xl">
-              {[
-                { id: 'config', label: 'Gateways', icon: Settings },
-                { id: 'templates', label: 'Templates', icon: MessageSquare },
-                { id: 'broadcast', label: 'Bulk Composer', icon: Send },
-                { id: 'logs', label: 'Delivery Logs', icon: FileText },
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => {
-                    setActiveSubTab(tab.id as any);
-                    setBroadcastStatus(null);
-                  }}
-                  className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    activeSubTab === tab.id
-                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-gray-100 dark:border-slate-800/50 scale-102'
-                      : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-                  }`}
-                >
-                  <tab.icon className="w-3.5 h-3.5" />
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex gap-1.5 p-1 bg-gray-100/70 dark:bg-slate-800 rounded-xl">
+            {[
+              { id: 'config', label: 'Gateways', icon: Settings },
+              { id: 'templates', label: 'Templates', icon: MessageSquare },
+              { id: 'broadcast', label: 'Bulk Composer', icon: Send },
+              { id: 'logs', label: 'Delivery Logs', icon: FileText },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setActiveSubTab(tab.id as any);
+                  setBroadcastStatus(null);
+                }}
+                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                  activeSubTab === tab.id
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-gray-100 dark:border-slate-800/50 scale-102'
+                    : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+                }`}
+              >
+                <tab.icon className="w-3.5 h-3.5" />
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Tab Contents Frame */}
-        <div className="flex-1 p-6 relative">
+        <div className="flex-1 p-6 overflow-y-auto custom-scrollbar relative">
           <AnimatePresence mode="wait">
-            {activeSubTab === 'config' && !isMasterAdmin && (
-              <div className="max-w-xl mx-auto py-2">
-                <div className="bg-white dark:bg-slate-950 p-6 md:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl space-y-6 animate-fade-in">
-                  <div className="flex items-center gap-4 border-b border-gray-100 dark:border-slate-800 pb-5">
-                    <div className="w-12 h-12 bg-gradient-to-tr from-emerald-500 to-teal-500 text-white rounded-2xl flex items-center justify-center font-bold text-lg shadow-md shadow-emerald-100 dark:shadow-none animate-pulse">
-                      WA
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-base text-gray-950 dark:text-white">হোয়াটসঅ্যাপ মেসেজিং গেটওয়ে (WhatsApp Gateway)</h3>
-                      <p className="text-xs text-gray-400 font-medium tracking-tight">আপনার গেটওয়ে চালুর মাধ্যমে অটোমেটিক কাস্টমার চালান মেসেজ পাঠান</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-[10px] font-black text-gray-450 dark:text-slate-400 uppercase tracking-widest block mb-1.5">
-                          Device Session ID *
-                        </label>
-                        <input
-                          type="text"
-                          value={zenderDeviceId}
-                          onChange={(e) => {
-                            setZenderDeviceId(e.target.value);
-                            setZenderWaDeviceId(e.target.value);
-                          }}
-                          placeholder="e.g. dynamic_shop_station"
-                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-slate-200 transition-all shadow-inner"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] font-black text-gray-455 dark:text-slate-400 uppercase tracking-widest block mb-1.5">
-                          input Your WhatsApp business number *
-                        </label>
-                        <input
-                          type="text"
-                          value={otpPhone}
-                          onChange={(e) => setOtpPhone(e.target.value)}
-                          placeholder="যেমন: 017XXXXXXXX"
-                          className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-slate-200 transition-all shadow-inner"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 dark:bg-slate-900/60 p-5 rounded-2xl border border-gray-200/60 dark:border-slate-800 space-y-4">
-                      <div className="flex items-center justify-between pb-3 border-b border-gray-200/50 dark:border-slate-800/80">
-                        <span className="text-[10.5px] font-black text-gray-400 uppercase tracking-wider">Device Auth Status</span>
-                        <span className={`text-[9.5px] uppercase font-black px-2.5 py-1 rounded-full border ${
-                          whatsappStatus === 'connected' 
-                            ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 shadow-xs' 
-                            : 'bg-rose-500/10 text-rose-500 border-rose-500/20'
-                        }`}>
-                          {whatsappStatus === 'connected' ? 'Connected / Active' : 'Disconnected'}
-                        </span>
-                      </div>
-
-                      {whatsappStatus === 'connected' ? (
-                        <div className="space-y-3">
-                          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold leading-normal">
-                            ✓ আপনার হোয়াটসঅ্যাপ সফলভাবে সংযুক্ত রয়েছে। এখন স্বয়ংক্রিয়ভাবে ইনভয়েস ডেলিভারি করা হবে।
-                          </p>
-                          <button
-                            type="button"
-                            onClick={handleUnlinkWhatsApp}
-                            className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 border border-rose-200/50 dark:border-rose-900/30 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98"
-                          >
-                            ডিসকানেক্ট করুন (Disconnect Session)
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="space-y-3.5">
-                          <p className="text-[11px] text-gray-400 leading-normal font-semibold">
-                            সংযোগ চালু করতে আপনার ফোন নাম্বার ইনপুট করে নিচের বাটনটিতে প্রেস করুন এবং মেসেঞ্জার লিঙ্ক কোড স্ক্যান করুন।
-                          </p>
-                          <div className="flex flex-col gap-2">
-                            <button
-                              type="button"
-                              onClick={handleGenerateOtp}
-                              disabled={isGeneratingOtp || !otpPhone}
-                              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-650 hover:to-teal-650 font-black rounded-xl text-xs text-white bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-all cursor-pointer border border-transparent disabled:opacity-50 flex items-center justify-center gap-1 shadow-md shadow-emerald-100 dark:shadow-none"
-                            >
-                              {isGeneratingOtp ? 'অপেক্ষা করুন...' : 'কিউআর কোড জেনারেট করুন (Generate QR Code)'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleResync}
-                              className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-bold rounded-xl text-xs transition-all cursor-pointer border border-indigo-100 dark:border-indigo-800/40"
-                            >
-                              Re-sync Connection
-                            </button>
-                          </div>
-
-                          {otpError && (
-                            <p className="text-[10px] text-rose-500 bg-rose-50 dark:bg-rose-950/20 border border-rose-100/55 p-2.5 rounded-xl font-bold whitespace-normal leading-normal">{otpError}</p>
-                          )}
-
-                          {otpCode && (
-                            <div className="bg-white dark:bg-slate-900 border border-indigo-500/25 p-4 rounded-xl text-center flex flex-col items-center space-y-3 shadow-md pb-5" id="qrcode">
-                              <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider animate-bounce">
-                                Scan QR to Link Device
-                              </p>
-                              <div className="bg-white p-2 rounded-xl shadow-sm border border-gray-105 flex justify-center max-w-[190px]">
-                                <QRCode 
-                                  value={otpCode}
-                                  size={180}
-                                  level="H"
-                                  className="animate-pulse duration-1000"
-                                  style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                />
-                              </div>
-                              <p className="text-[9.5px] text-gray-400 leading-relaxed font-sans max-w-xs">
-                                WhatsApp Settings {'>'} Linked Devices {'>'} <strong>Link a Device</strong> দিয়ে এই কোডটি মোবাইল ক্যামেরা দিয়ে স্ক্যান করুন।
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Test Connection Section */}
-                    <div className="bg-indigo-50/40 dark:bg-slate-900/40 p-5 rounded-2xl border border-indigo-100/50 dark:border-slate-800/80 space-y-3.5">
-                      <div>
-                        <h4 className="text-xs font-black text-indigo-900 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <span className="flex h-2 w-2 rounded-full bg-indigo-500 animate-pulse"></span>
-                          হোয়াটসঅ্যাপ কানেকশন টেস্ট (Test Connection)
-                        </h4>
-                        <p className="text-[10px] text-gray-400 font-medium">আপনার হোয়াটসঅ্যাপ গেটওয়েটি সঠিকভাবে বার্তা পাঠাচ্ছে কি না তা পরীক্ষা করুন</p>
-                      </div>
-                      <div className="space-y-2.5">
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={testPhone}
-                            onChange={(e) => setTestPhone(e.target.value)}
-                            placeholder="টেস্ট নম্বর দিন (যেমন: 017XXXXXXXX)"
-                            className="w-full px-4 py-2.5 bg-white dark:bg-slate-950 border border-indigo-100 dark:border-slate-800 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 dark:text-slate-200 transition-all shadow-inner"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleSendTestMessage}
-                            disabled={testSending || !testPhone}
-                            className="px-5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-650 hover:to-indigo-650 text-white font-bold rounded-xl text-xs shadow-md transition-all whitespace-nowrap cursor-pointer active:scale-98 disabled:opacity-55"
-                          >
-                            {testSending ? 'পাঠানো হচ্ছে...' : 'টেস্ট মেসেজ পাঠান'}
-                          </button>
-                        </div>
-
-                        {testMsgStatus && (
-                          <p className="text-[10px] text-emerald-600 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100/55 p-2.5 rounded-xl font-bold whitespace-normal leading-normal">
-                            {testMsgStatus}
-                          </p>
-                        )}
-
-                        {testMsgError && (
-                          <p className="text-[10px] text-rose-500 bg-rose-50 dark:bg-rose-950/20 border border-rose-100/55 p-2.5 rounded-xl font-bold whitespace-normal leading-normal">
-                            {testMsgError}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end pt-4 border-t border-gray-100 dark:border-slate-850">
-                    <div className="flex items-center gap-2">
-                      {saveSuccess && (
-                        <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest animate-bounce">
-                          সংরক্ষিত হয়েছে (Saved!)
-                        </span>
-                      )}
-                      <button
-                        onClick={() => {
-                          setIsSaving(true);
-                          setTimeout(() => {
-                            onSaveSettings({
-                              ...settings,
-                              zender_whatsapp_device_id: zenderDeviceId,
-                              zender_device_id: zenderDeviceId,
-                              zender_api_key: zenderApiKey || '4fe17fcfe73d5035f55b9144fa10e07443659005',
-                              zender_endpoint_url: 'https://app.sellerscampus.com/api/v1',
-                              default_route: 'whatsapp',
-                              whatsapp_status: whatsappStatus,
-                              waGatewayType: 'zender',
-                              smsGatewayType: 'none'
-                            });
-                            setIsSaving(false);
-                            setSaveSuccess(true);
-                            setTimeout(() => setSaveSuccess(false), 3000);
-                          }, 600);
-                        }}
-                        disabled={isSaving}
-                        className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500 rounded-xl font-bold text-xs shadow-md transition-all whitespace-nowrap cursor-pointer active:scale-98"
-                      >
-                        {isSaving ? 'সংরক্ষণ করা হচ্ছে...' : 'সেটিংস সংরক্ষণ করুন (Save)'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeSubTab === 'config' && isMasterAdmin && (
+            {activeSubTab === 'config' && (
               <motion.div
                 key="config-tab"
                 initial={{ opacity: 0, y: 15 }}
@@ -1134,13 +843,13 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
                           disabled
                           className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-800 font-semibold focus:ring-0 outline-none bg-gray-50 dark:bg-slate-800/50 text-sm opacity-80 cursor-not-allowed dark:text-slate-200"
                         >
-                          <option value="zender">SellersCampus Zender (White-Label QR Client)</option>
+                          <option value="zender">WhatsApp Cloud Gateway (QR Client)</option>
                         </select>
                       </div>
 
                       {/* Zender White-label Connector Area */}
                       <div className="bg-slate-100/50 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/80 p-4 rounded-xl space-y-4">
-                          <h5 className="text-[11px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/20 px-2 py-1.5 rounded-lg border border-indigo-100/20 uppercase tracking-wider text-center">
+                          <h5 className="hidden text-[11px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/20 px-2 py-1.5 rounded-lg border border-indigo-100/20 uppercase tracking-wider text-center">
                             SellersCampus / Zender WhatsApp Configuration
                           </h5>
                           
@@ -1197,33 +906,23 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
                             ) : (
                               <div className="space-y-2">
                                 <p className="text-[11px] text-gray-400 leading-relaxed font-semibold">
-                                  Handshake status is Disconnected. Use your phone number to get a linking code.
+                                  Handshake status is Disconnected. Generate a QR code to link your device.
                                 </p>
                                 <div className="flex flex-col gap-2">
-                                  {/* Direct Phone Number Linking Section */}
+                                  {/* Generate QR Code Section */}
                                   <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-gray-200 dark:border-slate-800 space-y-3.5">
-                                    <div>
-                                      <h6 className="text-[10px] font-black text-gray-700 dark:text-slate-300 uppercase tracking-wider">
-                                        input Your WhatsApp business number
-                                      </h6>
-                                      <p className="text-[9px] text-gray-400 font-medium">কোনো স্ক্যানিং ঝামেলা ছাড়াই সরাসরি ৮ ডিজিটের কোড দিয়ে লিঙ্ক করুন</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                      <input
-                                        type="text"
-                                        value={otpPhone}
-                                        onChange={(e) => setOtpPhone(e.target.value)}
-                                        placeholder="input Your WhatsApp business number (e.g. 016XXXXXXXX)"
-                                        className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-slate-800 text-xs font-mono font-bold focus:ring-1 focus:ring-indigo-500 outline-none bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
-                                      />
+                                    <div className="space-y-3">
+                                      <p className="text-[11px] text-gray-500 dark:text-gray-400 font-semibold leading-relaxed border-l-2 border-indigo-500 pl-2">
+                                        💡 <strong>এখানে কোনো নম্বর দেওয়ার প্রয়োজন নেই।</strong> নিচে "বারকোড জেনারেট করুন" বাটনে ক্লিক করুন এবং আপনার মোবাইলের হোয়াটসঅ্যাপ থেকে স্ক্যান করে যুক্ত হোন। (No need to input your number. Just generate the QR code and scan it with your WhatsApp app.)
+                                      </p>
                                       <div className="flex flex-col gap-2">
                                         <button
                                           type="button"
-                                          onClick={handleGenerateOtp}
-                                          disabled={isGeneratingOtp}
-                                          className="w-full py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 font-bold rounded-xl text-xs text-white transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1"
+                                          onClick={handleConnectWhatsApp}
+                                          disabled={isConnectingWa}
+                                          className="w-full py-2 bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 font-bold rounded-xl text-xs text-white transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1"
                                         >
-                                          {isGeneratingOtp ? 'অপেক্ষা করুন...' : 'লংকিং কোড জেনারেট করুন (Get Pairing Code)'}
+                                          {isConnectingWa ? 'অপেক্ষা করুন...' : 'বারকোড জেনারেট করুন (Generate WhatsApp QR)'}
                                         </button>
                                         <button
                                           type="button"
@@ -1235,37 +934,11 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
                                       </div>
                                     </div>
 
-                                    {otpError && (
-                                      <p className="text-[10px] text-rose-500 font-bold whitespace-normal leading-normal">{otpError}</p>
+                                    {connectionError && (
+                                      <p className="text-[10px] text-rose-500 font-bold whitespace-normal leading-normal">{connectionError}</p>
                                     )}
 
-                                    {otpCode && (
-                                      <div className="bg-white dark:bg-slate-900 border border-indigo-500/30 p-3.5 rounded-2xl text-center flex flex-col items-center space-y-3 shadow-sm" id="qrcode">
-                                        <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider animate-bounce">
-                                          {otpCode.length < 40 ? 'Your 8-Digit Pairing Code' : 'Scan to Link Device'}
-                                        </p>
-                                        <div className="bg-white p-2 rounded-xl shadow-sm border border-gray-100 flex justify-center w-full">
-                                          {otpCode.length < 40 ? (
-                                            <div className="py-4 px-2 tracking-widest text-3xl font-black font-mono text-slate-800">
-                                              {otpCode}
-                                            </div>
-                                          ) : (
-                                            <QRCode 
-                                              value={otpCode}
-                                              size={180}
-                                              level="H"
-                                              className="animate-pulse duration-1000"
-                                              style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                            />
-                                          )}
-                                        </div>
-                                        <p className="text-[9px] text-gray-400 leading-normal font-sans">
-                                          {otpCode.length < 40 
-                                            ? 'Enter this 8-digit code in WhatsApp > Linked Devices > Link with phone number.'
-                                            : 'Go to WhatsApp Settings > Linked Devices > Link a Device and scan this code.'}
-                                        </p>
-                                      </div>
-                                    )}
+
                                   </div>
                                 </div>
                               </div>
@@ -1274,7 +947,7 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
                         </div>
 
                       <div className="p-3 bg-indigo-50/40 dark:bg-indigo-950/10 rounded-xl text-xs text-indigo-600 dark:text-indigo-400 leading-relaxed font-semibold">
-                        SellersCampus Zender uses a central cloud node. Pair once and receive instant, automatic WhatsApp invoice drops.
+                        The WhatsApp Gateway uses a central cloud node. Pair once and receive instant, automatic WhatsApp invoice drops.
                       </div>
 
                       {/* Test Connection Section (Admin) */}
@@ -1803,8 +1476,14 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
               </button>
             </div>
             <div className="p-6 flex flex-col items-center justify-center" id="qrcode">
-              {qrWidgetUrl ? (
-                <iframe src={qrWidgetUrl} className="w-full h-[320px] border-0 rounded-2xl bg-white" title="QR Code Scanner" />
+              {qrString ? (
+                <QRCode 
+                  value={qrString}
+                  size={256}
+                  level="H"
+                  className="bg-white p-2 rounded-xl"
+                  style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                />
               ) : (
                 <div className="flex flex-col items-center justify-center h-[320px] text-gray-400">
                   <RefreshCw className="w-8 h-8 animate-spin mb-4" />

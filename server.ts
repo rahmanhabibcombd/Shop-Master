@@ -159,108 +159,17 @@ async function startServer() {
               isSimulated: false
             });
           } else {
-            // Real Zender API call fell back due to status non-OK
+            const errText = await response.text();
+            return res.status(response.status).json({ success: false, error: errText });
           }
         } catch (apiErr: any) {
-          // Quiet sandbox fallback - network is unreachable/offline
+          return res.status(500).json({ success: false, error: apiErr.message });
         }
       }
 
-      // Simulation mode fallback
-      simulatedSessions.set(sessionDeviceId, 'disconnected');
-      return res.json({
-        success: true,
-        device_id: sessionDeviceId,
-        widget_url: `/api/gateways/simulator/widget?device_id=${sessionDeviceId}&shopId=${shopId || 'Master'}`,
-        isSimulated: true
-      });
+      return res.status(400).json({ success: false, error: 'Missing API key' });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Internal Server Error' });
-    }
-  });
-
-  // Phone OTP Generation endpoint for WhatsApp linking
-  app.post('/api/gateways/whatsapp/connect-otp', async (req: express.Request, res: express.Response) => {
-    try {
-      const { phone, token } = req.body;
-      const rawPhone = (phone || '').trim();
-      const cleanToken = (token || '4fe17fcfe73d5035f55b9144fa10e07443659005').trim();
-
-      if (!rawPhone) {
-        return res.status(400).json({ success: false, error: 'Phone number is required' });
-      }
-
-      // Format phone: remove any non-numeric characters e.g. +, - or spaces
-      let cleanPhone = rawPhone.replace(/[^\d]/g, '');
-      
-      // If of length 11 (standard Bangladesh mobile prefix e.g. 017...) we prepend '88' for country code
-      if (cleanPhone.length === 11 && cleanPhone.startsWith('0')) {
-        cleanPhone = '88' + cleanPhone;
-      }
-
-      // We pass secret and phone as specified by the Zender API to resolve the 'Invalid API Endpoint!' error.
-      // Passing &phone= generates an 8-digit code which is what the user interface describes
-      let url = `https://app.sellerscampus.com/api/create/wa.link?secret=${cleanToken}`;
-      if (cleanPhone) {
-         url += `&phone=${cleanPhone}`;
-      }
-      
-      console.log(`[Zender Link] Requesting OTP linking string for formatted number: ${cleanPhone} (Raw: ${rawPhone})...`);
-
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const data: any = await response.json();
-        console.log(`[Zender Link Response]`, data);
-
-        // Loose comparison since status could be string or numeric (200), or 'success', or success: true
-        const isSuccess = data.status == 200 || data.status === 'success' || data.success === true || !!data.data;
-        const hasPermissionError = String(data.message || data.error || '').toLowerCase().includes('permission');
-        
-        if (isSuccess && !hasPermissionError) {
-          // get the raw qr string from data.data.qrstring
-          const qrStringRaw = data.data?.qrstring || data.qrstring || null;
-          const serverId = data.data?.server_id || data.server_id || null;
-          return res.json({ success: true, qrstring: qrStringRaw, code: (data.code || qrStringRaw), deviceId: serverId });
-        } else {
-          // Fall back to a beautiful, simulated pairing code if it fails or returns a permission error (e.g. Satya has no permission)
-          const simulatedCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-          const serverId = `sim_device_${Math.floor(Math.random() * 100000)}`;
-          simulatedSessions.set(serverId, 'disconnected');
-          saveSessions(simulatedSessions);
-          
-          return res.json({ 
-            success: true, 
-            qrstring: simulatedCode,
-            code: simulatedCode,
-            deviceId: serverId,
-            isSimulated: true,
-            note: 'Simulated connection generated due to external gateway permission restrictions.'
-          });
-        }
-      } else {
-        // Fall back to a beautiful, simulated pairing code if it fails
-        const simulatedCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-        const serverId = `sim_device_${Math.floor(Math.random() * 100000)}`;
-        simulatedSessions.set(serverId, 'disconnected');
-        saveSessions(simulatedSessions);
-        
-        return res.json({ 
-          success: true, 
-          qrstring: simulatedCode,
-          code: simulatedCode,
-          deviceId: serverId,
-          isSimulated: true,
-          note: 'Simulated connection generated due to external gateway connection failure.'
-        });
-      }
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
     }
   });
 
@@ -293,21 +202,42 @@ async function startServer() {
             }
           });
 
+          const rawText = await response.text();
+          finalRawText = rawText;
+          
+          // Try parsing JSON first to detect explicit API/permission/subscription errors immediately (even on 403 non-2xx status)
+          let isPermissionError = false;
+          let tempParsed: any = {};
+          try {
+            tempParsed = JSON.parse(rawText);
+            const hasPermissionWord = String(tempParsed.message || tempParsed.error || '').toLowerCase().includes('permission') ||
+                                       String(tempParsed.message || tempParsed.error || '').toLowerCase().includes('subscription');
+            if (hasPermissionWord || tempParsed.status === 403 || response.status === 403 || tempParsed.status === 'error') {
+               isPermissionError = true;
+            }
+          } catch (e) {
+            if (response.status === 403) {
+              isPermissionError = true;
+            }
+          }
+
+          if (isPermissionError) {
+             console.log(`[Zender wa.link] Intercepted missing subscription permission: ${rawText}`);
+             return res.json({ 
+               success: false, 
+               status: 403,
+               message: tempParsed.message || tempParsed.error || "No permission to use WhatsApp service"
+             });
+          }
+
           if (response.ok) {
-            const rawText = await response.text();
-            finalRawText = rawText;
-            
             if (!rawText || rawText.includes('"data":false') || rawText.length < 100) {
               console.log(`[Zender wa.link] Attempt ${attempt} returned fallback/fake data: ${rawText.substring(0,30)}... Retrying in ${delaySeconds}s...`);
               await new Promise(r => setTimeout(r, delaySeconds * 1000));
               continue;
             }
             
-            try {
-              parsedData = JSON.parse(rawText);
-            } catch (e) {
-              parsedData = { raw_string: rawText };
-            }
+            parsedData = tempParsed;
 
             // Extract real QR string from JSON
             let detectedQr = rawText.trim();
@@ -339,33 +269,15 @@ async function startServer() {
                detectedQr = detectedQr.substring(1, detectedQr.length - 1);
             }
 
-            // --- 🎨 NEW OFFICIAL BRUTALIST & BULLETPROOF QR CLEAN-UP FILTER ---
-            // 🧼 ১. যদি শুরুতে কমা, স্পেস বা কোনো জাবর থাকে তা মুছে ফেলা
-            detectedQr = detectedQr.replace(/^[\s,]+/, '');
-
-            // 🧼 ২. সেলার্সক্যাম্পাসের অতিরিক্ত ট্র্যাকিং স্ট্রিং থাকলে তা কেটে ফেলা
-            if (detectedQr.includes("_SellersCampus_SecureLink_")) {
-                detectedQr = detectedQr.split("_SellersCampus_SecureLink_")[0];
-            }
-
-            // 🛡️ ডাবল প্রটেকশন: যদি কোনো HTML ট্যাগ বা অ্যাট্রিবিউটের ভেতরে থাকে
-            if (detectedQr.includes('title="')) {
-                detectedQr = detectedQr.split('title="')[1].split('"')[0];
-            } else if (detectedQr.includes('value="')) {
-                detectedQr = detectedQr.split('value="')[1].split('"')[0];
-            }
-
-            // 🟩 ৩. হোয়াটসঅ্যাপের অফিশিয়াল ২@ পয়েন্ট থেকে স্ট্রিং শুরু হওয়া ১০০% লক করা
-            if (detectedQr.includes("2@")) {
-                detectedQr = detectedQr.substring(detectedQr.indexOf("2@"));
-            }
-            // ------------------------------------------------------------------
+            // Send the raw string directly back to the frontend
+            let rawQrString = detectedQr;
             
             console.log(`[Zender wa.link] Real QR Payload fully acquired and cleaned on attempt ${attempt}:`, detectedQr.substring(0, 40));
             return res.json({
               success: true,
               device_id: parsedData.device_id || sessionDeviceId,
               widget_url: `/api/gateways/real/widget?qr_data=${encodeURIComponent(detectedQr.trim())}`,
+              rawQrString: detectedQr, // Pass the raw extracted QR string back to frontend for sanitization
               status: parsedData.status || 'pending',
               isSimulated: false,
               raw: parsedData
@@ -373,7 +285,7 @@ async function startServer() {
             
           } else {
             lastErrorStatus = response.status;
-            lastErrorMessage = await response.text();
+            lastErrorMessage = rawText;
             console.log(`[Zender wa.link] HTTP ${response.status} Error. Node likely busy/offline. Retrying...`);
             await new Promise(r => setTimeout(r, delaySeconds * 1000));
             continue;
@@ -400,24 +312,14 @@ async function startServer() {
   app.get('/api/gateways/status', async (req: express.Request, res: express.Response) => {
     try {
       const endpoint_url = 'https://app.sellerscampus.com/api/v1';
-      let api_key = '4fe17fcfe73d5035f55b9144fa10e07443659005';
+      let api_key = (req.query.api_key as string) || '4fe17fcfe73d5035f55b9144fa10e07443659005';
+      if (api_key === 'your_sellerscampus_zender_master_api_key_here' || api_key.trim() === '') {
+         api_key = '4fe17fcfe73d5035f55b9144fa10e07443659005';
+      }
       const device_id = (req.query.device_id as string) || '';
       const phone_query = (req.query.phone as string) || '';
 
       let cleanEndpoint = endpoint_url;
-
-      // Check for simulated/sandbox/demo mode
-      if (!device_id || device_id.startsWith('z_wa_demo_') || device_id.startsWith('sim_device_')) {
-        let fallbackStatus = simulatedSessions.get(device_id) || 'disconnected';
-        if (fallbackStatus === 'disconnected' && device_id.startsWith('sim_device_')) {
-          // Auto connect after 3 seconds for simulated OTP pairing
-          setTimeout(() => {
-            simulatedSessions.set(device_id, 'connected');
-            saveSessions(simulatedSessions);
-          }, 3000);
-        }
-        return res.json({ success: true, status: fallbackStatus, isSimulated: true });
-      }
 
       try {
         let checkUrl = `${cleanEndpoint}/whatsapp/status/${device_id}`;
@@ -426,8 +328,10 @@ async function startServer() {
           'Content-Type': 'application/json'
         };
 
+        const isWalink = device_id.startsWith('z_walink_') || device_id.startsWith('z_wa_otp_') || api_key.length === 40;
+
         // If the device ID happens to be from walink or we sense a specific walink setup
-        if (device_id.startsWith('z_walink_') || api_key.length === 40) { // token/secret is usually 40 chars
+        if (isWalink) { // token/secret is usually 40 chars
           checkUrl = `https://app.sellerscampus.com/api/get/wa.accounts?secret=${api_key}`;
           headers = {}; // clear bearer
         }
@@ -453,6 +357,12 @@ async function startServer() {
                 if (searchPhone.length === 11 && searchPhone.startsWith('0')) searchPhone = '88' + searchPhone;
                 matchingAccount = data.data.find((acc: any) => acc.phone && acc.phone.includes(searchPhone));
              }
+             // If we are polling for a new QR code (z_walink_) or resync is explicitly true, match ANY connected account
+             if (!matchingAccount && phone_query && (device_id.startsWith('z_walink_') || device_id.startsWith('z_wa_otp_'))) {
+                 // ONLY fallback if we have a phone query to match against, otherwise do NOT connect randomly
+                 matchingAccount = data.data.find((acc: any) => acc.phone && acc.phone.includes(phone_query) && (acc.status === 'connected' || acc.status === 'active'));
+             }
+             // CRITICAL FIX: If resync is requested, we can strictly grab the active connection to sync the UI state
              if (!matchingAccount && req.query.resync === 'true') {
                  matchingAccount = data.data.find((acc: any) => acc.status === 'connected' || acc.status === 'active');
              }
@@ -520,17 +430,6 @@ async function startServer() {
 
       const cleanEndpoint = endpoint_url;
 
-      if (device_id.startsWith('z_wa_demo_') || device_id.startsWith('sim_device_') || !device_id) {
-        let fallbackStatus = simulatedSessions.get(device_id) || 'disconnected';
-        if (fallbackStatus === 'disconnected' && device_id.startsWith('sim_device_')) {
-          setTimeout(() => {
-            simulatedSessions.set(device_id, 'connected');
-            saveSessions(simulatedSessions);
-          }, 3000);
-        }
-        return res.json({ success: true, status: fallbackStatus, isSimulated: true });
-      }
-
       try {
         const response = await fetch(`${cleanEndpoint}/whatsapp/status/${device_id}`, {
           method: 'GET',
@@ -551,8 +450,7 @@ async function startServer() {
         // Quiet fallback
       }
 
-      const backupStatus = simulatedSessions.get(device_id) || 'disconnected';
-      return res.json({ success: true, status: backupStatus });
+      return res.json({ success: true, status: 'disconnected' });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Internal server error' });
     }
@@ -568,9 +466,12 @@ async function startServer() {
           api_key = '4fe17fcfe73d5035f55b9144fa10e07443659005';
       }
 
-      if (!device_id || device_id.startsWith('z_wa_demo_')) {
-        simulatedSessions.delete(device_id);
-        return res.json({ success: true, message: 'Simulated session unlinked locally.' });
+      if (device_id) {
+         simulatedSessions.delete(device_id);
+      }
+
+      if (!device_id || device_id.startsWith('z_wa_demo_') || device_id.startsWith('z_walink_') || device_id.startsWith('z_wa_otp_') || device_id.startsWith('sim_device_')) {
+        return res.json({ success: true, message: 'Simulated/Temporary session unlinked locally.' });
       }
 
       let realAccountUniqueId = device_id;
@@ -944,19 +845,27 @@ async function startServer() {
         try {
           let realAccountUniqueId = waDeviceId || '';
           
-          if (!realAccountUniqueId || String(realAccountUniqueId).length < 20) {
+          if (realAccountUniqueId.startsWith('sim_device_') || realAccountUniqueId.startsWith('z_wa_demo_')) {
+             console.log(`[POS Dispatch Controller] Simulated device detected. Bypassing Zender API and simulating success.`);
+             return res.json({ success: true, route: 'whatsapp', simulated: true, data: { status: 200, message: 'Simulated success message.' } });
+          }
+
+          if (!realAccountUniqueId) {
+             return res.status(400).json({
+               success: false,
+               error: 'কোনো হোয়াটসঅ্যাপ অ্যাকাউন্ট যুক্ত করা নেই বা অ্যাকাউন্ট আইডি সঠিক নয়। প্রথমে সেটিংস থেকে অ্যাকাউন্ট কানেক্ট করুন। (WhatsApp not connected properly)',
+               code: 'WA_NOT_LINKED'
+             });
+          }
+
+          if (String(realAccountUniqueId).length < 20) {
             try {
               const checkUrl = `https://app.sellerscampus.com/api/get/wa.accounts?secret=${userSecret}`;
               const resolveRes = await fetch(checkUrl);
               if (resolveRes.ok) {
                 const resolveData: any = await resolveRes.json();
                 if (resolveData?.data && Array.isArray(resolveData.data) && resolveData.data.length > 0) {
-                   let matched = null;
-                   if (waDeviceId) {
-                     matched = resolveData.data.find((acc: any) => String(acc.id) === String(waDeviceId) || String(acc.unique) === String(waDeviceId));
-                   } else {
-                     matched = resolveData.data[0]; // grab first available if no specific requested
-                   }
+                   let matched = resolveData.data.find((acc: any) => String(acc.id) === String(waDeviceId) || String(acc.unique) === String(waDeviceId));
                    if (matched && matched.unique) {
                      realAccountUniqueId = matched.unique;
                      console.log(`[Zender WhatsApp] Resolved device ID to unique ID: ${realAccountUniqueId}`);
@@ -968,10 +877,10 @@ async function startServer() {
             }
           }
 
-          if (!realAccountUniqueId || (realAccountUniqueId === '1' && !waDeviceId)) {
+          if (!realAccountUniqueId || String(realAccountUniqueId).length < 20 || realAccountUniqueId === '1') {
              return res.status(400).json({
                success: false,
-               error: 'কোনো হোয়াটসঅ্যাপ অ্যাকাউন্ট যুক্ত করা নেই। প্রথমে সেটিংস থেকে অ্যাকাউন্ট কানেক্ট করুন। (WhatsApp not connected)',
+               error: 'কোনো হোয়াটসঅ্যাপ অ্যাকাউন্ট যুক্ত করা নেই বা অ্যাকাউন্ট আইডি সঠিক নয়। প্রথমে সেটিংস থেকে অ্যাকাউন্ট কানেক্ট করুন। (WhatsApp not connected properly)',
                code: 'WA_NOT_LINKED'
              });
           }
@@ -1620,6 +1529,11 @@ async function startServer() {
   });
 
   const isProd = process.env.NODE_ENV === 'production';
+
+  // API 404 Catch-all (must be before SPA fallback)
+  app.use('/api', (req, res) => {
+    res.status(404).json({ success: false, error: `API route not found: ${req.method} ${req.path}` });
+  });
 
   // For development (AI Studio / Local dev)
   if (!isProd) {
