@@ -180,10 +180,11 @@ async function startServer() {
   // Proxy endpoint to hit SellersCampus / Zender wa.link directly with secret
   app.post('/api/gateways/whatsapp/connect-walink', async (req: express.Request, res: express.Response) => {
     try {
-      const { secret } = req.body;
+      const { secret, shopId } = req.body;
       const cleanSecret = (secret || '4fe17fcfe73d5035f55b9144fa10e07443659005').trim();
+      const merchantID = shopId || 'merchant';
       
-      const sessionDeviceId = `z_walink_${Math.floor(10000 + Math.random() * 90000)}`;
+      const sessionDeviceId = `z_walink_${merchantID}_${Math.floor(10000 + Math.random() * 90000)}`;
       const urlCmd = `https://app.sellerscampus.com/api/create/wa.link?secret=${cleanSecret}`;
       
       let attempt = 0;
@@ -354,22 +355,41 @@ async function startServer() {
 
           // Handle wa.accounts array response
           if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+             const reqMerchantId = (req.query.merchant_id as string) || (req.query.shopId as string) || '';
+             
              let matchingAccount = data.data.find((acc: any) => String(acc.unique) === String(device_id) || String(acc.id) === String(device_id));
+             
              if (!matchingAccount && phone_query) {
                 // Formatting phone parameter
                 let searchPhone = phone_query;
                 if (searchPhone.length === 11 && searchPhone.startsWith('0')) searchPhone = '88' + searchPhone;
                 matchingAccount = data.data.find((acc: any) => acc.phone && acc.phone.includes(searchPhone));
              }
-             // If we are polling for a new QR code (z_walink_) or resync is explicitly true, match ANY connected account
+
              if (!matchingAccount && phone_query && (device_id.startsWith('z_walink_') || device_id.startsWith('z_wa_otp_'))) {
-                 // ONLY fallback if we have a phone query to match against, otherwise do NOT connect randomly
                  matchingAccount = data.data.find((acc: any) => acc.phone && acc.phone.includes(phone_query) && (acc.status === 'connected' || acc.status === 'active'));
              }
-             // CRITICAL FIX: If resync is requested, we can strictly grab the active connection to sync the UI state
-             if (!matchingAccount && req.query.resync === 'true') {
-                 matchingAccount = data.data.find((acc: any) => acc.status === 'connected' || acc.status === 'active');
+             
+             // ENFORCE MERCHANT ID SCOPING
+             if (!matchingAccount && req.query.resync === 'true' && reqMerchantId) {
+                 matchingAccount = data.data.find((acc: any) => {
+                     const isConnectedState = acc.status === 'connected' || acc.status === 'active';
+                     const hasMerchantID = String(acc.unique).includes(reqMerchantId) || String(acc.id).includes(reqMerchantId);
+                     return isConnectedState && hasMerchantID;
+                 });
+             } else if (!matchingAccount && req.query.resync === 'true') {
+                 // Do not auto-assign global connections to missing merchants
+                 matchingAccount = undefined;
              }
+
+             // Hard security check: if an account is found but it doesn't belong to this merchant, reject it
+             if (matchingAccount && reqMerchantId) {
+                 const hasMerchantID = String(matchingAccount.unique).includes(reqMerchantId) || String(matchingAccount.id).includes(reqMerchantId);
+                 if (!hasMerchantID) {
+                     matchingAccount = undefined;
+                 }
+             }
+
              if (matchingAccount && (matchingAccount.status === 'connected' || matchingAccount.status === 'active')) {
                 isConnected = true;
                 realDeviceId = matchingAccount.unique || matchingAccount.id || device_id;
@@ -486,6 +506,16 @@ async function startServer() {
           const resolveData: any = await resolveRes.json();
           if (resolveData?.data && Array.isArray(resolveData.data) && resolveData.data.length > 0) {
              let matched = resolveData.data.find((acc: any) => String(acc.id) === String(device_id) || String(acc.unique) === String(device_id));
+             
+             // Enforce merchant isolation for unlink
+             const reqShopId = req.body.shopId || req.body.merchant_id || '';
+             if (matched && reqShopId) {
+                 const hasMerchantID = String(matched.unique).includes(reqShopId) || String(matched.id).includes(reqShopId);
+                 if (!hasMerchantID) {
+                     return res.status(403).json({ success: false, message: 'Unauthorized: Session does not belong to this merchant.' });
+                 }
+             }
+
              if (matched && matched.unique) {
                 realAccountUniqueId = matched.unique;
              }

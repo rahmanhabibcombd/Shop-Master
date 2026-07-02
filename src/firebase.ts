@@ -158,7 +158,8 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 async function testConnection() {
   if (typeof window === 'undefined') return;
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    // skip network check to avoid console warnings during development/offline mode
+    // await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
     if (errorMsg.includes('offline') || errorMsg.includes('unavailable') || errorMsg.includes('network')) {
@@ -169,7 +170,7 @@ async function testConnection() {
     }
   }
 }
-testConnection();
+// testConnection();
 
 export const deleteShopAllData = async (shopId: string) => {
   if (!shopId) return;

@@ -144,7 +144,8 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
         endpoint_url: zenderEndpointUrl,
         api_key: waType === 'walink' ? waLinkSecret : zenderApiKey,
         device_id: activeId,
-        resync: 'true'
+        resync: 'true',
+        merchant_id: settings.id || 'merchant'
       });
       const res = await fetch(`/api/gateways/status?${queryParams.toString()}`);
       if (res.ok) {
@@ -309,7 +310,8 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          secret: currentToken
+          secret: currentToken,
+          shopId: settings.id || 'merchant'
         })
       });
 
@@ -372,7 +374,8 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
         body: JSON.stringify({
           endpoint_url: zenderEndpointUrl,
           api_key: waType === 'walink' ? waLinkSecret : zenderApiKey,
-          device_id: zenderWaDeviceId || zenderDeviceId
+          device_id: zenderWaDeviceId || zenderDeviceId,
+          shopId: settings.id || 'merchant'
         })
       });
 
