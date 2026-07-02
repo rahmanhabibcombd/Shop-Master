@@ -71,7 +71,11 @@ async function startServer() {
       });
     } catch (error: any) {
       console.error('Gemini API Error:', error);
-      res.status(500).json({ error: error.message || 'Internal Server Error' });
+      let errorMsg = error.message || 'Internal Server Error';
+      if (errorMsg.includes('503') || errorMsg.includes('high demand') || errorMsg.includes('UNAVAILABLE')) {
+        errorMsg = 'AI Model is currently experiencing high demand. Please try again in a few moments.';
+      }
+      res.status(500).json({ error: errorMsg });
     }
   };
 

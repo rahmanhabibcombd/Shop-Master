@@ -40,6 +40,9 @@ export async function syncGoogleContacts(
          if (res.status === 401) {
             // Token expired or invalid
             setCachedAccessToken(null);
+            if (silent) {
+               return { downloaded: 0, uploaded: 0 };
+            }
             throw new Error("Authentication expired. Please try syncing again.");
          }
          throw new Error(`Google API error: ${res.statusText}`);
@@ -168,8 +171,11 @@ export async function syncGoogleContacts(
     return { downloaded: downloadedCount, uploaded: uploadedCount };
   } catch (error: any) {
     console.error("Contact Sync Error", error);
-    onProgress(`Sync Error: ${error.message}`);
-    setTimeout(() => onProgress(''), 5000);
-    throw error;
+    if (!silent) {
+      onProgress(`Sync Error: ${error.message}`);
+      setTimeout(() => onProgress(''), 5000);
+      throw error;
+    }
+    return { downloaded: 0, uploaded: 0 };
   }
 }
