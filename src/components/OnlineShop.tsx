@@ -24,7 +24,15 @@ import {
   ChevronDown,
   Plus,
   Truck,
-  Activity
+  Activity,
+  Mic,
+  Bot,
+  Tag,
+  ShoppingCart,
+  Edit,
+  Trash2,
+  CheckCircle,
+  Printer
 } from 'lucide-react';
 
 interface TrackingMilestone {
@@ -73,19 +81,55 @@ interface FbThread {
   messages: FbMessage[];
 }
 
+interface WaMessage {
+  id: string;
+  sender: 'user' | 'system';
+  text: string;
+  created_at: string;
+  is_voice?: boolean;
+  voice_text_translation?: string;
+}
+
+interface WaThread {
+  id: string;
+  customer_name: string;
+  customer_phone: string;
+  unread: boolean;
+  ai_automated: boolean;
+  messages: WaMessage[];
+}
+
 export default function OnlineShop() {
-  const [activeTab, setActiveTab] = useState<'woocommerce' | 'laravel' | 'facebook'>('woocommerce');
+  const [activeTab, setActiveTab] = useState<'woocommerce' | 'laravel' | 'facebook' | 'whatsapp_ai'>('woocommerce');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<{ 
     wooOrders: WooOrder[]; 
     laravelEvents: LaravelEvent[]; 
     fbChats: FbThread[];
+    waChats: WaThread[];
+    aiProducts?: any[];
+    aiSettings?: {
+      agentName: string;
+      autoConfirmOrders: boolean;
+      systemPrompt: string;
+      failureFallbackMessage: string;
+    };
+    aiOrders?: any[];
     woo_webhook_active?: boolean;
     woo_last_ping?: string;
   }>({
     wooOrders: [],
     laravelEvents: [],
-    fbChats: []
+    fbChats: [],
+    waChats: [],
+    aiProducts: [],
+    aiSettings: {
+      agentName: 'SellersCampus AI Copilot',
+      autoConfirmOrders: false,
+      systemPrompt: '',
+      failureFallbackMessage: ''
+    },
+    aiOrders: []
   });
 
   // Settings
@@ -111,6 +155,13 @@ export default function OnlineShop() {
   const [simFbSenderId, setSimFbSenderId] = useState('8837162534');
   const [simFbText, setSimFbText] = useState('ভাইয়া, আমার এই অর্ডারটি কনফার্ম হয়েছে কিনা জানাবেন?');
 
+  // WhatsApp simulation inputs
+  const [simWaSender, setSimWaSender] = useState('Mohammad Raju');
+  const [simWaPhone, setSimWaPhone] = useState('01799887766');
+  const [simWaText, setSimWaText] = useState('ভাইয়া, আমি একটা লেদার ওয়ালেট ও পাঞ্জাবি নিতে চাই। নাম রাজু, ফোন ০১৭৯৯৮৮৭৭৬৬, ঠিকানা ধানমন্ডি ৮, ঢাকা।');
+  const [simWaIsVoice, setSimWaIsVoice] = useState(false);
+  const [simWaVoiceDuration, setSimWaVoiceDuration] = useState('12');
+
   // Expanded order view states
   const [expandedWooOrderId, setExpandedWooOrderId] = useState<string | null>(null);
   const [newLogStatus, setNewLogStatus] = useState('প্যাকেজিং সফল');
@@ -119,6 +170,32 @@ export default function OnlineShop() {
   // Active chat thread ID
   const [activeFbThreadId, setActiveFbThreadId] = useState<string | null>(null);
   const [fbReplyText, setFbReplyText] = useState('');
+
+  // Active WhatsApp chat thread ID
+  const [activeWaThreadId, setActiveWaThreadId] = useState<string | null>(null);
+  const [waReplyText, setWaReplyText] = useState('');
+  const [isWaReplyLoading, setIsWaReplyLoading] = useState(false);
+  const [isWaProcessingVoice, setIsWaProcessingVoice] = useState(false);
+
+  // WhatsApp Expert Bot Sub-Tabs
+  const [waSubTab, setWaSubTab] = useState<'chats' | 'orders' | 'settings' | 'catalog'>('chats');
+  const [selectedPrintOrder, setSelectedPrintOrder] = useState<any | null>(null);
+
+  // WhatsApp Dynamic Product Catalog State
+  const [catalogId, setCatalogId] = useState('');
+  const [catalogName, setCatalogName] = useState('');
+  const [catalogSku, setCatalogSku] = useState('');
+  const [catalogPrice, setCatalogPrice] = useState('');
+  const [catalogStock, setCatalogStock] = useState('');
+  const [catalogDescription, setCatalogDescription] = useState('');
+  const [isCatalogSubmitting, setIsCatalogSubmitting] = useState(false);
+
+  // WhatsApp AI Bot Settings Form State
+  const [settingsAgentName, setSettingsAgentName] = useState('');
+  const [settingsAutoConfirm, setSettingsAutoConfirm] = useState(false);
+  const [settingsPrompt, setSettingsPrompt] = useState('');
+  const [settingsFallback, setSettingsFallback] = useState('');
+  const [isSettingsSubmitting, setIsSettingsSubmitting] = useState(false);
 
   const [copiedWooUrl, setCopiedWooUrl] = useState(false);
   const [copiedLarUrl, setCopiedLarUrl] = useState(false);
@@ -142,12 +219,15 @@ export default function OnlineShop() {
           if (d.fbChats && d.fbChats.length > 0 && !activeFbThreadId) {
             setActiveFbThreadId(d.fbChats[0].id);
           }
+          if (d.waChats && d.waChats.length > 0 && !activeWaThreadId) {
+            setActiveWaThreadId(d.waChats[0].id);
+          }
         } else {
           console.warn('Fetched integration data is not JSON. Server might be restarting.');
         }
       }
     } catch (e) {
-      console.error('Error fetching integration data:', e);
+      console.warn('Error fetching integration data (transient during server restart):', e);
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -163,6 +243,15 @@ export default function OnlineShop() {
 
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (data.aiSettings) {
+      setSettingsAgentName(data.aiSettings.agentName || 'SellersCampus AI Copilot');
+      setSettingsAutoConfirm(!!data.aiSettings.autoConfirmOrders);
+      setSettingsPrompt(data.aiSettings.systemPrompt || '');
+      setSettingsFallback(data.aiSettings.failureFallbackMessage || '');
+    }
+  }, [data.aiSettings]);
 
   const triggerReset = async () => {
     if (!window.confirm('Are you sure you want to restore integration data back to pre-seeded simulation templates?')) return;
@@ -342,10 +431,231 @@ export default function OnlineShop() {
     }
   };
 
+  // WhatsApp Actions
+  const simulateWaWebhook = async (customText?: string, customIsVoice = false) => {
+    try {
+      setIsWaReplyLoading(true);
+      const messageContent = customText || simWaText;
+      const res = await fetch('/api/integrations/whatsapp/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_name: simWaSender,
+          customer_phone: simWaPhone,
+          text: messageContent,
+          isVoice: customIsVoice || simWaIsVoice,
+          voiceDuration: simWaVoiceDuration
+        })
+      });
+      if (res.ok) {
+        const out = await res.json();
+        await fetchAllData();
+        if (out.thread && out.thread.id) {
+          setActiveWaThreadId(out.thread.id);
+        }
+        if (!customText) {
+          setSimWaText('');
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsWaReplyLoading(false);
+    }
+  };
+
+  const simulateWaVoiceNote = async () => {
+    setIsWaProcessingVoice(true);
+    // Simulate speech recording wave visualizer delay of 2.5 seconds
+    setTimeout(async () => {
+      setIsWaProcessingVoice(false);
+      await simulateWaWebhook(
+        "আসসালামু আলাইকুম ভাইয়া, আমি একটি প্রিমিয়াম লেদার ওয়ালেট কিনতে চাই। আমার নাম মইনুল, মোবাইল ০১৭৯৯৮৮৭৭৬৬, ঠিকানা হাউজ ৪, রোড ১২, উত্তরা, ঢাকা।",
+        true
+      );
+    }, 2500);
+  };
+
+  const sendWaReply = async () => {
+    if (!activeWaThreadId || !waReplyText.trim()) return;
+    try {
+      setIsWaReplyLoading(true);
+      const res = await fetch('/api/integrations/whatsapp/reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId: activeWaThreadId,
+          text: waReplyText
+        })
+      });
+      if (res.ok) {
+        setWaReplyText('');
+        await fetchAllData();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsWaReplyLoading(false);
+    }
+  };
+
+  const toggleWaAi = async (threadId: string, currentVal: boolean) => {
+    try {
+      const res = await fetch('/api/integrations/whatsapp/ai-toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId,
+          ai_automated: !currentVal
+        })
+      });
+      if (res.ok) {
+        await fetchAllData();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const saveWaSettings = async () => {
+    try {
+      setIsSettingsSubmitting(true);
+      const res = await fetch('/api/integrations/whatsapp/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentName: settingsAgentName,
+          autoConfirmOrders: settingsAutoConfirm,
+          systemPrompt: settingsPrompt,
+          failureFallbackMessage: settingsFallback
+        })
+      });
+      if (res.ok) {
+        await fetchAllData();
+        alert('এআই সেটিংস সফলভাবে সংরক্ষণ করা হয়েছে!');
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSettingsSubmitting(false);
+    }
+  };
+
+  const addCatalogProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setIsCatalogSubmitting(true);
+      const res = await fetch('/api/integrations/whatsapp/products/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: catalogName,
+          sku: catalogSku,
+          price: Number(catalogPrice),
+          stock: Number(catalogStock),
+          description: catalogDescription
+        })
+      });
+      if (res.ok) {
+        setCatalogName('');
+        setCatalogSku('');
+        setCatalogPrice('');
+        setCatalogStock('');
+        setCatalogDescription('');
+        setCatalogId('');
+        await fetchAllData();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsCatalogSubmitting(false);
+    }
+  };
+
+  const editCatalogProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setIsCatalogSubmitting(true);
+      const res = await fetch('/api/integrations/whatsapp/products/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: catalogId,
+          name: catalogName,
+          sku: catalogSku,
+          price: Number(catalogPrice),
+          stock: Number(catalogStock),
+          description: catalogDescription
+        })
+      });
+      if (res.ok) {
+        setCatalogName('');
+        setCatalogSku('');
+        setCatalogPrice('');
+        setCatalogStock('');
+        setCatalogDescription('');
+        setCatalogId('');
+        await fetchAllData();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsCatalogSubmitting(false);
+    }
+  };
+
+  const deleteCatalogProduct = async (id: string) => {
+    if (!window.confirm('আপনি কি নিশ্চিত যে এই প্রোডাক্টটি ক্যাটালগ থেকে মুছে ফেলতে চান?')) return;
+    try {
+      const res = await fetch('/api/integrations/whatsapp/products/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) {
+        await fetchAllData();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const updateAiOrderStatus = async (id: string, status: string) => {
+    try {
+      const res = await fetch('/api/integrations/whatsapp/orders/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status })
+      });
+      if (res.ok) {
+        await fetchAllData();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const deleteAiOrder = async (id: string) => {
+    if (!window.confirm('আপনি কি নিশ্চিত যে এই অর্ডারটি মুছে ফেলতে চান?')) return;
+    try {
+      const res = await fetch('/api/integrations/whatsapp/orders/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) {
+        await fetchAllData();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const currentOrigin = window.location.origin;
   const wooWebhookEndpoint = `${currentOrigin}/api/integrations/woocommerce`;
   const larWebhookEndpoint = `${currentOrigin}/api/integrations/laravel`;
   const fbWebhookEndpoint = `${currentOrigin}/api/integrations/facebook`;
+  const waWebhookEndpoint = `${currentOrigin}/api/integrations/whatsapp/message`;
 
   const copyToClipboard = (text: string, setCopied: React.Dispatch<React.SetStateAction<boolean>>) => {
     navigator.clipboard.writeText(text);
@@ -354,6 +664,7 @@ export default function OnlineShop() {
   };
 
   const activeThread = data.fbChats.find(t => t.id === activeFbThreadId);
+  const activeWaThread = (data.waChats || []).find(t => t.id === activeWaThreadId);
 
   return (
     <div className="h-[calc(100vh-5rem)] flex flex-col bg-slate-50 dark:bg-slate-900 overflow-hidden" id="online-shop-root">
@@ -370,7 +681,7 @@ export default function OnlineShop() {
             </span>
           </div>
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-            ম্যানেজ করুন আপনার ওয়ার্ডপ্রেস (WooCommerce), লারাভেল ওয়েবসাইট এবং ফেসবুক মেসেঞ্জার চ্যাট হাব (we working this page)
+            ম্যানেজ করুন আপনার ওয়ার্ডপ্রেস (WooCommerce), লারাভেল ওয়েবসাইট, ফেসবুক মেসেঞ্জার এবং হোয়াটসঅ্যাপ এআই রোবট অ্যাসিস্ট্যান্ট (WhatsApp AI)
           </p>
         </div>
 
@@ -397,7 +708,8 @@ export default function OnlineShop() {
         {[
           { id: 'woocommerce', label: 'WordPress / WooCommerce', count: data.wooOrders.filter(o => o.status === 'pending').length },
           { id: 'laravel', label: 'Laravel PHP System', count: data.laravelEvents.filter(e => e.status === 'unread').length },
-          { id: 'facebook', label: 'Facebook Messenger', count: data.fbChats.filter(t => t.unread).length }
+          { id: 'facebook', label: 'Facebook Messenger', count: data.fbChats.filter(t => t.unread).length },
+          { id: 'whatsapp_ai', label: 'WhatsApp AI Agent (Expert)', count: (data.waChats || []).filter(t => t.unread).length }
         ].map(tab => (
           <button
             key={tab.id}
@@ -812,7 +1124,7 @@ export default function OnlineShop() {
                     <div>
                       <label className="block text-[10px] text-gray-400 mb-1">গ্রাহকের নাম (Sender Name)</label>
                       <input 
-                        type="text"
+                        type="text" 
                         value={simFbSender}
                         onChange={e => setSimFbSender(e.target.value)}
                         className="w-full bg-white dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-md px-2 py-1.5 text-xs text-gray-800 dark:text-gray-200 focus:outline-none"
@@ -835,6 +1147,103 @@ export default function OnlineShop() {
                       <Zap className="w-3.5 h-3.5" /> ফেক মেসেজ পাঠান
                     </button>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'whatsapp_ai' && (
+              <div className="space-y-5">
+                <div className="bg-emerald-50/50 dark:bg-emerald-950/20 p-4 rounded-xl border border-emerald-100/50 dark:border-emerald-950/50">
+                  <div className="flex items-center gap-2 mb-2">
+                    <MessageSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <h3 className="text-sm font-bold text-emerald-900 dark:text-emerald-300">WhatsApp Expert Bot</h3>
+                  </div>
+                  <p className="text-xs text-emerald-700/80 dark:text-emerald-400 leading-relaxed">
+                    SellersCampus AI চ্যাট ইঞ্জিনের সাথে আপনার কাস্টমারদের মেসেজগুলোর সরাসরি অটো-রিপ্লাই এবং অর্ডার প্রসেসিং সিস্টেম পরীক্ষা করুন।
+                  </p>
+                </div>
+
+                <div className="space-y-3 bg-slate-50 dark:bg-slate-900 p-3.5 rounded-xl border border-gray-150 dark:border-slate-805 text-xs">
+                  <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider border-b border-gray-200/50 dark:border-slate-800 pb-2">
+                    🧪 কাস্টমার মেসেজ সিমুলেটর
+                  </h4>
+
+                  <div className="space-y-2.5 mt-2">
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-1">কাস্টমারের নাম</label>
+                      <input 
+                        type="text" 
+                        value={simWaSender}
+                        onChange={e => setSimWaSender(e.target.value)}
+                        className="w-full bg-white dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-md px-2 py-1.5 text-xs text-gray-800 dark:text-gray-200 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-1">মোবাইল নম্বর</label>
+                      <input 
+                        type="text" 
+                        value={simWaPhone}
+                        onChange={e => setSimWaPhone(e.target.value)}
+                        className="w-full bg-white dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-md px-2 py-1.5 text-xs text-gray-800 dark:text-gray-200 focus:outline-none font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-1">হোয়াটসঅ্যাপ মেসেজ টেক্সট</label>
+                      <textarea 
+                        rows={3}
+                        value={simWaText}
+                        onChange={e => setSimWaText(e.target.value)}
+                        placeholder="যেমন: পাঞ্জাবির দাম কত?"
+                        className="w-full bg-white dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-md px-2 py-1.5 text-xs text-gray-800 dark:text-gray-200 focus:outline-none resize-none"
+                      />
+                    </div>
+
+                    <button 
+                      onClick={() => simulateWaWebhook()}
+                      disabled={isWaReplyLoading}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs mt-1 transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/15"
+                    >
+                      <Zap className="w-3.5 h-3.5" /> মেসেজ পুশ করুন
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-3 bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-slate-900/60 dark:to-slate-950/60 p-3.5 rounded-xl border border-indigo-100 dark:border-slate-850 text-xs">
+                  <h4 className="text-xs font-bold text-indigo-900 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                    🎙️ Voice Message AI Simulation
+                  </h4>
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    গ্রাহকদের পাঠানো ভয়েস নোট স্পীচ-টু-টেক্সট কনভার্শন এবং অটো-অর্ডার জেনারেশন পরীক্ষা করুন।
+                  </p>
+
+                  <button
+                    onClick={simulateWaVoiceNote}
+                    disabled={isWaProcessingVoice}
+                    className={`w-full py-2.5 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow ${
+                      isWaProcessingVoice 
+                        ? 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-300' 
+                        : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/15'
+                    }`}
+                  >
+                    {isWaProcessingVoice ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Recording & translating...
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="w-3.5 h-3.5" /> ভয়েস অর্ডার সিমুলেশন
+                      </>
+                    )}
+                  </button>
+                  {isWaProcessingVoice && (
+                    <div className="flex items-center gap-1.5 justify-center mt-2">
+                      <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-bounce"></span>
+                      <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                      <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1391,7 +1800,822 @@ export default function OnlineShop() {
             </div>
           )}
 
+          {activeTab === 'whatsapp_ai' && (
+            <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
+              
+              {/* WhatsApp Sub-Tabs Bar */}
+              <div className="bg-white dark:bg-slate-950 border-b border-gray-200 dark:border-slate-800 p-3 flex flex-wrap items-center justify-between gap-3 shrink-0 transition-colors">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                    <Bot className="w-4 h-4 animate-pulse" />
+                  </div>
+                  <div>
+                    <h2 className="text-xs font-black text-gray-800 dark:text-white uppercase tracking-wider">WhatsApp AI Expert Bot</h2>
+                    <p className="text-[10px] text-gray-400 font-medium">রিয়েল-টাইম এআই অটোমেশন, স্টক ক্যাটালগ ও অর্ডার সেটিংস হাব</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
+                  <button
+                    onClick={() => setWaSubTab('chats')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      waSubTab === 'chats'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">লাইভ ইনবক্স</span>
+                    <span className="bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 text-[9px] font-black rounded-full">
+                      {(data.waChats || []).length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setWaSubTab('orders')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      waSubTab === 'orders'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">এআই অর্ডারস</span>
+                    <span className="bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-400 px-1.5 py-0.5 text-[9px] font-black rounded-full">
+                      {(data.aiOrders || []).length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setWaSubTab('catalog')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      waSubTab === 'catalog'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    <Tag className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">প্রোডাক্ট ক্যাটালগ</span>
+                    <span className="bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 text-[9px] font-black rounded-full">
+                      {(data.aiProducts || []).length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setWaSubTab('settings')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      waSubTab === 'settings'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">কনফিগারেশন</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Sub-tab view body */}
+              <div className="flex-1 flex overflow-hidden">
+                
+                {/* 1. CHATS TAB */}
+                {waSubTab === 'chats' && (
+                  <div className="flex-1 flex overflow-hidden">
+                    {/* WhatsApp Thread list */}
+                    <div className="w-72 border-r border-gray-200 dark:border-slate-800 flex flex-col bg-white dark:bg-slate-950 shrink-0 transition-colors">
+                      <div className="p-4 border-b border-gray-150 dark:border-slate-800 shrink-0 flex items-center justify-between">
+                        <h3 className="font-extrabold text-xs text-gray-800 dark:text-white uppercase tracking-wider">হোয়াটসঅ্যাপ ইনবক্স</h3>
+                        <span className="px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-400 font-extrabold text-[8px] uppercase rounded">AI Live</span>
+                      </div>
+                      
+                      <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        {(data.waChats || []).map(thread => (
+                          <button
+                            key={thread.id}
+                            onClick={() => setActiveWaThreadId(thread.id)}
+                            className={`w-full text-left p-4 flex items-start gap-3 border-b border-gray-100 dark:border-slate-800 transition-colors ${
+                              activeWaThreadId === thread.id 
+                                ? 'bg-slate-50 dark:bg-slate-900 border-l-4 border-l-emerald-600' 
+                                : 'hover:bg-slate-50 dark:hover:bg-slate-900/50'
+                            }`}
+                          >
+                            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-600 flex items-center justify-center text-white font-bold shrink-0 text-xs text-center shadow-inner uppercase">
+                              {thread.customer_name.slice(0, 2)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1 mb-1">
+                                <p className="font-extrabold text-xs text-gray-800 dark:text-white truncate">{thread.customer_name}</p>
+                                {thread.unread && (
+                                  <span className="w-2.5 h-2.5 bg-emerald-600 rounded-full shrink-0"></span>
+                                )}
+                              </div>
+                              <div className="flex items-center justify-between gap-1">
+                                <p className="text-[11px] text-gray-450 truncate flex-1">
+                                  {thread.messages[thread.messages.length - 1]?.text || 'No messages'}
+                                </p>
+                                {thread.ai_automated && (
+                                  <span className="text-[9px] bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 font-black px-1 rounded uppercase tracking-wider shrink-0 scale-90">AI</span>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+
+                        {(data.waChats || []).length === 0 && (
+                          <div className="text-center py-10 text-gray-400 px-4">
+                            <MessageSquare className="w-8 h-8 text-gray-200 mx-auto mb-2" />
+                            <p className="text-xs">কোনো হোয়াটসঅ্যাপ চ্যাট পাওয়া যায়নি। সিমুলেটর দিয়ে প্রথম বার্তা পুশ করুন।</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Conversation view */}
+                    <div className="flex-1 flex flex-col bg-slate-50 dark:bg-slate-900 relative">
+                      {activeWaThread ? (
+                        <>
+                          {/* Header */}
+                          <div className="bg-white dark:bg-slate-950 border-b border-gray-200 dark:border-slate-800 p-4 flex items-center justify-between shrink-0 transition-colors">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs uppercase shadow-sm">
+                                {activeWaThread.customer_name.slice(0, 2)}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <p className="font-extrabold text-xs text-gray-800 dark:text-white">{activeWaThread.customer_name}</p>
+                                  <span className="px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 text-[8px] font-black rounded uppercase">WhatsApp Client</span>
+                                </div>
+                                <span className="text-[9px] text-gray-400 font-mono">Phone: {activeWaThread.customer_phone}</span>
+                              </div>
+                            </div>
+
+                            {/* AI bot switch controller */}
+                            <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-gray-150 dark:border-slate-800">
+                              <span className="text-[10px] text-gray-500 font-bold">🤖 AI Auto-Reply Bot:</span>
+                              <button
+                                onClick={() => toggleWaAi(activeWaThread.id, activeWaThread.ai_automated)}
+                                className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  activeWaThread.ai_automated ? 'bg-emerald-600' : 'bg-gray-300 dark:bg-gray-700'
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                    activeWaThread.ai_automated ? 'translate-x-5' : 'translate-x-0'
+                                  }`}
+                                />
+                              </button>
+                              <span className={`text-[9px] font-black uppercase ${
+                                activeWaThread.ai_automated ? 'text-emerald-600' : 'text-gray-400'
+                              }`}>
+                                {activeWaThread.ai_automated ? 'On' : 'Off'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Messages stream */}
+                          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar lg:max-h-[calc(100vh-21rem)] flex flex-col">
+                            {activeWaThread.messages.map((message) => {
+                              const isSystem = message.sender === 'system';
+                              return (
+                                <div 
+                                  key={message.id}
+                                  className={`flex ${isSystem ? 'justify-end' : 'justify-start'}`}
+                                >
+                                  <div className={`max-w-[70%] rounded-2xl p-3.5 shadow-sm text-xs ${
+                                    isSystem 
+                                      ? 'bg-emerald-600 text-white rounded-br-none' 
+                                      : 'bg-white dark:bg-slate-950 text-gray-800 dark:text-gray-200 rounded-bl-none border border-gray-100 dark:border-slate-850'
+                                  }`}>
+                                    {message.is_voice ? (
+                                      <div className="space-y-2 min-w-[200px]">
+                                        {/* Simulated voice wave and play button */}
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                                            <Mic className="w-4 h-4 animate-pulse" />
+                                          </div>
+                                          <div className="flex-1">
+                                            <div className="flex items-center gap-1">
+                                              <span className="w-1.5 h-3 bg-emerald-600 dark:bg-emerald-400 rounded-full animate-pulse"></span>
+                                              <span className="w-1.5 h-4 bg-emerald-600 dark:bg-emerald-400 rounded-full animate-pulse [animation-delay:0.1s]"></span>
+                                              <span className="w-1.5 h-2 bg-emerald-600 dark:bg-emerald-400 rounded-full animate-pulse [animation-delay:0.2s]"></span>
+                                              <span className="w-1.5 h-5 bg-emerald-600 dark:bg-emerald-400 rounded-full animate-pulse [animation-delay:0.3s]"></span>
+                                              <span className="w-1.5 h-3 bg-emerald-600 dark:bg-emerald-400 rounded-full animate-pulse [animation-delay:0.4s]"></span>
+                                            </div>
+                                            <span className="text-[9px] text-gray-400 font-mono block mt-1">0:12</span>
+                                          </div>
+                                        </div>
+                                        
+                                        {/* AI Speech-to-Text Transcription box */}
+                                        {message.voice_text_translation && (
+                                          <div className="bg-emerald-50/70 dark:bg-slate-900/60 p-2.5 rounded-lg border border-emerald-100/50 dark:border-slate-800 mt-2">
+                                            <p className="text-[10px] text-emerald-800 dark:text-emerald-400 font-extrabold flex items-center gap-1">
+                                              <span>🗣️ AI Voice-to-Text Translation:</span>
+                                            </p>
+                                            <p className="text-[11px] text-gray-700 dark:text-gray-300 italic mt-1 leading-relaxed">
+                                              "{message.voice_text_translation}"
+                                            </p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <p className="leading-relaxed whitespace-pre-line">{message.text}</p>
+                                    )}
+                                    
+                                    <span className={`block text-[9px] mt-1.5 text-right font-medium opacity-60 ${
+                                      isSystem ? 'text-emerald-100' : 'text-gray-450'
+                                    }`}>
+                                      {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Chat Text Input Bar */}
+                          <div className="p-4 bg-white dark:bg-slate-950 border-t border-gray-200 dark:border-slate-800 shrink-0 transition-colors">
+                            <div className="flex gap-2">
+                              <textarea 
+                                rows={2}
+                                value={waReplyText}
+                                onChange={(e) => setWaReplyText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    sendWaReply();
+                                  }
+                                }}
+                                placeholder="হোয়াটসঅ্যাপে গ্রাহককে উত্তর লিখুন এবং এন্টার প্রেস করুন..."
+                                className="flex-1 bg-slate-50 dark:bg-slate-900 border border-gray-250 dark:border-slate-800 rounded-xl px-4 py-2.5 text-xs text-gray-800 dark:text-gray-150 resize-none focus:outline-none focus:border-emerald-600"
+                              />
+                              <button 
+                                onClick={sendWaReply}
+                                disabled={!waReplyText.trim() || isWaReplyLoading}
+                                className="px-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl flex items-center justify-center transition-colors shadow-lg shadow-emerald-600/10 active:scale-95"
+                              >
+                                {isWaReplyLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex-1 flex flex-col items-center justify-center text-gray-400 py-10">
+                          <MessageSquare className="w-12 h-12 text-gray-200 dark:text-slate-800 mb-2" />
+                          <p className="text-xs font-bold text-gray-500">বাম পাশের তালিকা থেকে চ্যাট থ্রেড নির্বাচন করুন</p>
+                          <p className="text-[11px] text-gray-400 mt-1 max-w-sm text-center">সিমুলেশন প্যানেল থেকে কোনো মেসেজ পুশ করলে সরাসরি এখানে প্রদর্শিত হবে।</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. ORDERS TAB */}
+                {waSubTab === 'orders' && (
+                  <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-white dark:bg-slate-950 p-4 rounded-2xl border border-gray-150 dark:border-slate-800 shadow-sm">
+                      <div>
+                        <h3 className="text-sm font-extrabold text-gray-800 dark:text-white">এআই জেনারেটেড অর্ডার ও লিড ট্র্যাকার</h3>
+                        <p className="text-xs text-gray-400 mt-0.5">হোয়াটসঅ্যাপ চ্যাটে কাস্টমারের নাম, ফোন ও ঠিকানা পেয়ে জেমিনি এআই যে সমস্ত অর্ডার ড্রাফট বা সাবমিট করেছে।</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2 py-1 rounded-lg border border-emerald-100 dark:border-emerald-900">
+                          মোট অর্ডার: {(data.aiOrders || []).length} টি
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4">
+                      {(data.aiOrders || []).map((order: any) => (
+                        <div 
+                          key={order.id}
+                          className="bg-white dark:bg-slate-950 rounded-2xl border border-gray-200 dark:border-slate-850 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col md:flex-row md:items-stretch"
+                        >
+                          {/* Left visual column */}
+                          <div className="p-5 border-b md:border-b-0 md:border-r border-gray-150 dark:border-slate-850 flex flex-col justify-between shrink-0 bg-slate-50/50 dark:bg-slate-900/10 md:w-48">
+                            <div>
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <span className="px-2 py-0.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 font-mono text-[10px] font-black rounded uppercase">
+                                  {order.order_number}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-gray-400 font-medium">অর্ডার টাইম:</span>
+                              <p className="text-[11px] text-gray-600 dark:text-gray-300 font-bold mt-0.5">
+                                {new Date(order.created_at).toLocaleString('bn-BD', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
+                              </p>
+                            </div>
+                            
+                            <div className="mt-4">
+                              <span className="text-[10px] text-gray-400 font-medium block">অর্ডার স্ট্যাটাস:</span>
+                              <span className={`inline-flex items-center gap-1 text-[10px] font-black uppercase mt-1 px-2 py-0.5 rounded-full ${
+                                order.status === 'confirmed'
+                                  ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-400'
+                                  : 'bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-400'
+                              }`}>
+                                {order.status === 'confirmed' ? '● CONFIRMED (অনুমোদিত)' : '● PENDING REVIEW (অপেক্ষমাণ)'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Middle core customer & product details */}
+                          <div className="flex-1 p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <h4 className="text-[11px] uppercase font-black tracking-wider text-gray-400">গ্রাহকের বিবরণ</h4>
+                              <div>
+                                <p className="text-xs font-black text-gray-800 dark:text-white flex items-center gap-1">
+                                  <User className="w-3.5 h-3.5 text-slate-400" />
+                                  <span>{order.customer_name}</span>
+                                </p>
+                                <p className="text-xs text-gray-600 dark:text-gray-300 font-bold font-mono mt-1 flex items-center gap-1">
+                                  <Smartphone className="w-3.5 h-3.5 text-slate-400" />
+                                  <span>{order.customer_phone}</span>
+                                </p>
+                                <p className="text-[11px] text-gray-500 mt-1.5 bg-slate-50 dark:bg-slate-900/60 p-2 rounded-lg border border-gray-100 dark:border-slate-800">
+                                  📍 <span className="font-medium text-gray-600 dark:text-gray-300">ডেলিভারি ঠিকানা: </span>{order.customer_address}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2 sm:border-l sm:border-gray-100 sm:dark:border-slate-800 sm:pl-4">
+                              <h4 className="text-[11px] uppercase font-black tracking-wider text-gray-400">অর্ডার প্রোডাক্ট ক্যাটালগ</h4>
+                              <div>
+                                <p className="text-xs font-black text-slate-800 dark:text-white bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-lg inline-block">
+                                  {order.product_name}
+                                </p>
+                                <div className="mt-3 grid grid-cols-2 gap-2 text-center">
+                                  <div className="p-1.5 bg-slate-50 dark:bg-slate-900/40 rounded-xl border border-gray-100 dark:border-slate-850">
+                                    <span className="text-[9px] text-gray-400 block font-bold">পরিমাণ</span>
+                                    <span className="text-xs font-black text-gray-800 dark:text-white">{order.quantity} টি</span>
+                                  </div>
+                                  <div className="p-1.5 bg-slate-50 dark:bg-slate-900/40 rounded-xl border border-gray-100 dark:border-slate-850">
+                                    <span className="text-[9px] text-gray-400 block font-bold">সর্বমোট বিল</span>
+                                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">{order.total}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Right action column */}
+                          <div className="p-5 border-t md:border-t-0 md:border-l border-gray-150 dark:border-slate-850 flex md:flex-col justify-center gap-2 shrink-0 bg-slate-50/20 dark:bg-slate-900/5">
+                            {order.status !== 'confirmed' && (
+                              <button
+                                onClick={() => updateAiOrderStatus(order.id, 'confirmed')}
+                                className="flex-1 md:flex-initial px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md shadow-emerald-600/10 active:scale-95"
+                              >
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                <span>অর্ডার কনফার্ম করুন</span>
+                              </button>
+                            )}
+                            
+                            {order.status === 'confirmed' && (
+                              <>
+                                <button
+                                  onClick={() => updateAiOrderStatus(order.id, 'pending_review')}
+                                  className="flex-1 md:flex-initial px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95"
+                                >
+                                  <Clock className="w-3.5 h-3.5" />
+                                  <span>হোল্ড করুন (Pending)</span>
+                                </button>
+                                <button
+                                  onClick={() => setSelectedPrintOrder(order)}
+                                  className="flex-1 md:flex-initial px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md shadow-indigo-600/10 active:scale-95"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                  <span>লেবেল প্রিন্ট করুন</span>
+                                </button>
+                              </>
+                            )}
+
+                            <button
+                              onClick={() => deleteAiOrder(order.id)}
+                              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span className="md:hidden">মুছে ফেলুন</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+
+                      {(data.aiOrders || []).length === 0 && (
+                        <div className="text-center py-16 bg-white dark:bg-slate-950 rounded-2xl border border-gray-150 dark:border-slate-800 text-gray-400">
+                          <ShoppingCart className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+                          <p className="text-sm font-black text-gray-500">কোনো এআই অর্ডার এখনও জেনারেট হয়নি</p>
+                          <p className="text-xs text-gray-400 mt-1 max-w-md mx-auto">চ্যাটবট যখন সফলভাবে কাস্টমারের অর্ডার ডিটেইলস (নাম, মোবাইল, ঠিকানা) কালেক্ট করবে, তখন স্বয়ংক্রিয়ভাবে এখানে অর্ডার তৈরি হয়ে যাবে।</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. CATALOG TAB */}
+                {waSubTab === 'catalog' && (
+                  <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6">
+                    
+                    {/* Add/Edit Product Catalog Form Panel */}
+                    <div className="bg-white dark:bg-slate-950 p-5 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
+                        <h3 className="text-xs font-black text-gray-800 dark:text-white uppercase tracking-wider">
+                          {catalogId ? '🛍️ প্রোডাক্ট ক্যাটালগ এডিট করুন' : '🛍️ নতুন প্রোডাক্ট অ্যাড করুন (স্টক ও লাইভ ক্যাটালগ)'}
+                        </h3>
+                        {catalogId && (
+                          <button 
+                            onClick={() => {
+                              setCatalogId('');
+                              setCatalogName('');
+                              setCatalogSku('');
+                              setCatalogPrice('');
+                              setCatalogStock('');
+                              setCatalogDescription('');
+                            }}
+                            className="text-xs text-rose-600 hover:underline font-bold"
+                          >
+                            নতুন অ্যাড মোডে ফিরে যান
+                          </button>
+                        )}
+                      </div>
+
+                      <form onSubmit={catalogId ? editCatalogProduct : addCatalogProduct} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">প্রোডাক্টের নাম (Name):</label>
+                          <input 
+                            type="text"
+                            required
+                            placeholder="যেমন: Cotton Panjabi"
+                            value={catalogName}
+                            onChange={(e) => setCatalogName(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-gray-800 dark:text-gray-150 focus:outline-none focus:border-emerald-600"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">এসকেইউ কোড (SKU ID):</label>
+                          <input 
+                            type="text"
+                            required
+                            placeholder="যেমন: PANJABI-101"
+                            value={catalogSku}
+                            onChange={(e) => setCatalogSku(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-gray-800 dark:text-gray-150 focus:outline-none focus:border-emerald-600"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">প্রোডাক্ট মূল্য (Taka ৳):</label>
+                          <input 
+                            type="number"
+                            required
+                            placeholder="যেমন: 1250"
+                            value={catalogPrice}
+                            onChange={(e) => setCatalogPrice(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-gray-800 dark:text-gray-150 focus:outline-none focus:border-emerald-600"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">স্টক ইউনিট (Stock Qty):</label>
+                          <input 
+                            type="number"
+                            required
+                            placeholder="যেমন: 45"
+                            value={catalogStock}
+                            onChange={(e) => setCatalogStock(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-gray-800 dark:text-gray-150 focus:outline-none focus:border-emerald-600"
+                          />
+                        </div>
+                        <div className="md:col-span-3">
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">সংক্ষিপ্ত বিবরণ ও বৈশিষ্ট্য (Description for AI Bot context):</label>
+                          <input 
+                            type="text"
+                            placeholder="যেমন: ১০০% প্রিমিয়াম সুতি কাপড়ে তৈরি পাঞ্জাবি। কালার ব্লু, সাইজ ৪০, ৪২, ৪৪।"
+                            value={catalogDescription}
+                            onChange={(e) => setCatalogDescription(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-gray-800 dark:text-gray-150 focus:outline-none focus:border-emerald-600"
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <button
+                            type="submit"
+                            disabled={isCatalogSubmitting}
+                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95"
+                          >
+                            {isCatalogSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                            <span>{catalogId ? 'ক্যাটালগ আপডেট করুন' : 'নতুন প্রোডাক্ট যুক্ত করুন'}</span>
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+
+                    {/* Stock Table Bento Panel */}
+                    <div className="bg-white dark:bg-slate-950 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                      <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
+                        <h4 className="text-xs font-black text-gray-800 dark:text-white uppercase tracking-wider">লাইভ প্রোডাক্ট ও স্টক ডিরেক্টরি (Live Inventory)</h4>
+                        <span className="text-[10px] text-gray-400">এআই এজেন্ট এই স্টক ডেটা দেখেই কাস্টমারকে সঠিক উত্তর দেবে</span>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 dark:bg-slate-900 text-gray-500 font-bold border-b border-gray-150 dark:border-slate-850">
+                              <th className="p-4">SKU / কোড</th>
+                              <th className="p-4">প্রোডাক্টের নাম</th>
+                              <th className="p-4">মূল্য (Price)</th>
+                              <th className="p-4">স্টক পরিমাণ (Stock)</th>
+                              <th className="p-4">সংক্ষিপ্ত বিবরণ</th>
+                              <th className="p-4 text-center">অ্যাকশন</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
+                            {(data.aiProducts || []).map((prod: any) => (
+                              <tr key={prod.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
+                                <td className="p-4 font-mono font-bold text-slate-700 dark:text-slate-300">{prod.sku}</td>
+                                <td className="p-4 font-bold text-gray-800 dark:text-white">{prod.name}</td>
+                                <td className="p-4 font-extrabold text-emerald-600 dark:text-emerald-400">৳ {prod.price}</td>
+                                <td className="p-4">
+                                  <span className={`inline-flex px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                                    prod.stock > 0 
+                                      ? 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400' 
+                                      : 'bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400'
+                                  }`}>
+                                    {prod.stock > 0 ? `${prod.stock} টি ইন-স্টক` : 'স্টক আউট'}
+                                  </span>
+                                </td>
+                                <td className="p-4 text-gray-500 dark:text-gray-400 truncate max-w-xs">{prod.description || 'বিবরণ দেওয়া হয়নি'}</td>
+                                <td className="p-4">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setCatalogId(prod.id);
+                                        setCatalogName(prod.name);
+                                        setCatalogSku(prod.sku);
+                                        setCatalogPrice(String(prod.price));
+                                        setCatalogStock(String(prod.stock));
+                                        setCatalogDescription(prod.description || '');
+                                      }}
+                                      className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-500 hover:text-emerald-600 transition-colors"
+                                      title="এডিট করুন"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => deleteCatalogProduct(prod.id)}
+                                      className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-lg text-slate-500 hover:text-rose-600 transition-colors"
+                                      title="মুছে ফেলুন"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+
+                            {(data.aiProducts || []).length === 0 && (
+                              <tr>
+                                <td colSpan={6} className="text-center py-10 text-gray-400">
+                                  কোনো প্রোডাক্ট এখনও ক্যাটালগে যুক্ত করা হয়নি।
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. SETTINGS TAB */}
+                {waSubTab === 'settings' && (
+                  <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6">
+                    <div className="bg-white dark:bg-slate-950 p-6 rounded-2xl border border-gray-150 dark:border-slate-800 shadow-sm space-y-6">
+                      <div className="border-b border-gray-100 dark:border-slate-800 pb-4">
+                        <h3 className="text-sm font-extrabold text-gray-800 dark:text-white">এআই চ্যাটবট এজেন্ট কন্ট্রোল সেন্টার (Configuration Panel)</h3>
+                        <p className="text-xs text-gray-400 mt-1">জেমিনি এআই মডেলের নির্দেশাবলী, এজেন্ট পরিচিতি ও স্বয়ংক্রিয় অর্ডার কনফার্মেশন কন্ট্রোল করুন।</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Agent Name */}
+                        <div>
+                          <label className="block text-xs font-black text-gray-700 dark:text-gray-300 mb-1.5">১. এআই সেলস এজেন্টের নাম (Agent Display Name):</label>
+                          <input 
+                            type="text"
+                            required
+                            placeholder="SellersCampus AI Copilot"
+                            value={settingsAgentName}
+                            onChange={(e) => setSettingsAgentName(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-gray-250 dark:border-slate-800 rounded-xl px-4 py-2.5 text-xs text-gray-800 dark:text-gray-150 focus:outline-none focus:border-emerald-600"
+                          />
+                          <p className="text-[10px] text-gray-400 mt-1">গ্রাহকের কাছে বটটি যে নামে নিজের পরিচয় দেবে।</p>
+                        </div>
+
+                        {/* Order Confirmation Logic */}
+                        <div>
+                          <label className="block text-xs font-black text-gray-700 dark:text-gray-300 mb-1.5">২. স্বয়ংক্রিয় অর্ডার অনুমোদন (Auto-Confirm Orders):</label>
+                          <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-gray-200 dark:border-slate-800 flex items-center justify-between">
+                            <div>
+                              <span className="text-xs font-bold text-gray-800 dark:text-white">অর্ডার সরাসরি কনফার্ম করুন</span>
+                              <p className="text-[10px] text-gray-400 mt-0.5">এআই সফলভাবে ঠিকানা পেলে সাথে সাথে অর্ডারটি 'Approved/Confirmed' স্ট্যাটাসে নিয়ে যাবে।</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSettingsAutoConfirm(!settingsAutoConfirm)}
+                              className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                settingsAutoConfirm ? 'bg-emerald-600' : 'bg-gray-300 dark:bg-gray-700'
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                  settingsAutoConfirm ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Custom Bengali Prompt */}
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-black text-gray-700 dark:text-gray-300 mb-1.5">৩. কাস্টম এআই নির্দেশিকা ও প্রম্পট (System Prompt / Instructions):</label>
+                          <textarea 
+                            rows={6}
+                            required
+                            placeholder="যেমন: আপনি কাস্টমারের সাথে খুব নম্রভাবে বাংলায় কথা বলবেন। আপনার লক্ষ্য হলো গ্রাহককে আমাদের লেদার ওয়ালেটটি সেল করা এবং তার থেকে ডেলিভারির জন্য নাম, ঠিকানা ও সচল মোবাইল নাম্বার সংগ্রহ করা..."
+                            value={settingsPrompt}
+                            onChange={(e) => setSettingsPrompt(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-gray-250 dark:border-slate-800 rounded-xl px-4 py-3 text-xs text-gray-800 dark:text-gray-150 resize-none focus:outline-none focus:border-emerald-600 font-mono"
+                          />
+                          <p className="text-[10px] text-gray-400 mt-1">জেমিনি এআই মডেলকে কন্ট্রোল করার জন্য প্রফেশনাল সিস্টেম প্রম্পট। এখানে আপনার ব্যবসায়িক নিয়মাবলী যুক্ত করতে পারেন।</p>
+                        </div>
+
+                        {/* Fallback Message */}
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-black text-gray-700 dark:text-gray-300 mb-1.5">৪. সিস্টেম ফেইলর বা ফালব্যাক মেসেজ (Failure Fallback Message):</label>
+                          <input 
+                            type="text"
+                            required
+                            placeholder="জি ভাইয়া, আমি আপনার অর্ডার তথ্য বুঝতে পারছি না। দয়া করে সঠিক মোবাইল নাম্বার ও ঠিকানা দিন।"
+                            value={settingsFallback}
+                            onChange={(e) => setSettingsFallback(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-gray-250 dark:border-slate-800 rounded-xl px-4 py-2.5 text-xs text-gray-800 dark:text-gray-150 focus:outline-none focus:border-emerald-600"
+                          />
+                          <p className="text-[10px] text-gray-400 mt-1">যদি কাস্টমার এমন প্রশ্ন করে যা এআই সমাধান করতে না পারে, তাহলে বট এই ব্যাকআপ মেসেজটি উত্তর দেবে।</p>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-gray-100 dark:border-slate-800 pt-4 flex justify-end">
+                        <button
+                          onClick={saveWaSettings}
+                          disabled={isSettingsSubmitting}
+                          className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md shadow-emerald-600/10 active:scale-95"
+                        >
+                          {isSettingsSubmitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                          <span>এআই কনফিগারেশন সংরক্ষণ করুন</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+
+            </div>
+          )}
+
         </div>
+
+        {selectedPrintOrder && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <style>{`
+              @media print {
+                body * {
+                  visibility: hidden !important;
+                }
+                #printable-delivery-label, #printable-delivery-label * {
+                  visibility: visible !important;
+                }
+                #printable-delivery-label {
+                  position: fixed !important;
+                  left: 50% !important;
+                  top: 50% !important;
+                  transform: translate(-50%, -50%) !important;
+                  width: 450px !important;
+                  margin: 0 !important;
+                  padding: 20px !important;
+                  border: 2px solid #000 !important;
+                  box-shadow: none !important;
+                  background: white !important;
+                  color: black !important;
+                  z-index: 9999999 !important;
+                }
+              }
+            `}</style>
+            
+            <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl relative flex flex-col border border-gray-200 dark:border-slate-800 animate-in fade-in-50 zoom-in-95 duration-200">
+              
+              {/* Modal Header */}
+              <div className="bg-slate-50 dark:bg-slate-950 p-4 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Printer className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  <h3 className="text-sm font-extrabold text-gray-800 dark:text-white">ডেলিভারি লেবেল প্রিভিউ</h3>
+                </div>
+                <button 
+                  onClick={() => setSelectedPrintOrder(null)}
+                  className="p-1.5 hover:bg-gray-150 dark:hover:bg-slate-800 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Printable Area Container */}
+              <div className="p-6 overflow-y-auto max-h-[70vh] flex justify-center bg-slate-100 dark:bg-slate-950/50">
+                <div 
+                  id="printable-delivery-label"
+                  className="bg-white text-black p-6 rounded-lg shadow-sm border border-gray-200 w-[380px] shrink-0 font-sans"
+                  style={{ color: '#000000', backgroundColor: '#ffffff' }}
+                >
+                  {/* Label Logo */}
+                  <div className="text-center border-b-2 border-black pb-3 mb-3">
+                    <h1 className="text-lg font-black tracking-wider uppercase m-0 text-black">SellersCampus LOGISTICS</h1>
+                    <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest mt-0.5">Automated AI Fulfillment Sticker</p>
+                  </div>
+
+                  {/* Meta dates */}
+                  <div className="flex justify-between text-[10px] border-b border-black pb-2 mb-3 text-black font-mono">
+                    <div><strong>ORDER NO:</strong> {selectedPrintOrder.order_number}</div>
+                    <div><strong>DATE:</strong> {new Date(selectedPrintOrder.created_at).toLocaleDateString('bn-BD')}</div>
+                  </div>
+
+                  {/* Receiver Info */}
+                  <div className="mb-4 text-black">
+                    <span className="inline-block bg-black text-white text-[9px] font-black px-2 py-0.5 uppercase tracking-wide rounded-sm mb-2">
+                      DELIVER TO (প্রাপক)
+                    </span>
+                    <div className="text-base font-black mb-1 text-black">{selectedPrintOrder.customer_name}</div>
+                    <div className="text-xs font-black font-mono text-black">📞 {selectedPrintOrder.customer_phone}</div>
+                    <div className="text-xs mt-1.5 leading-relaxed text-black">
+                      <strong>ঠিকানা:</strong> {selectedPrintOrder.customer_address}
+                    </div>
+                  </div>
+
+                  {/* Product list */}
+                  <div className="border-t border-b border-dashed border-black py-2.5 mb-4 text-black text-xs">
+                    <span className="block text-[9px] font-black text-gray-600 uppercase tracking-wider mb-1">Items Details</span>
+                    <div className="flex justify-between font-bold">
+                      <span className="truncate max-w-[250px]">{selectedPrintOrder.product_name}</span>
+                      <span className="shrink-0 pl-2">Qty: {selectedPrintOrder.quantity}</span>
+                    </div>
+                  </div>
+
+                  {/* Fake Barcode visualization */}
+                  <div className="text-center mb-4">
+                    <div className="inline-flex items-center gap-0.5 h-10 overflow-hidden opacity-90">
+                      <span className="w-1 h-10 bg-black"></span>
+                      <span className="w-0.5 h-10 bg-black"></span>
+                      <span className="w-1.5 h-10 bg-black"></span>
+                      <span className="w-0.5 h-10 bg-black"></span>
+                      <span className="w-1 h-10 bg-black"></span>
+                      <span className="w-0.5 h-10 bg-black"></span>
+                      <span className="w-2 h-10 bg-black"></span>
+                      <span className="w-0.5 h-10 bg-black"></span>
+                      <span className="w-1 h-10 bg-black"></span>
+                      <span className="w-1.5 h-10 bg-black"></span>
+                      <span className="w-0.5 h-10 bg-black"></span>
+                      <span className="w-2 h-10 bg-black"></span>
+                      <span className="w-1 h-10 bg-black"></span>
+                      <span className="w-0.5 h-10 bg-black"></span>
+                    </div>
+                    <div className="text-[9px] font-mono tracking-widest mt-1 text-black">*{selectedPrintOrder.order_number}*</div>
+                  </div>
+
+                  {/* COD Badge Footer */}
+                  <div className="flex items-center justify-between border-t border-black pt-3">
+                    <div className="border-2 border-black px-3 py-1 bg-black text-white rounded-md text-center">
+                      <div className="text-[8px] font-black uppercase tracking-wider">COD AMOUNT</div>
+                      <div className="text-base font-black font-mono">{selectedPrintOrder.total}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[9px] font-black uppercase tracking-wide text-black">Payment Method</div>
+                      <div className="text-[10px] font-bold text-gray-700">Cash On Delivery</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border-t border-gray-200 dark:border-slate-800 flex gap-2 shrink-0">
+                <button
+                  onClick={() => setSelectedPrintOrder(null)}
+                  className="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 font-bold text-xs rounded-xl transition-colors"
+                >
+                  বন্ধ করুন
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors shadow-lg shadow-indigo-600/10"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>লেবেল প্রিন্ট করুন (Print)</span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
 
       </div>
 

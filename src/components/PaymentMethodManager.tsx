@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { CreditCard, Save, Smartphone } from 'lucide-react';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, doc, updateDoc } from '../firebase';
 
 export default function PaymentMethodManager({ shopSettings, user, onRefreshSettings }: any) {
   const [bKashType, setBkashType] = useState(shopSettings?.paymentConfig?.bKashType || 'none');

@@ -33,7 +33,7 @@ import {
   Upload,
   Camera
 } from 'lucide-react';
-import { 
+import { db, secondaryAuth, 
   collection, 
   addDoc, 
   updateDoc, 
@@ -44,8 +44,7 @@ import {
   where,
   setDoc,
   getDocs
-} from 'firebase/firestore';
-import { db, secondaryAuth } from '../firebase';
+} from '../firebase';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { motion } from 'motion/react';
 import html2canvas from 'html2canvas';

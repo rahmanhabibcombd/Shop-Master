@@ -17,8 +17,7 @@ import {
   Building2,
   Lock
 } from 'lucide-react';
-import { db } from '../firebase';
-import { collection, addDoc } from 'firebase/firestore';
+import { db, collection, addDoc } from '../firebase';
 
 interface Employee {
   id: string;

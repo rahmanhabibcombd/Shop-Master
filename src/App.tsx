@@ -12,6 +12,10 @@ import { parsePosVoiceCommandAI } from './utils/aiVoiceParser';
 import { addToSyncQueue, getSyncQueue, removeFromSyncQueue } from './utils/offlineDb';
 import { syncGoogleContacts } from './utils/googleContactsSync';
 import { 
+  Home,
+  PenTool,
+  Layers,
+  Terminal,
   ArrowLeftRight,
   CheckSquare,
   LayoutDashboard, 
@@ -154,6 +158,16 @@ import { PageManagement } from './components/PageManagement';
 import { MessagingGateway } from './components/MessagingGateway';
 import MainAdmin from './components/MainAdmin';
 import BusinessBio from './components/BusinessBio';
+import { 
+  AdminSecurityWrapper,
+  AdminHomepage,
+  AdminExcalidraw,
+  AdminSidebarPages,
+  AdminMerchantConsole,
+  AdminMyHisab,
+  AdminControl,
+  AdminContactUs
+} from './components/AdminPages';
 import OnlineShop from './components/OnlineShop';
 import { LiveTVPortal } from './components/LiveTVPortal';
 import { GlobalPipPlayer } from './components/GlobalPipPlayer';
@@ -214,7 +228,8 @@ import {
   writeBatch,
   deleteShopAllData,
   setCachedAccessToken,
-  getCachedAccessToken
+  getCachedAccessToken,
+  isQuotaExceeded
 } from './firebase';
 
 import { 
@@ -4620,6 +4635,17 @@ export default function App() {
   const [showPremiumPopup, setShowPremiumPopup] = useState(false);
   const [premiumDaysRemaining, setPremiumDaysRemaining] = useState(0);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [firestoreQuotaExceeded, setFirestoreQuotaExceeded] = useState(() => isQuotaExceeded);
+
+  useEffect(() => {
+    const handleQuotaExceeded = () => {
+      setFirestoreQuotaExceeded(true);
+    };
+    window.addEventListener('firestore-quota-exceeded', handleQuotaExceeded);
+    return () => {
+      window.removeEventListener('firestore-quota-exceeded', handleQuotaExceeded);
+    };
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -8376,25 +8402,6 @@ export default function App() {
                           </div>
                           {st('googleSignIn')}
                         </button>
-
-                        <div className="relative flex py-2 items-center">
-                          <div className="flex-grow border-t border-gray-100 dark:border-slate-800"></div>
-                          <span className="flex-shrink mx-4 text-gray-400 text-[10px] uppercase tracking-wider font-extrabold">Or Iframe Bypass</span>
-                          <div className="flex-grow border-t border-gray-100 dark:border-slate-800"></div>
-                        </div>
-
-                        <button 
-                          type="button"
-                          onClick={handleSandboxLogin}
-                          className="w-full h-14 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-2xl font-bold hover:from-indigo-500 hover:to-indigo-400 transition-all flex items-center justify-center gap-4 hover:shadow-lg hover:shadow-indigo-100 dark:hover:shadow-none"
-                        >
-                          <div className="w-8 h-8 bg-indigo-700/50 shadow-sm rounded-full flex items-center justify-center border border-indigo-400/30">
-                            <svg className="w-4 h-4 text-white animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                            </svg>
-                          </div>
-                          {systemLang === 'bn' ? 'স্যান্ডবক্স গেস্ট লগইন (Iframe Bypass)' : 'Sandbox Guest Login (Iframe Bypass)'}
-                        </button>
                         
                         <div className="pt-6 border-t border-gray-100 text-center">
                           <p className="text-gray-400 text-xs leading-relaxed uppercase tracking-widest font-bold">
@@ -8576,6 +8583,120 @@ export default function App() {
     );
   }
 
+  const sidebarItems = [
+    { id: 'core', label: 'Core', items: [
+      { id: 'dashboard', icon: LayoutDashboard, label: st('dashboard'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+      { id: 'pos', icon: ShoppingBag, label: st('pos'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+      { id: 'table_room', icon: DoorOpen, label: 'Table/Room', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+      { id: 'kitchen_display', icon: ChefHat, label: 'Kitchen Display (KDS)', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+      { id: 'draft_invoice', icon: FileText, label: st('draftInvoice'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+      { id: 'mobile_electronics', icon: Smartphone, label: 'Mobile & Electronics', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+      { id: 'pharmacy_module', icon: Pill, label: 'Pharmacy & Medicine', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+      { id: 'dealership_module', icon: Truck, label: 'Dealership & Bulk Dispatch', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+      { id: 'how_to_use', icon: BookOpen, label: 'How To Use', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'] },
+    ]},
+    { id: 'inventory_section', label: 'Inventory', items: [
+      { id: 'inventory_dashboard', icon: LayoutDashboard, label: 'Inventory Dashboard', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'],
+        subItems: [
+          { id: 'inventory', icon: Package, label: st('inventory'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['admin', 'manager', 'warehouse'] },
+          { id: 'supplier', icon: Users, label: st('supplier'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'barcode', icon: Barcode, label: st('barcode'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'damage_expire', icon: Trash2, label: 'Damage/Expire', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'stock_transfer', icon: ArrowLeftRight, label: systemLang === 'bn' ? 'স্টক ট্রান্সফার' : 'Stock Transfer', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'] },
+        ]
+      }
+    ]},
+    { id: 'sales_crm_section', label: 'Sales & CRM', items: [
+      { id: 'sales_crm_dashboard', icon: LayoutDashboard, label: 'Sales & CRM Dashboard', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'],
+        subItems: [
+          { id: 'sales', icon: History, label: 'Sales Records', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'customers', icon: Users, label: st('customers'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'branch_crm', icon: Building2, label: 'Branch Sales & CRM', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'customer_orders', icon: ShoppingBag, label: 'Customer Orders', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'online_shop', icon: Globe, label: st('onlineShop'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'courier', icon: Truck, label: st('courier'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'warranty', icon: ShieldCheck, label: st('warranty'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'service_offer', icon: Zap, label: 'Service', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'note', icon: StickyNote, label: st('note'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'recycle_bin', icon: Trash2, label: st('recycleBin'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+        ]
+      }
+    ]},
+    { id: 'accounting_section', label: 'Accounting', items: [
+      { id: 'accounting_dashboard', icon: LayoutDashboard, label: 'Accounting Dashboard', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'],
+        subItems: [
+          { id: 'accounting', icon: CalculatorIcon, label: st('hishabNikash'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'daily_closing', icon: Clock, label: st('dailyClosing'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+        ]
+      }
+    ]},
+    { id: 'hrm_section', label: 'HRM', items: [
+      { id: 'hrm_dashboard', icon: LayoutDashboard, label: 'HRM Dashboard', roles: ['admin', 'manager', 'assistant_manager'],
+        subItems: [
+          { id: 'staff_directory', icon: Users, label: 'Staff Directory', roles: ['admin', 'manager', 'assistant_manager'] },
+          { id: 'attendance_tracker', icon: CheckSquare, label: 'Attendance & Shifts', roles: ['admin', 'manager', 'assistant_manager'] },
+          { id: 'payroll_disbursal', icon: Banknote, label: 'Payroll & Salaries', roles: ['admin', 'manager', 'assistant_manager'] },
+          { id: 'leave_planner', icon: Calendar, label: 'Leave & Holidays', roles: ['admin', 'manager', 'assistant_manager'] },
+          { id: 'system_login', icon: ShieldCheck, label: 'System Login', roles: ['admin', 'manager', 'assistant_manager'] },
+          { id: 'employment_contracts', icon: FileText, label: 'Contracts & Releases', roles: ['admin', 'manager', 'assistant_manager'] }
+        ]
+      }
+    ]},
+    { id: 'marketing_content_section', label: 'Marketing Content', items: [
+      { id: 'marketing_content', icon: LayoutDashboard, label: 'Marketing Content', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'],
+        subItems: [
+          { id: 'content_plan', icon: FileText, label: 'Content Plan', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'hook_generator', icon: Link, label: 'Hook Generator', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'visual_hook_pro', icon: ImageIcon, label: 'Visual Hook Pro', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'content_writer_pro', icon: FileEdit, label: 'Content Writer Pro', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'story_maker', icon: Video, label: 'Story Maker (OVC)', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+          { id: 'brand_memory', icon: Brain, label: 'Brand Memory', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+        ]
+      }
+    ]},
+    { id: 'management_section', label: 'Management', items: [
+      { id: 'management_dashboard', icon: LayoutDashboard, label: 'Management Dashboard', roles: ['admin'],
+        subItems: [
+          { id: 'membership', icon: Award, label: 'Membership', roles: ['admin', 'manager'] },
+          { id: 'jarvis', icon: Bot, label: st('jarvisAI'), roles: ['admin'] },
+          { id: 'payment_method', icon: CreditCard, label: st('paymentMethod'), roles: ['admin'] },
+          { id: 'loan_management', icon: Banknote, label: st('loanManagement'), roles: ['admin'] },
+          { id: 'community_hub', icon: Users, label: 'Community Hub', roles: ['admin'] },
+          { id: 'live_tv', icon: Tv, label: 'Live TV', roles: ['admin'] },
+          { id: 'business_bio', icon: User, label: 'Business Bio', roles: ['admin'] },
+          { id: 'contact_us', icon: Phone, label: 'Contact Us', roles: ['admin'] },
+          { id: 'business_mail', icon: Mail, label: 'Business Mail', roles: ['admin'] },
+          { id: 'meet_scheduler', icon: Calendar, label: 'Meet Scheduler', roles: ['admin'] },
+          { id: 'release_logs', icon: Activity, label: 'Release Logs', roles: ['admin'] },
+          { id: 'settings', icon: Settings, label: st('settings'), roles: ['admin'] },
+          { id: 'messaging_gateway', icon: MessageSquare, label: 'Messaging Gateway', roles: ['admin', 'master_admin', 'dealer', 'salesman', 'staff', 'dsr', 'sales_partner', 'manager', 'assistant_manager', 'employee'] },
+        ]
+      }
+    ]},
+    { id: 'admin_dashboard_section', label: 'Admin Panel', items: [
+      { 
+        id: 'admin_dashboard', 
+        icon: Shield, 
+        label: 'Admin ( dashboard )', 
+        roles: ['admin'], 
+        emailScope: 'stratproamz@gmail.com',
+        bg: 'bg-indigo-50',
+        color: 'text-indigo-600',
+        border: 'border-indigo-100',
+        subItems: [
+          { id: 'admin_homepage', icon: Home, label: 'Homepage', roles: ['admin'], emailScope: 'stratproamz@gmail.com', bg: 'bg-indigo-50', color: 'text-indigo-600' },
+          { id: 'admin_excalidraw', icon: PenTool, label: 'ExcaLidraw', roles: ['admin'], emailScope: 'stratproamz@gmail.com', bg: 'bg-indigo-50', color: 'text-indigo-600' },
+          { id: 'admin_sidebar_pages', icon: Layers, label: 'SideBar & Pages', roles: ['admin'], emailScope: 'stratproamz@gmail.com', bg: 'bg-indigo-50', color: 'text-indigo-600' },
+          { id: 'admin_merchant_console', icon: Terminal, label: 'Merchant Console', roles: ['admin'], emailScope: 'stratproamz@gmail.com', bg: 'bg-indigo-50', color: 'text-indigo-600' },
+          { id: 'admin_my_hisab', icon: CalculatorIcon, label: 'My HISAB', roles: ['admin'], emailScope: 'stratproamz@gmail.com', bg: 'bg-indigo-50', color: 'text-indigo-600' },
+          { id: 'admin_control', icon: Sliders, label: 'Control', roles: ['admin'], emailScope: 'stratproamz@gmail.com', bg: 'bg-indigo-50', color: 'text-indigo-600' },
+          { id: 'admin_contact_us', icon: Phone, label: 'Contact us', roles: ['admin'], emailScope: 'stratproamz@gmail.com', bg: 'bg-indigo-50', color: 'text-indigo-600' },
+        ]
+      }
+    ]}
+  ];
+
   return (
     <ErrorBoundary>
       <div className={`min-h-screen bg-slate-50 dark:bg-slate-950 flex ${isRtl ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -8635,98 +8756,10 @@ export default function App() {
               </div>
 
           <nav className="flex-1 px-4 py-6 overflow-y-auto custom-scrollbar space-y-1.5 bg-white dark:bg-slate-900" id="main-navigation-menu">
-            {[
-              { id: 'core', label: 'Core', items: [
-                { id: 'dashboard', icon: LayoutDashboard, label: st('dashboard'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                { id: 'pos', icon: ShoppingBag, label: st('pos'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                { id: 'table_room', icon: DoorOpen, label: 'Table/Room', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                { id: 'kitchen_display', icon: ChefHat, label: 'Kitchen Display (KDS)', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                { id: 'draft_invoice', icon: FileText, label: st('draftInvoice'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                { id: 'mobile_electronics', icon: Smartphone, label: 'Mobile & Electronics', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                { id: 'pharmacy_module', icon: Pill, label: 'Pharmacy & Medicine', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                { id: 'dealership_module', icon: Truck, label: 'Dealership & Bulk Dispatch', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                { id: 'how_to_use', icon: BookOpen, label: 'How To Use', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'] },
-              ]},
-              { id: 'inventory_section', label: 'Inventory', items: [
-                { id: 'inventory_dashboard', icon: LayoutDashboard, label: 'Inventory Dashboard', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'],
-                  subItems: [
-                    { id: 'inventory', icon: Package, label: st('inventory'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['admin', 'manager', 'warehouse'] },
-                    { id: 'supplier', icon: Users, label: st('supplier'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'barcode', icon: Barcode, label: st('barcode'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'damage_expire', icon: Trash2, label: 'Damage/Expire', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'stock_transfer', icon: ArrowLeftRight, label: systemLang === 'bn' ? 'স্টক ট্রান্সফার' : 'Stock Transfer', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'] },
-                  ]
-                }
-              ]},
-              { id: 'sales_crm_section', label: 'Sales & CRM', items: [
-                { id: 'sales_crm_dashboard', icon: LayoutDashboard, label: 'Sales & CRM Dashboard', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'],
-                  subItems: [
-                    { id: 'sales', icon: History, label: 'Sales Records', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'customers', icon: Users, label: st('customers'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'branch_crm', icon: Building2, label: 'Branch Sales & CRM', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'customer_orders', icon: ShoppingBag, label: 'Customer Orders', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'online_shop', icon: Globe, label: st('onlineShop'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'courier', icon: Truck, label: st('courier'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'warranty', icon: ShieldCheck, label: st('warranty'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'service_offer', icon: Zap, label: 'Service', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'note', icon: StickyNote, label: st('note'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'recycle_bin', icon: Trash2, label: st('recycleBin'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                  ]
-                }
-              ]},
-              { id: 'accounting_section', label: 'Accounting', items: [
-                { id: 'accounting_dashboard', icon: LayoutDashboard, label: 'Accounting Dashboard', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'],
-                  subItems: [
-                    { id: 'accounting', icon: CalculatorIcon, label: st('hishabNikash'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'daily_closing', icon: Clock, label: st('dailyClosing'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                  ]
-                }
-              ]},
-              { id: 'hrm_section', label: 'HRM', items: [
-                { id: 'hrm_dashboard', icon: LayoutDashboard, label: 'HRM Dashboard', roles: ['admin', 'manager', 'assistant_manager'],
-                  subItems: [
-                    { id: 'staff_directory', icon: Users, label: 'Staff Directory', roles: ['admin', 'manager', 'assistant_manager'] },
-                    { id: 'attendance_tracker', icon: CheckSquare, label: 'Attendance & Shifts', roles: ['admin', 'manager', 'assistant_manager'] },
-                    { id: 'payroll_disbursal', icon: Banknote, label: 'Payroll & Salaries', roles: ['admin', 'manager', 'assistant_manager'] },
-                    { id: 'leave_planner', icon: Calendar, label: 'Leave & Holidays', roles: ['admin', 'manager', 'assistant_manager'] },
-                    { id: 'system_login', icon: ShieldCheck, label: 'System Login', roles: ['admin', 'manager', 'assistant_manager'] },
-                    { id: 'employment_contracts', icon: FileText, label: 'Contracts & Releases', roles: ['admin', 'manager', 'assistant_manager'] }
-                  ]
-                }
-              ]},
-              { id: 'marketing_content_section', label: 'Marketing Content', items: [
-                { id: 'marketing_content', icon: LayoutDashboard, label: 'Marketing Content', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'],
-                  subItems: [
-                    { id: 'content_plan', icon: FileText, label: 'Content Plan', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'hook_generator', icon: Link, label: 'Hook Generator', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'visual_hook_pro', icon: ImageIcon, label: 'Visual Hook Pro', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'content_writer_pro', icon: FileEdit, label: 'Content Writer Pro', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'story_maker', icon: Video, label: 'Story Maker (OVC)', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'brand_memory', icon: Brain, label: 'Brand Memory', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                  ]
-                }
-              ]},
-              { id: 'management_section', label: 'Management', items: [
-                { id: 'management_dashboard', icon: LayoutDashboard, label: 'Management Dashboard', roles: ['admin'],
-                  subItems: [
-                    { id: 'membership', icon: Award, label: 'Membership', roles: ['admin', 'manager'] },
-                    { id: 'jarvis', icon: Bot, label: st('jarvisAI'), roles: ['admin'] },
-                    { id: 'payment_method', icon: CreditCard, label: st('paymentMethod'), roles: ['admin'] },
-                    { id: 'loan_management', icon: Banknote, label: st('loanManagement'), roles: ['admin'] },
-                    { id: 'community_hub', icon: Users, label: 'Community Hub', roles: ['admin'] },
-                    { id: 'live_tv', icon: Tv, label: 'Live TV', roles: ['admin'] },
-                    { id: 'business_bio', icon: User, label: 'Business Bio', roles: ['admin'] },
-                    { id: 'contact_us', icon: Phone, label: 'Contact Us', roles: ['admin'] },
-                    { id: 'business_mail', icon: Mail, label: 'Business Mail', roles: ['admin'] },
-                    { id: 'meet_scheduler', icon: Calendar, label: 'Meet Scheduler', roles: ['admin'] },
-                    { id: 'release_logs', icon: Activity, label: 'Release Logs', roles: ['admin'] },
-                    { id: 'settings', icon: Settings, label: st('settings'), roles: ['admin'] },
-                    { id: 'messaging_gateway', icon: MessageSquare, label: 'Messaging Gateway', roles: ['admin', 'master_admin', 'dealer', 'salesman', 'staff', 'dsr', 'sales_partner', 'manager', 'assistant_manager', 'employee'] },
-                  ]
-                }
-              ]},
-            ].filter((group) => {
+            {sidebarItems.filter((group) => {
+              if (group.id === 'admin_dashboard_section') {
+                return user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
+              }
               if (group.id === 'management_section') {
                 return user && (user.role === 'admin' || user.email?.toLowerCase().trim() === 'stratproamz@gmail.com');
               }
@@ -8818,6 +8851,39 @@ export default function App() {
           </div>
         </aside>
         <main className="flex-1 transition-all duration-300 p-4 lg:p-8 overflow-x-hidden relative bg-white dark:bg-slate-950">
+          {firestoreQuotaExceeded && (
+            <div className="mb-6 p-4.5 bg-amber-500/10 border-2 border-amber-500/30 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm animate-fade-in relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-1 h-full bg-amber-500"></div>
+              <div className="flex items-center gap-3.5 relative z-10">
+                <div className="p-2.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-xl shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                    {shopSettings.systemLanguage === 'bn' ? 'ডাটাবেজ কানেকশন লিমিট (Quota Full)' : 'Demo Database Quota Exceeded'}
+                  </h4>
+                  <p className="text-xs text-gray-600 dark:text-slate-400 mt-1 leading-relaxed">
+                    {shopSettings.systemLanguage === 'bn' 
+                      ? 'ফ্রি ডেমো ডাটাবেজের দৈনিক লিমিট পূর্ণ হয়েছে। আপনার সুবিধার্থে অ্যাপটি "রেজিলিয়েন্ট অফলাইন মোড"-এ চালু হয়েছে। এখন আপনি সব ফিচার, সেলস ও এন্ট্রি চমৎকারভাবে ব্যবহার করতে পারবেন।' 
+                      : 'The daily free Firestore database write units are exhausted. The app has activated "Resilient Offline/Local Mode" so you can continue testing, making sales, and exploring all POS features perfectly.'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 relative z-10 shrink-0 self-end md:self-auto">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs font-semibold uppercase tracking-wider animate-pulse">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  {shopSettings.systemLanguage === 'bn' ? 'অফলাইন মোড সক্রিয়' : 'Local Active'}
+                </span>
+                <button 
+                  onClick={() => setFirestoreQuotaExceeded(false)}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-black/5 rounded-lg transition-all"
+                  title="Dismiss"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-gray-100 dark:border-slate-800/80">
             <div className="flex items-center gap-3 md:gap-4">
               <button
@@ -9436,6 +9502,43 @@ export default function App() {
             {activeTab === 'story_maker' && <PlaceholderView title="Story Maker (OVC)" />}
             {activeTab === 'brand_memory' && <PlaceholderView title="Brand Memory" />}
             {activeTab === 'management_dashboard' && <PlaceholderView title="Management Dashboard" />}
+            
+            {/* Secure Admin Pages exclusively for stratproamz@gmail.com */}
+            {(activeTab === 'admin_homepage' || activeTab === 'admin_dashboard') && (
+              <AdminSecurityWrapper user={user}>
+                <AdminHomepage />
+              </AdminSecurityWrapper>
+            )}
+            {activeTab === 'admin_excalidraw' && (
+              <AdminSecurityWrapper user={user}>
+                <AdminExcalidraw />
+              </AdminSecurityWrapper>
+            )}
+            {activeTab === 'admin_sidebar_pages' && (
+              <AdminSecurityWrapper user={user}>
+                <AdminSidebarPages />
+              </AdminSecurityWrapper>
+            )}
+            {activeTab === 'admin_merchant_console' && (
+              <AdminSecurityWrapper user={user}>
+                <AdminMerchantConsole />
+              </AdminSecurityWrapper>
+            )}
+            {activeTab === 'admin_my_hisab' && (
+              <AdminSecurityWrapper user={user}>
+                <AdminMyHisab />
+              </AdminSecurityWrapper>
+            )}
+            {activeTab === 'admin_control' && (
+              <AdminSecurityWrapper user={user}>
+                <AdminControl />
+              </AdminSecurityWrapper>
+            )}
+            {activeTab === 'admin_contact_us' && (
+              <AdminSecurityWrapper user={user}>
+                <AdminContactUs />
+              </AdminSecurityWrapper>
+            )}
             {activeTab === 'community_hub' && <CommunityHubPage user={user} shopSettings={shopSettings} />}
             {activeTab === 'live_tv' && <LiveTVPortal currentStream={currentStream} setCurrentStream={setCurrentStream} />}
             {activeTab !== 'live_tv' && currentStream && (

@@ -1,7 +1,536 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously } from 'firebase/auth';
-import { initializeFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, onSnapshot, getDocFromServer, increment, serverTimestamp, writeBatch, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  collection, 
+  doc, 
+  getDoc as realGetDoc, 
+  getDocs as realGetDocs, 
+  setDoc as realSetDoc, 
+  addDoc as realAddDoc, 
+  updateDoc as realUpdateDoc, 
+  deleteDoc as realDeleteDoc, 
+  query, 
+  where, 
+  orderBy, 
+  limit, 
+  onSnapshot as realOnSnapshot, 
+  getDocFromServer, 
+  increment, 
+  serverTimestamp, 
+  writeBatch as realWriteBatch, 
+  persistentLocalCache, 
+  persistentMultipleTabManager, 
+  memoryLocalCache,
+  disableNetwork,
+  setLogLevel
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+
+// Silence Firestore internal logging to prevent console log clutter when quota is exceeded
+try {
+  setLogLevel('silent');
+} catch (e) {
+  console.warn('[Quota Intercept] Failed to silence Firestore logger:', e);
+}
+
+// Global quota tracker
+export let isQuotaExceeded = typeof window !== 'undefined' ? localStorage.getItem('firestore_quota_exceeded') === 'true' : false;
+
+const markQuotaExceeded = () => {
+  if (!isQuotaExceeded) {
+    isQuotaExceeded = true;
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('firestore_quota_exceeded', 'true');
+        window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
+        if (db) {
+          disableNetwork(db).catch(() => {});
+        }
+      } catch (e) {}
+    }
+  }
+};
+
+// Safe wrapper for setDoc
+export const setDoc = async (docRef: any, data: any, options?: any): Promise<any> => {
+  const handleLocalSet = () => {
+    try {
+      const key = `local_firestore_fallback_${docRef.path}`;
+      localStorage.setItem(key, JSON.stringify({ ...(data as any), _local_fallback: true, updatedAt: Date.now() }));
+    } catch (e) {
+      console.error('[Quota Intercept] Failed to write fallback to localStorage', e);
+    }
+  };
+
+  if (isQuotaExceeded) {
+    if (typeof window !== 'undefined') {
+      handleLocalSet();
+    }
+    return Promise.resolve();
+  }
+
+  try {
+    return await realSetDoc(docRef, data, options);
+  } catch (error: any) {
+    const errorMsg = error?.message || '';
+    if (error?.code === 'resource-exhausted' || errorMsg.includes('resource-exhausted') || errorMsg.includes('quota') || errorMsg.includes('Quota')) {
+      console.warn('[Quota Intercept] setDoc failed due to quota exhaustion. Falling back to local mode.', error);
+      markQuotaExceeded();
+      if (typeof window !== 'undefined') {
+        handleLocalSet();
+      }
+      return Promise.resolve();
+    }
+    throw error;
+  }
+};
+
+// Safe wrapper for addDoc
+export const addDoc = async (collectionRef: any, data: any): Promise<any> => {
+  const handleLocalAdd = () => {
+    const mockId = 'mock_id_' + Math.random().toString(36).substring(2, 15);
+    const docPath = `${collectionRef.path}/${mockId}`;
+    const key = `local_firestore_fallback_${docPath}`;
+    try {
+      localStorage.setItem(key, JSON.stringify({ ...(data as any), id: mockId, _local_fallback: true, createdAt: Date.now() }));
+      
+      const collKey = `local_collection_fallback_${collectionRef.path}`;
+      const existingListStr = localStorage.getItem(collKey) || '[]';
+      const list = JSON.parse(existingListStr);
+      list.push(mockId);
+      localStorage.setItem(collKey, JSON.stringify(list));
+    } catch (e) {
+      console.error('[Quota Intercept] Failed to write collection fallback to localStorage', e);
+    }
+    return {
+      id: mockId,
+      path: docPath,
+      parent: collectionRef,
+      withConverter: () => ({})
+    };
+  };
+
+  if (isQuotaExceeded) {
+    if (typeof window !== 'undefined') {
+      return Promise.resolve(handleLocalAdd()) as any;
+    }
+    return Promise.resolve({ id: 'mock_quota_id' }) as any;
+  }
+
+  try {
+    return await realAddDoc(collectionRef, data);
+  } catch (error: any) {
+    const errorMsg = error?.message || '';
+    if (error?.code === 'resource-exhausted' || errorMsg.includes('resource-exhausted') || errorMsg.includes('quota') || errorMsg.includes('Quota')) {
+      console.warn('[Quota Intercept] addDoc failed due to quota exhaustion. Falling back to local mode.', error);
+      markQuotaExceeded();
+      if (typeof window !== 'undefined') {
+        return Promise.resolve(handleLocalAdd()) as any;
+      }
+      return Promise.resolve({ id: 'mock_quota_id' }) as any;
+    }
+    throw error;
+  }
+};
+
+// Safe wrapper for updateDoc
+export const updateDoc = async (docRef: any, data: any): Promise<any> => {
+  const handleLocalUpdate = () => {
+    try {
+      const key = `local_firestore_fallback_${docRef.path}`;
+      const existing = localStorage.getItem(key);
+      let merged = { ...(data as any) };
+      if (existing) {
+        try {
+          merged = { ...JSON.parse(existing), ...(data as any) };
+        } catch (parseErr) {
+          merged = { ...(data as any) };
+        }
+      }
+      localStorage.setItem(key, JSON.stringify({ ...merged, _local_fallback: true, updatedAt: Date.now() }));
+    } catch (e) {
+      console.error('[Quota Intercept] Failed to update fallback in localStorage', e);
+    }
+  };
+
+  if (isQuotaExceeded) {
+    if (typeof window !== 'undefined') {
+      handleLocalUpdate();
+    }
+    return Promise.resolve();
+  }
+
+  try {
+    return await realUpdateDoc(docRef, data);
+  } catch (error: any) {
+    const errorMsg = error?.message || '';
+    if (error?.code === 'resource-exhausted' || errorMsg.includes('resource-exhausted') || errorMsg.includes('quota') || errorMsg.includes('Quota')) {
+      console.warn('[Quota Intercept] updateDoc failed due to quota exhaustion. Falling back to local mode.', error);
+      markQuotaExceeded();
+      if (typeof window !== 'undefined') {
+        handleLocalUpdate();
+      }
+      return Promise.resolve();
+    }
+    throw error;
+  }
+};
+
+// Safe wrapper for deleteDoc
+export const deleteDoc = async (docRef: any): Promise<any> => {
+  const handleLocalDelete = () => {
+    try {
+      const key = `local_firestore_fallback_${docRef.path}`;
+      localStorage.removeItem(key);
+      
+      const parentPath = docRef.parent?.path || '';
+      if (parentPath) {
+        const collKey = `local_collection_fallback_${parentPath}`;
+        const existingListStr = localStorage.getItem(collKey);
+        if (existingListStr) {
+          const list = JSON.parse(existingListStr);
+          const filtered = list.filter((id: string) => id !== docRef.id);
+          localStorage.setItem(collKey, JSON.stringify(filtered));
+        }
+      }
+    } catch (e) {
+      console.error('[Quota Intercept] Failed to delete fallback from localStorage', e);
+    }
+  };
+
+  if (isQuotaExceeded) {
+    if (typeof window !== 'undefined') {
+      handleLocalDelete();
+    }
+    return Promise.resolve();
+  }
+
+  try {
+    return await realDeleteDoc(docRef);
+  } catch (error: any) {
+    const errorMsg = error?.message || '';
+    if (error?.code === 'resource-exhausted' || errorMsg.includes('resource-exhausted') || errorMsg.includes('quota') || errorMsg.includes('Quota')) {
+      console.warn('[Quota Intercept] deleteDoc failed due to quota exhaustion. Falling back to local mode.', error);
+      markQuotaExceeded();
+      if (typeof window !== 'undefined') {
+        handleLocalDelete();
+      }
+      return Promise.resolve();
+    }
+    throw error;
+  }
+};
+
+// Safe wrapper for getDoc
+export const getDoc = async (docRef: any): Promise<any> => {
+  const key = `local_firestore_fallback_${docRef.path}`;
+  const handleLocalGet = () => {
+    const localData = localStorage.getItem(key);
+    if (localData) {
+      console.log(`[Quota Intercept] getDoc fallback loaded for path ${docRef.path}`);
+      const parsed = JSON.parse(localData);
+      return {
+        exists: () => true,
+        data: () => parsed,
+        id: docRef.id,
+        ref: docRef,
+        get: (field: string) => parsed[field]
+      };
+    }
+    return {
+      exists: () => false,
+      data: () => undefined,
+      id: docRef.id,
+      ref: docRef,
+      get: () => undefined
+    };
+  };
+
+  if (isQuotaExceeded) {
+    if (typeof window !== 'undefined') {
+      return Promise.resolve(handleLocalGet()) as any;
+    }
+  }
+
+  try {
+    return await realGetDoc(docRef);
+  } catch (error: any) {
+    const errorMsg = error?.message || '';
+    if (error?.code === 'resource-exhausted' || errorMsg.includes('resource-exhausted') || errorMsg.includes('quota') || errorMsg.includes('Quota')) {
+      markQuotaExceeded();
+      if (typeof window !== 'undefined') {
+        return Promise.resolve(handleLocalGet()) as any;
+      }
+    }
+    throw error;
+  }
+};
+
+// Safe wrapper for getDocs
+export const getDocs = async (queryRef: any): Promise<any> => {
+  const handleLocalGetDocs = () => {
+    const path = (queryRef as any).path || ((queryRef as any)._query?.path?.segments?.join('/')) || '';
+    if (path) {
+      const collKey = `local_collection_fallback_${path}`;
+      const listStr = localStorage.getItem(collKey);
+      if (listStr) {
+        const list = JSON.parse(listStr);
+        const docsList = list.map((id: string) => {
+          const itemKey = `local_firestore_fallback_${path}/${id}`;
+          const itemData = localStorage.getItem(itemKey);
+          const dataObj = itemData ? JSON.parse(itemData) : {};
+          return {
+            id,
+            exists: () => true,
+            data: () => dataObj,
+            get: (field: string) => dataObj[field]
+          };
+        });
+        return {
+          docs: docsList,
+          empty: docsList.length === 0,
+          size: docsList.length,
+          forEach: (callback: any) => docsList.forEach(callback)
+        };
+      }
+    }
+    return {
+      docs: [],
+      empty: true,
+      size: 0,
+      forEach: () => {}
+    };
+  };
+
+  if (isQuotaExceeded) {
+    if (typeof window !== 'undefined') {
+      return Promise.resolve(handleLocalGetDocs()) as any;
+    }
+  }
+
+  try {
+    return await realGetDocs(queryRef);
+  } catch (error: any) {
+    const errorMsg = error?.message || '';
+    if (error?.code === 'resource-exhausted' || errorMsg.includes('resource-exhausted') || errorMsg.includes('quota') || errorMsg.includes('Quota')) {
+      markQuotaExceeded();
+      if (typeof window !== 'undefined') {
+        return Promise.resolve(handleLocalGetDocs()) as any;
+      }
+      return {
+        docs: [],
+        empty: true,
+        size: 0,
+        forEach: () => {}
+      } as any;
+    }
+    throw error;
+  }
+};
+
+// Safe wrapper for onSnapshot
+export const onSnapshot = (queryRef: any, ...args: any[]): () => void => {
+  let onNext = args[0];
+  let onError = args[1];
+  let onCompletion = args[2];
+  
+  if (typeof onNext === 'object' && onNext !== null) {
+    onNext = args[0].next;
+    onError = args[0].error;
+    onCompletion = args[0].complete;
+  }
+
+  const safeOnNext = (snapshot: any) => {
+    try {
+      if (onNext) onNext(snapshot);
+    } catch (e) {
+      console.error('[Quota Intercept] onSnapshot callback error:', e);
+    }
+  };
+  
+  const safeOnError = (error: any) => {
+    const errorMsg = error?.message || '';
+    if (error?.code === 'resource-exhausted' || errorMsg.includes('resource-exhausted') || errorMsg.includes('quota') || errorMsg.includes('Quota')) {
+      markQuotaExceeded();
+      console.warn('[Quota Intercept] onSnapshot error handled gracefully:', errorMsg);
+      
+      // Attempt local mock snapshot emission
+      const path = (queryRef as any).path || ((queryRef as any)._query?.path?.segments?.join('/')) || '';
+      if (path && typeof window !== 'undefined') {
+        const collKey = `local_collection_fallback_${path}`;
+        const listStr = localStorage.getItem(collKey);
+        if (listStr) {
+          try {
+            const list = JSON.parse(listStr);
+            const docsList = list.map((id: string) => {
+              const itemKey = `local_firestore_fallback_${path}/${id}`;
+              const itemData = localStorage.getItem(itemKey);
+              const dataObj = itemData ? JSON.parse(itemData) : {};
+              return {
+                id,
+                exists: () => true,
+                data: () => dataObj,
+                get: (field: string) => dataObj[field]
+              };
+            });
+            safeOnNext({
+              docs: docsList,
+              empty: docsList.length === 0,
+              size: docsList.length,
+              forEach: (callback: any) => docsList.forEach(callback)
+            });
+          } catch (snapshotErr) {
+            console.error('[Quota Intercept] Failed to emit mock snapshot:', snapshotErr);
+          }
+        }
+      }
+
+      if (onError) {
+        try {
+          onError(error);
+        } catch (callbackErr) {
+          // Ignore
+        }
+      }
+    } else {
+      if (onError) {
+        try {
+          onError(error);
+        } catch (callbackErr) {}
+      }
+    }
+  };
+
+  // If already marked as quota exceeded, emit immediately and do not listen to Firestore
+  if (isQuotaExceeded) {
+    const path = (queryRef as any).path || ((queryRef as any)._query?.path?.segments?.join('/')) || '';
+    if (path && typeof window !== 'undefined') {
+      setTimeout(() => {
+        const collKey = `local_collection_fallback_${path}`;
+        const listStr = localStorage.getItem(collKey);
+        if (listStr) {
+          try {
+            const list = JSON.parse(listStr);
+            const docsList = list.map((id: string) => {
+              const itemKey = `local_firestore_fallback_${path}/${id}`;
+              const itemData = localStorage.getItem(itemKey);
+              const dataObj = itemData ? JSON.parse(itemData) : {};
+              return {
+                id,
+                exists: () => true,
+                data: () => dataObj,
+                get: (field: string) => dataObj[field]
+              };
+            });
+            safeOnNext({
+              docs: docsList,
+              empty: docsList.length === 0,
+              size: docsList.length,
+              forEach: (callback: any) => docsList.forEach(callback)
+            });
+          } catch (snapshotErr) {
+            console.error('[Quota Intercept] Failed to emit pre-check mock snapshot:', snapshotErr);
+          }
+        }
+      }, 50);
+    }
+    return () => {};
+  }
+
+  try {
+    return realOnSnapshot(queryRef, safeOnNext, safeOnError, onCompletion);
+  } catch (err: any) {
+    console.error('[Quota Intercept] onSnapshot initialization failed:', err);
+    return () => {};
+  }
+};
+
+// Safe wrapper for writeBatch
+export const writeBatch = (dbInstance: any) => {
+  const realBatch = realWriteBatch(dbInstance);
+  const pendingOperations: Array<() => void> = [];
+  
+  return {
+    set(docRef: any, data: any, options?: any) {
+      pendingOperations.push(() => {
+        const key = `local_firestore_fallback_${docRef.path}`;
+        localStorage.setItem(key, JSON.stringify({ ...(data as any), _local_fallback: true, updatedAt: Date.now() }));
+      });
+      if (!isQuotaExceeded) {
+        try {
+          realBatch.set(docRef, data, options);
+        } catch (e) {}
+      }
+      return this;
+    },
+    update(docRef: any, data: any) {
+      pendingOperations.push(() => {
+        const key = `local_firestore_fallback_${docRef.path}`;
+        const existing = localStorage.getItem(key);
+        let merged = { ...(data as any) };
+        if (existing) {
+          try {
+            merged = { ...JSON.parse(existing), ...(data as any) };
+          } catch (e) {
+            merged = { ...(data as any) };
+          }
+        }
+        localStorage.setItem(key, JSON.stringify({ ...merged, _local_fallback: true, updatedAt: Date.now() }));
+      });
+      if (!isQuotaExceeded) {
+        try {
+          realBatch.update(docRef, data);
+        } catch (e) {}
+      }
+      return this;
+    },
+    delete(docRef: any) {
+      pendingOperations.push(() => {
+        const key = `local_firestore_fallback_${docRef.path}`;
+        localStorage.removeItem(key);
+      });
+      if (!isQuotaExceeded) {
+        try {
+          realBatch.delete(docRef);
+        } catch (e) {}
+      }
+      return this;
+    },
+    async commit() {
+      if (isQuotaExceeded) {
+        if (typeof window !== 'undefined') {
+          for (const op of pendingOperations) {
+            try {
+              op();
+            } catch (e) {}
+          }
+        }
+        return Promise.resolve();
+      }
+      try {
+        return await realBatch.commit();
+      } catch (error: any) {
+        const errorMsg = error?.message || '';
+        if (error?.code === 'resource-exhausted' || errorMsg.includes('resource-exhausted') || errorMsg.includes('quota') || errorMsg.includes('Quota')) {
+          console.warn('[Quota Intercept] writeBatch commit failed due to quota exhaustion. Running operations locally.', error);
+          markQuotaExceeded();
+          if (typeof window !== 'undefined') {
+            for (const op of pendingOperations) {
+              try {
+                op();
+              } catch (e) {
+                console.error('[Quota Intercept] Failed running batch fallback op:', e);
+              }
+            }
+          }
+          return Promise.resolve() as any;
+        }
+        throw error;
+      }
+    }
+  };
+};
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -36,6 +565,11 @@ export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   localCache: determineLocalCache()
 }, (firebaseConfig as any).firestoreDatabaseId);
+
+if (isQuotaExceeded) {
+  console.log("Firestore quota was previously exceeded, disabling network immediately to prevent any quota errors.");
+  disableNetwork(db).catch(() => {});
+}
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
@@ -220,8 +754,8 @@ export const deleteShopAllData = async (shopId: string) => {
 };
 
 export { 
-  collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, 
-  query, where, orderBy, limit, onSnapshot, signInWithPopup, signOut, onAuthStateChanged,
-  signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, increment, serverTimestamp, writeBatch,
+  collection, doc, 
+  query, where, orderBy, limit, signInWithPopup, signOut, onAuthStateChanged,
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, increment, serverTimestamp,
   GoogleAuthProvider
 };

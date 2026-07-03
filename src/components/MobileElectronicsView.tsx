@@ -18,8 +18,7 @@ import {
   AlertTriangle,
   Info
 } from 'lucide-react';
-import { doc, updateDoc, addDoc, collection } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, doc, updateDoc, addDoc, collection } from '../firebase';
 import Papa from 'papaparse';
 
 interface Product {

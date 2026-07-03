@@ -8,6 +8,7 @@ async function startServer() {
   const PORT = 3000;
   
   app.use((req, res, next) => {
+    console.log(`[HTTP Request] ${req.method} ${req.url}`);
     const isWcWebhook = req.path.toLowerCase() === '/api/integrations/woocommerce' || req.path.toLowerCase() === '/api/integrations/woocommerce/';
     if (isWcWebhook) {
       return next();
@@ -55,15 +56,46 @@ async function startServer() {
         modelToUse = "gemini-3.5-flash";
       }
 
-      const response = await ai.models.generateContent({ 
-        model: modelToUse,
-        contents: contents || [{ role: 'user', parts: [{ text: prompt }] }],
-        config: {
-          systemInstruction: systemInstruction,
-          tools: tools,
-          ...(config?.generationConfig || {})
+      let response;
+      try {
+        response = await ai.models.generateContent({ 
+          model: modelToUse,
+          contents: contents || [{ role: 'user', parts: [{ text: prompt }] }],
+          config: {
+            systemInstruction: systemInstruction,
+            tools: tools,
+            ...(config?.generationConfig || {})
+          }
+        });
+      } catch (innerError: any) {
+        const errorStr = String(innerError.message || innerError.status || JSON.stringify(innerError) || '');
+        const isQuotaOrPaidError = errorStr.includes('429') || 
+                                   errorStr.toLowerCase().includes('quota') || 
+                                   errorStr.includes('RESOURCE_EXHAUSTED') ||
+                                   errorStr.toLowerCase().includes('limit');
+                                   
+        if (isQuotaOrPaidError && modelToUse !== 'gemini-3.5-flash') {
+          console.warn(`[Gemini Fallback] Quota exceeded or paid flow required for ${modelToUse}. Falling back to gemini-3.5-flash.`);
+          
+          // Clean up config for gemini-3.5-flash (remove thinkingConfig)
+          const cleanConfig = { ...config?.generationConfig };
+          if (cleanConfig.thinkingConfig) {
+            delete cleanConfig.thinkingConfig;
+          }
+          
+          response = await ai.models.generateContent({ 
+            model: 'gemini-3.5-flash',
+            contents: contents || [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+              systemInstruction: systemInstruction,
+              tools: tools,
+              ...cleanConfig
+            }
+          });
+        } else {
+          throw innerError;
         }
-      });
+      }
 
       res.json({ 
         text: response.text,
@@ -127,6 +159,44 @@ async function startServer() {
     return result;
   } as typeof simulatedSessions.delete;
 
+  const MERCHANT_SESSIONS_FILE = path.join(process.cwd(), 'merchant_sessions.json');
+  function loadMerchantSessions(): Map<string, string> {
+    try {
+      if (fs.existsSync(MERCHANT_SESSIONS_FILE)) {
+        const data = fs.readFileSync(MERCHANT_SESSIONS_FILE, 'utf-8');
+        return new Map(Object.entries(JSON.parse(data)));
+      }
+    } catch (e) {
+      console.error('Failed to load merchant sessions', e);
+    }
+    return new Map<string, string>();
+  }
+
+  function saveMerchantSessions(sessions: Map<string, string>) {
+    try {
+      const obj = Object.fromEntries(sessions.entries());
+      fs.writeFileSync(MERCHANT_SESSIONS_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Failed to save merchant sessions', e);
+    }
+  }
+
+  const merchantSessions = loadMerchantSessions();
+
+  const originalMerchantSet = merchantSessions.set.bind(merchantSessions);
+  merchantSessions.set = function(k: string, v: string) {
+    const result = originalMerchantSet(k, v);
+    saveMerchantSessions(merchantSessions);
+    return result;
+  } as typeof merchantSessions.set;
+
+  const originalMerchantDelete = merchantSessions.delete.bind(merchantSessions);
+  merchantSessions.delete = function(k: string) {
+    const result = originalMerchantDelete(k);
+    saveMerchantSessions(merchantSessions);
+    return result;
+  } as typeof merchantSessions.delete;
+
   // White-label WhatsApp create device and QR token session endpoint
   app.post('/api/gateways/whatsapp/connect', async (req: express.Request, res: express.Response) => {
     try {
@@ -173,24 +243,43 @@ async function startServer() {
 
       return res.status(400).json({ success: false, error: 'Missing API key' });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Internal Server Error' });
+      res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
     }
   });
 
   // Proxy endpoint to hit SellersCampus / Zender wa.link directly with secret
-  app.post('/api/gateways/whatsapp/connect-walink', async (req: express.Request, res: express.Response) => {
+  app.post('/api/gateways/whatsapp/connect-walink', async (req, res) => {
     try {
-      const { secret, shopId } = req.body;
-      const cleanSecret = (secret || '4fe17fcfe73d5035f55b9144fa10e07443659005').trim();
-      const merchantID = shopId || 'merchant';
+      const { merchant_id, device_session_id } = req.body;
+      if (!merchant_id || !device_session_id) return res.status(400).json({ success: false, error: "Missing ID" });
+
+      // Lock session in map
+      merchantSessions.set(merchant_id, device_session_id);
+
+      // CRITICAL FIX: Append &unique=device_session_id to securely bind the payload!
+      const apiUrl = `https://app.sellerscampus.com/api/create/wa.link?secret=4fe17fcfe73d5035f55b9144fa10e07443659005&unique=${encodeURIComponent(device_session_id)}`;
       
-      const sessionDeviceId = `z_walink_${merchantID}_${Math.floor(10000 + Math.random() * 90000)}`;
+      const zenderRes = await fetch(apiUrl);
+      const rawText = await zenderRes.text();
+
+      return res.json({ success: true, rawQrString: rawText });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  const OLD_BYPASSED_CONNECT_WALINK = async (req: any, res: any) => {
+    try {
+      const { merchant_id, device_session_id } = req.body;
+      const merchantID = merchant_id || 'merchant';
+      const sessionDeviceId = device_session_id || `z_walink_${merchantID}_${Math.floor(10000 + Math.random() * 90000)}`;
+      
+      const cleanSecret = '4fe17fcfe73d5035f55b9144fa10e07443659005';
       const urlCmd = `https://app.sellerscampus.com/api/create/wa.link?secret=${cleanSecret}`;
       
       let attempt = 0;
       const maxAttempts = 12;
       let finalRawText = '';
-      let parsedData: any = {};
       let lastErrorStatus = 0;
       let lastErrorMessage = '';
       const delaySeconds = 2.5;
@@ -210,7 +299,6 @@ async function startServer() {
           const rawText = await response.text();
           finalRawText = rawText;
           
-          // Try parsing JSON first to detect explicit API/permission/subscription errors immediately (even on 403 non-2xx status)
           let isPermissionError = false;
           let tempParsed: any = {};
           try {
@@ -227,7 +315,6 @@ async function startServer() {
           }
 
           if (isPermissionError) {
-             console.log(`[Zender wa.link] Intercepted missing subscription permission: ${rawText}`);
              return res.json({ 
                success: false, 
                status: 403,
@@ -237,17 +324,12 @@ async function startServer() {
 
           if (response.ok) {
             if (!rawText || rawText.includes('"data":false') || rawText.length < 100) {
-              console.log(`[Zender wa.link] Attempt ${attempt} returned fallback/fake data: ${rawText.substring(0,30)}... Retrying in ${delaySeconds}s...`);
               await new Promise(r => setTimeout(r, delaySeconds * 1000));
               continue;
             }
             
-            parsedData = tempParsed;
-
-            // Extract real QR string from JSON
             let detectedQr = rawText.trim();
             if (detectedQr.startsWith('{') || detectedQr.startsWith('[')) {
-               // deeply search for qrcode or code
                const extractString = (obj: any): string | null => {
                   if (typeof obj === 'string' && obj.length > 50 && !obj.startsWith('{')) return obj;
                   if (!obj || typeof obj !== 'object') return null;
@@ -261,161 +343,177 @@ async function startServer() {
                   }
                   return null;
                };
-               let ext = extractString(parsedData);
+               let ext = extractString(tempParsed);
                if (ext) detectedQr = ext;
             } else if (detectedQr.startsWith('"') && detectedQr.endsWith('"')) {
-               // The API returned a raw string wrapped in JSON quotes (e.g. Google Apps Script output)
                detectedQr = detectedQr.substring(1, detectedQr.length - 1);
             }
             
-            // Final sanitize: just in case the inner extracted text also has quotes
             detectedQr = detectedQr.trim();
             if (detectedQr.startsWith('"') && detectedQr.endsWith('"')) {
                detectedQr = detectedQr.substring(1, detectedQr.length - 1);
             }
 
-            // Send the raw string directly back to the frontend
-            let rawQrString = detectedQr;
+            // Save the session mapping for this merchant!
+            merchantSessions.set(merchantID, sessionDeviceId);
             
-            console.log(`[Zender wa.link] Real QR Payload fully acquired and cleaned on attempt ${attempt}:`, detectedQr.substring(0, 40));
+            console.log(`[Zender wa.link] Real QR Payload acquired on attempt ${attempt}:`, detectedQr.substring(0, 40));
             return res.json({
               success: true,
-              device_id: parsedData.device_id || sessionDeviceId,
-              widget_url: `/api/gateways/real/widget?qr_data=${encodeURIComponent(detectedQr.trim())}`,
-              rawQrString: detectedQr, // Pass the raw extracted QR string back to frontend for sanitization
-              status: parsedData.status || 'pending',
-              isSimulated: false,
-              raw: parsedData
+              device_id: sessionDeviceId,
+              rawQrString: detectedQr,
+              widget_url: `/api/gateways/real/widget?qr_data=${encodeURIComponent(detectedQr)}`,
+              status: 'pending'
             });
             
           } else {
             lastErrorStatus = response.status;
             lastErrorMessage = rawText;
-            console.log(`[Zender wa.link] HTTP ${response.status} Error. Node likely busy/offline. Retrying...`);
             await new Promise(r => setTimeout(r, delaySeconds * 1000));
             continue;
           }
         } catch (apiErr: any) {
-          console.log(`[Zender wa.link] Fetch failure: ${apiErr.message}. Retrying...`);
           lastErrorMessage = apiErr.message;
           await new Promise(r => setTimeout(r, delaySeconds * 1000));
         }
       }
 
-      // If we exhausted attempts, output final clear error
       return res.status(502).json({ 
          success: false, 
-         error: `SellersCampus Node Timeout: Container spin-up took too long or failed. Last Status: ${lastErrorStatus || 'Network Fail'}, Last Msg: ${lastErrorMessage.substring(0,100) || finalRawText.substring(0,100)}` 
+         error: `SellersCampus Node Timeout. Last Status: ${lastErrorStatus || 'Network Fail'}, Last Msg: ${lastErrorMessage.substring(0,100)}` 
       });
 
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
     }
+  };
+
+  // Helper to fetch real status from Zender API for a given device_id
+  async function fetchRealZenderStatus(device_id: string): Promise<{ isConnected: boolean, phone: string }> {
+    try {
+      const api_key = '4fe17fcfe73d5035f55b9144fa10e07443659005';
+      const checkUrl = `https://app.sellerscampus.com/api/get/wa.accounts?secret=${api_key}`;
+      
+      const response = await fetch(checkUrl, { method: 'GET' });
+      if (response.ok) {
+        const data: any = await response.json();
+        if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+          const matchingAccount = data.data.find((acc: any) => 
+            String(acc.unique) === String(device_id) || String(acc.id) === String(device_id)
+          );
+          if (matchingAccount && (matchingAccount.status === 'connected' || matchingAccount.status === 'active')) {
+            return { isConnected: true, phone: matchingAccount.phone || '' };
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[Zender Status Check Error]', e);
+    }
+    return { isConnected: false, phone: '' };
+  }
+
+  // Helper to determine if a device is connected (simulated or real)
+  async function isDeviceConnected(device_id: string): Promise<{ isConnected: boolean, phone: string }> {
+    if (!device_id) return { isConnected: false, phone: '' };
+    if (device_id.startsWith('sim_device_') || device_id.startsWith('z_wa_demo_') || device_id.startsWith('z_walink_') || device_id.startsWith('z_wa_otp_')) {
+      const isSimConnected = simulatedSessions.get(device_id) === 'connected';
+      return { isConnected: isSimConnected, phone: '8801700000000' };
+    }
+    // Real Zender status check
+    return await fetchRealZenderStatus(device_id);
+  }
+
+  // Real-time Gateway status controller (supporting both query & param routing with strict tenant isolation)
+  app.get('/api/gateways/whatsapp/status', async (req: express.Request, res: express.Response) => {
+    try {
+      const merchant_id = req.query.merchant_id as string;
+      const device_session_id = req.query.device_session_id as string;
+      if (!merchant_id) return res.json({ success: false, status: 'disconnected' });
+
+      // CRITICAL: Re-hydrate memory if frontend sends the saved ID
+      if (device_session_id && device_session_id !== 'undefined' && !merchantSessions.has(merchant_id)) {
+          merchantSessions.set(merchant_id, device_session_id);
+      }
+
+      // Check strict isolation map
+      const active_device = merchantSessions.get(merchant_id);
+      if (!active_device) {
+         return res.json({ success: true, status: 'disconnected', device_id: null });
+      }
+
+      const { isConnected, phone } = await isDeviceConnected(active_device);
+      if (isConnected) {
+         return res.json({ success: true, status: 'connected', device_id: active_device, phone });
+      } else {
+         return res.json({ success: true, status: 'disconnected', device_id: active_device });
+      }
+    } catch (error: any) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
   });
 
-  // Real-time Gateway status controller (supporting both query & param routing)
   app.get('/api/gateways/status', async (req: express.Request, res: express.Response) => {
     try {
-      const endpoint_url = 'https://app.sellerscampus.com/api/v1';
-      let api_key = (req.query.api_key as string) || '4fe17fcfe73d5035f55b9144fa10e07443659005';
-      if (api_key === 'your_sellerscampus_zender_master_api_key_here' || api_key.trim() === '') {
-         api_key = '4fe17fcfe73d5035f55b9144fa10e07443659005';
+      const merchant_id = (req.query.merchant_id || req.query.shopId) as string;
+      const device_session_id = req.query.device_session_id as string;
+      if (!merchant_id) return res.json({ success: false, status: 'disconnected' });
+
+      // CRITICAL: Re-hydrate memory if frontend sends the saved ID
+      if (device_session_id && device_session_id !== 'undefined' && !merchantSessions.has(merchant_id)) {
+          merchantSessions.set(merchant_id, device_session_id);
       }
-      const device_id = (req.query.device_id as string) || '';
-      const phone_query = (req.query.phone as string) || '';
 
-      let cleanEndpoint = endpoint_url;
-
-      try {
-        let checkUrl = `${cleanEndpoint}/whatsapp/status/${device_id}`;
-        let headers: any = {
-          'Authorization': `Bearer ${api_key}`,
-          'Content-Type': 'application/json'
-        };
-
-        const isWalink = device_id.startsWith('z_walink_') || device_id.startsWith('z_wa_otp_') || api_key.length === 40;
-
-        // If the device ID happens to be from walink or we sense a specific walink setup
-        if (isWalink) { // token/secret is usually 40 chars
-          checkUrl = `https://app.sellerscampus.com/api/get/wa.accounts?secret=${api_key}`;
-          headers = {}; // clear bearer
-        }
-
-        console.log(`[Status Sync] GET check Zender status at ${checkUrl}`);
-        const response = await fetch(checkUrl, {
-          method: 'GET',
-          headers
-        });
-
-        if (response.ok) {
-          const data: any = await response.json();
-          let isConnected = false;
-          let realDeviceId = device_id;
-          let phone = '';
-
-          // Handle wa.accounts array response
-          if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-             const reqMerchantId = (req.query.merchant_id as string) || (req.query.shopId as string) || '';
-             
-             let matchingAccount = data.data.find((acc: any) => String(acc.unique) === String(device_id) || String(acc.id) === String(device_id));
-             
-             if (!matchingAccount && phone_query) {
-                // Formatting phone parameter
-                let searchPhone = phone_query;
-                if (searchPhone.length === 11 && searchPhone.startsWith('0')) searchPhone = '88' + searchPhone;
-                matchingAccount = data.data.find((acc: any) => acc.phone && acc.phone.includes(searchPhone));
-             }
-
-             if (!matchingAccount && phone_query && (device_id.startsWith('z_walink_') || device_id.startsWith('z_wa_otp_'))) {
-                 matchingAccount = data.data.find((acc: any) => acc.phone && acc.phone.includes(phone_query) && (acc.status === 'connected' || acc.status === 'active'));
-             }
-             
-             // ENFORCE MERCHANT ID SCOPING
-             if (!matchingAccount && req.query.resync === 'true' && reqMerchantId) {
-                 matchingAccount = data.data.find((acc: any) => {
-                     const isConnectedState = acc.status === 'connected' || acc.status === 'active';
-                     const hasMerchantID = String(acc.unique).includes(reqMerchantId) || String(acc.id).includes(reqMerchantId);
-                     return isConnectedState && hasMerchantID;
-                 });
-             } else if (!matchingAccount && req.query.resync === 'true') {
-                 // Do not auto-assign global connections to missing merchants
-                 matchingAccount = undefined;
-             }
-
-             // Hard security check: if an account is found but it doesn't belong to this merchant, reject it
-             if (matchingAccount && reqMerchantId) {
-                 const hasMerchantID = String(matchingAccount.unique).includes(reqMerchantId) || String(matchingAccount.id).includes(reqMerchantId);
-                 if (!hasMerchantID) {
-                     matchingAccount = undefined;
-                 }
-             }
-
-             if (matchingAccount && (matchingAccount.status === 'connected' || matchingAccount.status === 'active')) {
-                isConnected = true;
-                realDeviceId = matchingAccount.unique || matchingAccount.id || device_id;
-                phone = matchingAccount.phone;
-             }
-          } else {
-            // Adjust for both standard and wa.info structured payloads
-            const allValues = [data.status, data.state, data.data?.status, data.data, data.data?.state];
-            isConnected = allValues.some(val => val === 'connected' || val === 'active' || val === 'REAL_CONNECTED');
-            phone = data.phone || data.data?.phone || '';
-          }
-          
-          if (isConnected) {
-            return res.json({ success: true, status: 'connected', real_device_id: realDeviceId, raw: data, phone: phone });
-          } else {
-            return res.json({ success: true, status: 'disconnected', raw: data });
-          }
-        } else {
-          return res.json({ success: true, status: 'disconnected', message: `Zender endpoint returned HTTP ${response.status}` });
-        }
-      } catch (err: any) {
-        // Quiet fallback - network offline or status sync server unreachable
-        return res.json({ success: true, status: 'disconnected', error: err.message });
+      const active_device = merchantSessions.get(merchant_id);
+      if (!active_device) {
+         return res.json({ success: true, status: 'disconnected', device_id: null });
       }
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Internal check error' });
+
+      const { isConnected, phone } = await isDeviceConnected(active_device);
+      if (isConnected) {
+         return res.json({ success: true, status: 'connected', device_id: active_device, phone, real_device_id: active_device });
+      } else {
+         return res.json({ success: true, status: 'disconnected', device_id: active_device });
+      }
+    } catch (error: any) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // POST /api/gateways/whatsapp/disconnect:
+  app.post('/api/gateways/whatsapp/disconnect', async (req: express.Request, res: express.Response) => {
+    try {
+      const { merchant_id } = req.body;
+      if (!merchant_id) {
+        return res.status(400).json({ success: false, error: 'merchant_id is required' });
+      }
+
+      const device_id = merchantSessions.get(merchant_id);
+      if (device_id) {
+        const api_key = '4fe17fcfe73d5035f55b9144fa10e07443659005';
+        try {
+          const removeParams = new URLSearchParams();
+          removeParams.set('secret', api_key);
+          removeParams.set('account', device_id);
+
+          const waDeleteUrl = `https://app.sellerscampus.com/api/delete/whatsapp`;
+          await fetch(waDeleteUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: removeParams.toString()
+          });
+        } catch (unlinkErr) {
+          console.error('Failed to unlink from Zender API:', unlinkErr);
+        }
+      }
+
+      // CRITICAL: Wipe from isolated map
+      merchantSessions.delete(merchant_id);
+      
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, error: error.message });
     }
   });
 
@@ -483,7 +581,11 @@ async function startServer() {
   // Two-way logout/unlink session hard reset
   app.post('/api/gateways/unlink', async (req: express.Request, res: express.Response) => {
     try {
-      const { device_id, api_key: reqApiKey, endpoint_url: reqEndpointUrl } = req.body;
+      const { device_id, api_key: reqApiKey, endpoint_url: reqEndpointUrl, shopId, merchant_id } = req.body;
+      const mId = shopId || merchant_id || '';
+      if (mId) {
+        merchantSessions.delete(mId);
+      }
       const cleanEndpoint = reqEndpointUrl || 'https://app.sellerscampus.com/api/v1';
       let api_key = reqApiKey || '4fe17fcfe73d5035f55b9144fa10e07443659005';
       if (api_key === 'your_sellerscampus_zender_master_api_key_here') {
@@ -855,7 +957,20 @@ async function startServer() {
       const invoiceUrl = `https://app.sellerscampus.com/invoice/view/${sale.id || 'live'}`; // simulated dynamic invoice PDF link or web portal
 
       const defaultRoute = gatewayConfig?.default_route || 'manual_redirect';
-      let waDeviceId = gatewayConfig?.zender_whatsapp_device_id || '';
+      
+      const mId = shopId || req.body.merchant_id || '';
+      let waDeviceId = gatewayConfig?.zender_whatsapp_device_id || req.body.device_session_id || '';
+
+      // CRITICAL Fallback / Re-hydration:
+      if (mId) {
+         const cachedDevice = merchantSessions.get(mId);
+         if (cachedDevice) {
+            waDeviceId = cachedDevice;
+         } else if (waDeviceId && waDeviceId !== 'undefined') {
+            merchantSessions.set(mId, waDeviceId);
+         }
+      }
+
       const smsDeviceId = gatewayConfig?.zender_sms_device_id || '';
       let userSecret = gatewayConfig?.zender_api_key || '4fe17fcfe73d5035f55b9144fa10e07443659005';
       if (userSecret === 'your_sellerscampus_zender_master_api_key_here') {
@@ -884,10 +999,10 @@ async function startServer() {
              return res.json({ success: true, route: 'whatsapp', simulated: true, data: { status: 200, message: 'Simulated success message.' } });
           }
 
-          if (!realAccountUniqueId) {
+          if (!realAccountUniqueId || realAccountUniqueId === 'undefined' || realAccountUniqueId === '1') {
              return res.status(400).json({
                success: false,
-               error: 'কোনো হোয়াটসঅ্যাপ অ্যাকাউন্ট যুক্ত করা নেই বা অ্যাকাউন্ট আইডি সঠিক নয়। প্রথমে সেটিংস থেকে অ্যাকাউন্ট কানেক্ট করুন। (WhatsApp not connected properly)',
+               error: "WhatsApp account doesn't exist! Please click Re-sync Connection.",
                code: 'WA_NOT_LINKED'
              });
           }
@@ -911,7 +1026,7 @@ async function startServer() {
             }
           }
 
-          if (!realAccountUniqueId || String(realAccountUniqueId).length < 20 || realAccountUniqueId === '1') {
+          if (!realAccountUniqueId || realAccountUniqueId === 'undefined' || realAccountUniqueId === '1') {
              return res.status(400).json({
                success: false,
                error: 'কোনো হোয়াটসঅ্যাপ অ্যাকাউন্ট যুক্ত করা নেই বা অ্যাকাউন্ট আইডি সঠিক নয়। প্রথমে সেটিংস থেকে অ্যাকাউন্ট কানেক্ট করুন। (WhatsApp not connected properly)',
@@ -1037,17 +1152,73 @@ async function startServer() {
   const INTEGRATIONS_FILE = path.join(process.cwd(), 'integrations_data.json');
 
   function getIntegrationsData() {
+    let parsed: any = null;
     try {
       if (fs.existsSync(INTEGRATIONS_FILE)) {
         const content = fs.readFileSync(INTEGRATIONS_FILE, 'utf-8');
         if (content && content.trim()) {
-          return JSON.parse(content);
+          parsed = JSON.parse(content);
         }
       }
     } catch (e) {
       console.error('Failed to parse integrations data, corrupt file reset:', e);
     }
+
     const defaultData = {
+      aiProducts: [
+        {
+          id: "prod_1",
+          sku: "COT-PAN-01",
+          name: "প্রিমিয়াম সুতি পাঞ্জাবি (Premium Cotton Panjabi)",
+          price: 1250,
+          stock: 45,
+          description: "সাইজসমূহ: M (৪০), L (৪২), XL (৪৪), XXL (৪৬)। প্রিমিয়াম ১০০% সুতি নরম ডাবল কটন কাপড়। অত্যন্ত আরামদায়ক।"
+        },
+        {
+          id: "prod_2",
+          sku: "LTH-WAL-02",
+          name: "প্রিমিয়াম লেদার ওয়ালেট (Premium Leather Wallet)",
+          price: 850,
+          stock: 12,
+          description: "১০০% খাঁটি চামড়া (Genuine Leather)। ৫টি কার্ড স্লট এবং ২টি ক্যাশ পকেট।"
+        },
+        {
+          id: "prod_3",
+          sku: "LAD-KUR-03",
+          name: "ডিজাইনার লেডিস কুর্তি (Designer Ladies Kurti)",
+          price: 850,
+          stock: 25,
+          description: "সাইজসমূহ: M, L, XL। আকর্ষণীয় এমব্রয়ডারি ডিজাইন সহ লিনেন ফ্যাব্রিক।"
+        },
+        {
+          id: "prod_4",
+          sku: "PRE-ATT-04",
+          name: "প্রিমিয়াম আতর (Premium Attar)",
+          price: 350,
+          stock: 8,
+          description: "রোজ এবং উদ সুগন্ধি যুক্ত দীর্ঘস্থায়ী নন-অ্যালকোহলিক প্রিমিয়াম আতর।"
+        }
+      ],
+      aiSettings: {
+        agentName: "SellersCampus AI Copilot",
+        autoConfirmOrders: false,
+        systemPrompt: "আপনি 'SellersCampus' ই-কমার্স ব্র্যান্ডের একজন অভিজ্ঞ সেলস অ্যাসিস্ট্যান্ট। আপনার আচরণ হবে অত্যন্ত ভদ্র ও অমায়িক। কাস্টমারদের সাথে বাংলায় কথা বলবেন। ক্যাটালগে থাকা পণ্যের বাইরে অন্য কোনো পণ্য বিক্রি করবেন না। কাস্টমার যদি কোনো পণ্যের দাম, সাইজ বা স্টক জানতে চায় তবে ডাটাবেজে থাকা পণ্য ক্যাটালগ দেখে নিখুঁত উত্তর দিন। কাস্টমার অর্ডার বুক করতে চাইলে তার কাছে নাম, মোবাইল নম্বর এবং সম্পূর্ণ ডেলিভারি ঠিকানা চান। সব তথ্য একসাথে পেলে অর্ডারটি বুক করুন।",
+        failureFallbackMessage: "দুঃখিত ভাইয়া/আপু, আপনার এই বিষয়টি আমি ঠিক বুঝতে পারছি না। আমাদের কাস্টমার কেয়ার টিম খুব শীঘ্রই আপনার সাথে সরাসরি যোগাযোগ করবে।"
+      },
+      aiOrders: [
+        {
+          id: "ai_ord_1",
+          order_number: "AI-3941",
+          customer_name: "Mahmudul Hasan",
+          customer_phone: "01712345678",
+          customer_address: "হাউজ ১২, রোড ৪, উত্তরা, ঢাকা",
+          product_name: "প্রিমিয়াম সুতি পাঞ্জাবি (Premium Cotton Panjabi)",
+          total: "৳ 1,310",
+          quantity: 1,
+          status: "pending_review",
+          created_at: new Date(Date.now() - 3600000).toISOString()
+        }
+      ],
       wooOrders: [
         {
           id: "woo_1",
@@ -1136,8 +1307,53 @@ async function startServer() {
             { id: "msg_5", sender: "system", text: "ঢাকার বাইরে ডেলিভারি চার্জ ১৫০ টাকা ভাইয়া। ক্যাশ অন ডেলিভারি পাবেন।", created_at: new Date(Date.now() - 39000000).toISOString() }
           ]
         }
+      ],
+      waChats: [
+        {
+          id: "wa_thread_1",
+          customer_name: "Mahmudul Hasan",
+          customer_phone: "01712345678",
+          unread: true,
+          ai_automated: true,
+          messages: [
+            { id: "wa_msg_1", sender: "user", text: "আসসালামু আলাইকুম, আপনাদের কাছে কি কটন পাঞ্জাবি আছে?", created_at: new Date(Date.now() - 3600000).toISOString() },
+            { id: "wa_msg_2", sender: "system", text: "ওয়া আলাইকুম আসসালাম। জি ভাইয়া, আমাদের কাছে কটন পাঞ্জাবি এভেইলএবল আছে। প্রিমিয়াম কোয়ালিটি সুতি কাপড়। অর্ডার করতে আপনার নাম, মোবাইল ও ডেলিভারি এড্রেস লিখে পাঠান!", created_at: new Date(Date.now() - 3000000).toISOString() },
+            { id: "wa_msg_3", sender: "user", text: "আমি একটি লার্জ (L) সাইজের পাঞ্জাবি নিতে চাই। আমার নাম মইনুল, ফোন নম্বর ০১৭৪১৯১২২৩৩, ঠিকানা হাউজ ১২, রোড ৪, উত্তরা, ঢাকা।", created_at: new Date(Date.now() - 1200000).toISOString() }
+          ]
+        },
+        {
+          id: "wa_thread_2",
+          customer_name: "Nusrat Jahan",
+          customer_phone: "01987654321",
+          unread: false,
+          ai_automated: false,
+          messages: [
+            { id: "wa_msg_4", sender: "user", text: "ডেলিভারি চার্জ কত ঢাকার বাইরে ভাইয়া?", created_at: new Date(Date.now() - 14400000).toISOString() },
+            { id: "wa_msg_5", sender: "system", text: "ঢাকার বাইরে ডেলিভারি চার্জ ১২০ টাকা আপু। ক্যাশ অন ডেলিভারি পাবেন।", created_at: new Date(Date.now() - 14000000).toISOString() }
+          ]
+        }
       ]
     };
+
+    if (parsed) {
+      let changed = false;
+      if (!parsed.aiProducts) { parsed.aiProducts = defaultData.aiProducts; changed = true; }
+      if (!parsed.aiSettings) { parsed.aiSettings = defaultData.aiSettings; changed = true; }
+      if (!parsed.aiOrders) { parsed.aiOrders = defaultData.aiOrders; changed = true; }
+      if (!parsed.wooOrders) { parsed.wooOrders = defaultData.wooOrders; changed = true; }
+      if (!parsed.laravelEvents) { parsed.laravelEvents = defaultData.laravelEvents; changed = true; }
+      if (!parsed.fbChats) { parsed.fbChats = defaultData.fbChats; changed = true; }
+      if (!parsed.waChats) { parsed.waChats = defaultData.waChats; changed = true; }
+      if (changed) {
+        try {
+          fs.writeFileSync(INTEGRATIONS_FILE, JSON.stringify(parsed, null, 2), 'utf-8');
+        } catch (e) {
+          console.error('Failed to update existing integrations data with default fields:', e);
+        }
+      }
+      return parsed;
+    }
+
     try {
       fs.writeFileSync(INTEGRATIONS_FILE, JSON.stringify(defaultData, null, 2), 'utf-8');
     } catch (e) {
@@ -1434,104 +1650,488 @@ async function startServer() {
     }
   });
 
-  // Laravel receiver
-  app.post('/api/integrations/laravel', (req: express.Request, res: express.Response) => {
-    try {
-      const data = getIntegrationsData();
-      const newEvent = {
-        id: 'lar_' + Date.now(),
-        event_type: req.body.event_type || 'Laravel Event Triggered',
-        payload: req.body.payload || { info: 'No details provided' },
-        status: 'unread',
-        created_at: new Date().toISOString()
-      };
-      data.laravelEvents.unshift(newEvent);
-      saveIntegrationsData(data);
-      res.json({ success: true, message: 'Laravel custom integration event received', event: newEvent });
-    } catch (err: any) {
-      console.error('Error receiving Laravel event:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to process Laravel hook' });
-    }
-  });
+  // L  // Offline Heuristic AI Responder for WhatsApp when Gemini API Key is missing/unconfigured
+  function heuristicWhatsAppAI(messageText: string) {
+    const text = messageText.toLowerCase();
+    const data = getIntegrationsData();
+    const products = data.aiProducts || [];
+    const settings = data.aiSettings || {
+      agentName: "SellersCampus AI Copilot",
+      autoConfirmOrders: false,
+      systemPrompt: "",
+      failureFallbackMessage: "দুঃখিত ভাইয়া/আপু, আপনার এই বিষয়টি আমি ঠিক বুঝতে পারছি না। আমাদের প্রতিনিধি খুব শীঘ্রই আপনার সাথে যোগাযোগ করবেন।"
+    };
 
-  // Laravel Event Status Update
-  app.post('/api/integrations/laravel/status', (req: express.Request, res: express.Response) => {
-    try {
-      const { id, status } = req.body;
-      const data = getIntegrationsData();
-      data.laravelEvents = data.laravelEvents.map((e: any) => e.id === id ? { ...e, status } : e);
-      saveIntegrationsData(data);
-      res.json({ success: true, message: `Event status updated to ${status}` });
-    } catch (err: any) {
-      console.error('Error updating Laravel event status:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to update event status' });
-    }
-  });
+    let replyText = `আসসালামু আলাইকুম ভাইয়া। ${settings.agentName || 'AI Copilot'} থেকে আপনাকে স্বাগত জানাচ্ছি। আমরা কিভাবে সাহায্য করতে পারি?`;
+    let isOrderPlaced = false;
+    let orderDetails: any = null;
 
-  // Facebook verify
-  app.get('/api/integrations/facebook', (req: express.Request, res: express.Response) => {
-    try {
-      const hubMode = req.query['hub.mode'];
-      const hubToken = req.query['hub.verify_token'];
-      const hubChallenge = req.query['hub.challenge'];
-      if (hubMode === 'subscribe' && hubToken === 'my-verification-token') {
-        res.send(hubChallenge);
-      } else {
-        res.status(403).send('Verification failed');
+    // Check if user is asking about any of the dynamic products
+    let foundProduct: any = null;
+    for (const p of products) {
+      const nameLower = p.name.toLowerCase();
+      const skuLower = p.sku.toLowerCase();
+      if (
+        text.includes(skuLower) ||
+        text.includes(nameLower.split('(')[0].trim().toLowerCase()) ||
+        (text.includes('পাঞ্জাবি') && nameLower.includes('পাঞ্জাবি')) ||
+        (text.includes('ওয়ালেট') && nameLower.includes('wallet')) ||
+        (text.includes('মানিব্যাগ') && nameLower.includes('wallet')) ||
+        (text.includes('কুর্তি') && nameLower.includes('kurti')) ||
+        (text.includes('আতর') && nameLower.includes('attar'))
+      ) {
+        foundProduct = p;
+        break;
       }
-    } catch (err: any) {
-      console.error('Error on Facebook verification:', err);
-      res.status(500).send('Verification processing error');
     }
-  });
 
-  // Facebook simulation message
-  app.post('/api/integrations/facebook/message', (req: express.Request, res: express.Response) => {
+    if (foundProduct) {
+      replyText = `জি ভাইয়া, আমাদের "${foundProduct.name}" এভেইলএবল আছে। মূল্য মাত্র ৳ ${foundProduct.price}। ক্যাটালগ কোড: ${foundProduct.sku}। স্টক রয়েছে ${foundProduct.stock} টি। ${foundProduct.description}। অর্ডার কনফার্ম করতে নাম, মোবাইল নম্বর এবং সম্পূর্ণ ঠিকানা লিখে পাঠান।`;
+    } else if (text.includes('ডেলিভারি চার্জ') || text.includes('delivery charge') || text.includes('কুরিয়ার')) {
+      replyText = 'আমাদের ডেলিভারি চার্জ ঢাকার ভেতরে ৬০ টাকা এবং ঢাকার বাইরে ১২০ টাকা ভাইয়া। পুরো বাংলাদেশে ক্যাশ অন ডেলিভারি (হাতে পেয়ে টাকা পরিশোধ) সুবিধা রয়েছে।';
+    } else if (text.includes('ক্যাশ অন ডেলিভারি') || text.includes('cod') || text.includes('হাতে পেয়ে')) {
+      replyText = 'জি ভাইয়া, আমাদের পুরো বাংলাদেশেই ক্যাশ অন ডেলিভারি (Cash on Delivery) সার্ভিস সচল আছে। অর্ডার বুক করতে নাম, ফোন ও ঠিকানা দিন!';
+    } else if (text.includes('অর্ডার') || text.includes('order') || text.includes('ঠিকানা') || text.includes('নাম') || text.includes('ফোন')) {
+      const phoneMatch = messageText.match(/01[3-9]\d{8}/);
+      if (phoneMatch) {
+        isOrderPlaced = true;
+        const phone = phoneMatch[0];
+        
+        let name = 'WhatsApp Customer';
+        if (messageText.includes('নাম')) {
+          const parts = messageText.split(/নাম/);
+          if (parts[1]) name = parts[1].split(/,|ফোন|ঠিকানা|মোবাইল|০/)[0].replace(/[:\s\-\=\ঃ]+/g, '').trim() || name;
+        }
+
+        let address = 'ধানমন্ডি, ঢাকা, বাংলাদেশ';
+        if (messageText.includes('ঠিকানা')) {
+          const parts = messageText.split(/ঠিকানা/);
+          if (parts[1]) address = parts[1].split(/,|ফোন|মোবাইল/)[0].replace(/[:\s\-\=\ঃ]+/g, '').trim() || address;
+        }
+
+        const targetProd = products[0] || { name: 'Premium Leather Wallet', price: 850 };
+        orderDetails = {
+          customer_name: name,
+          customer_phone: phone,
+          customer_address: address,
+          product_name: targetProd.name,
+          total: `৳ ${targetProd.price}`
+        };
+
+        const confirmText = settings.autoConfirmOrders 
+          ? `জি ${name} ভাই, আপনার অর্ডারটি সফলভাবে রিসিভ ও কনফার্ম করা হয়েছে! আপনার দেওয়া ঠিকানা: ${address} এবং ফোন নম্বর: ${phone}। আমরা ১-২ দিনের মধ্যে ডেলিভারি সম্পন্ন করার ব্যবস্থা করছি। ধন্যবাদ!`
+          : `জি ${name} ভাই, আপনার অর্ডার তথ্য পেয়েছি! আপনার ঠিকানা: ${address} এবং ফোন নম্বর: ${phone}। আমাদের একজন প্রতিনিধি অর্ডারটি রিভিউ করে খুব শীঘ্রই এটি কনফার্ম করার জন্য কল দিবেন। ধন্যবাদ!`;
+        
+        replyText = confirmText;
+      } else {
+        replyText = 'অর্ডার বুকিং করতে অনুগ্রহ করে আপনার সম্পূর্ণ নাম, মোবাইল নম্বর এবং সম্পূর্ণ ডেলিভারি ঠিকানা একসাথে লিখে পাঠান ভাইয়া।';
+      }
+    } else if (text.includes('হ্যালো') || text.includes('hello') || text.includes('হাই') || text.includes('hi')) {
+      const prodNames = products.map((p: any) => p.name.split('(')[0].trim()).slice(0, 2).join(' নাকি ');
+      replyText = `হ্যালো ভাইয়া! ${settings.agentName || 'AI Copilot'} থেকে আপনাকে স্বাগতম। আপনি কি আমাদের ${prodNames || 'নতুন কালেকশন'} কিনতে চান? আমাদের জানান!`;
+    } else if (text.includes('থ্যাংকস') || text.includes('ধন্যবাদ') || text.includes('thank')) {
+      replyText = 'জি ভাইয়া, আপনাকেও অনেক ধন্যবাদ! কোনো সহযোগিতা লাগলে আমাদের মেসেজ দিবেন। ভালো থাকুন!';
+    } else {
+      replyText = settings.failureFallbackMessage || "দুঃখিত ভাইয়া/আপু, আপনার এই বিষয়টি আমি ঠিক বুঝতে পারছি না। আমাদের প্রতিনিধি খুব শীঘ্রই আপনার সাথে যোগাযোগ করবেন।";
+    }
+
+    return { replyText, isOrderPlaced, orderDetails };
+  }
+
+  // POST: Receive simulated WhatsApp Message (Text or Voice note) and process via Gemini AI
+  app.post('/api/integrations/whatsapp/message', async (req: express.Request, res: express.Response) => {
     try {
-      const { customer_name, customer_id, text } = req.body;
+      const { customer_name, customer_phone, text, isVoice, voiceDuration } = req.body;
       const data = getIntegrationsData();
-      const targetThreadId = 'fb_thread_' + (customer_id || Date.now());
-      
-      let thread = data.fbChats.find((t: any) => t.customer_id === (customer_id || 'guest_id'));
+      if (!data.waChats) data.waChats = [];
+
+      const cleanPhone = String(customer_phone || '01711223344').trim();
+      const cleanName = customer_name || 'WhatsApp Customer';
+      const targetThreadId = 'wa_thread_' + cleanPhone;
+
+      let thread = data.waChats.find((t: any) => t.customer_phone === cleanPhone);
       if (!thread) {
         thread = {
           id: targetThreadId,
-          customer_name: customer_name || 'Guest User',
-          customer_id: customer_id || 'guest_id',
+          customer_name: cleanName,
+          customer_phone: cleanPhone,
           unread: true,
+          ai_automated: true,
           messages: []
         };
-        data.fbChats.unshift(thread);
+        data.waChats.unshift(thread);
       }
-      
-      thread.messages.push({
-        id: 'msg_' + Date.now(),
+
+      // Handle voice message transcript simulation
+      const messageText = text || (isVoice ? `🎤 Voice note (0:${voiceDuration || '05'})` : 'Hello');
+      const voiceTextTranslation = isVoice ? (text || "আসসালামু আলাইকুম ভাইয়া, আমি একটা লেদার ওয়ালেট অর্ডার করবো, আমার নাম মইনুল, মোবাইল ০১৭৯৯৮৮৭৭৬৬, ঠিকানা মোহাম্মদপুর, ঢাকা।") : undefined;
+
+      const userMsg: any = {
+        id: 'wa_msg_u_' + Date.now(),
         sender: 'user',
-        text: text || 'Hello',
+        text: messageText,
         created_at: new Date().toISOString()
-      });
+      };
+
+      if (isVoice) {
+        userMsg.is_voice = true;
+        userMsg.voice_text_translation = voiceTextTranslation;
+      }
+
+      thread.messages.push(userMsg);
       thread.unread = true;
 
+      const products = data.aiProducts || [];
+      const settings = data.aiSettings || {
+        agentName: "SellersCampus AI Copilot",
+        autoConfirmOrders: false,
+        systemPrompt: "",
+        failureFallbackMessage: "দুঃখিত ভাইয়া/আপু, আপনার এই বিষয়টি আমি ঠিক বুঝতে পারছি না। আমাদের প্রতিনিধি খুব শীঘ্রই আপনার সাথে যোগাযোগ করবেন।"
+      };
+
+      // AI auto reply trigger if enabled
+      if (thread.ai_automated) {
+        const queryText = isVoice ? voiceTextTranslation : messageText;
+        let replyText = '';
+        let isOrderPlaced = false;
+        let orderDetails = null;
+
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (apiKey) {
+          try {
+            const ai = new GoogleGenAI({ 
+              apiKey: apiKey,
+              httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+            });
+
+            const promptText = `Customer query: "${queryText}"`;
+            const systemInstruction = `
+            You are an expert AI Sales Assistant for the e-commerce brand.
+            Your name is "${settings.agentName || 'SellersCampus AI Copilot'}".
+            
+            ${settings.systemPrompt}
+            
+            Here is the current dynamic Product Catalog (Stock and Pricing are live):
+            ${products.map((p: any) => `- SKU: ${p.sku} | Name: ${p.name} | Price: ৳ ${p.price} | Stock: ${p.stock} units | Description: ${p.description}`).join('\n')}
+            
+            Delivery Charges: Inside Dhaka 60 Taka, outside Dhaka 120 Taka. All orders are Cash on Delivery.
+            
+            Analyze the query and determine if the user wants to buy/order a product.
+            If they provide name, phone, and address, consider it a valid order placement.
+            
+            You MUST respond with a strictly valid JSON object with the following schema:
+            {
+              "replyText": "Polite reply in Bengali or Banglish answering the customer's query or confirming receipt of order details. Do not use markdown inside this text.",
+              "isOrderPlaced": true or false,
+              "orderDetails": {
+                "customer_name": "extracted name or empty",
+                "customer_phone": "extracted phone or empty",
+                "customer_address": "extracted address or empty",
+                "product_name": "extracted product name or SKU or empty",
+                "total": "calculated total in Taka like '৳ 1,310' (price + delivery charge) or empty",
+                "quantity": 1
+              }
+            }
+            
+            If you are unable to answer or resolve the customer's query, return "isOrderPlaced": false and use this specific fallback reply message:
+            "${settings.failureFallbackMessage}"
+            
+            Always output ONLY valid JSON. No other text around it.
+            `;
+
+            const response = await ai.models.generateContent({
+              model: 'gemini-3.5-flash',
+              contents: [{ role: 'user', parts: [{ text: promptText }] }],
+              config: {
+                systemInstruction: systemInstruction,
+                responseMimeType: 'application/json'
+              }
+            });
+
+            const aiResult = JSON.parse(response.text || '{}');
+            replyText = aiResult.replyText || 'জি ভাইয়া, আমরা আপনার মেসেজটি পেয়েছি। অনুগ্রহ করে অপেক্ষা করুন।';
+            isOrderPlaced = aiResult.isOrderPlaced || false;
+            orderDetails = aiResult.orderDetails || null;
+
+          } catch (geminiErr: any) {
+            console.error('[WhatsApp AI Error] Failed calling real Gemini API:', geminiErr.message);
+            const fallback = heuristicWhatsAppAI(queryText || '');
+            replyText = fallback.replyText;
+            isOrderPlaced = fallback.isOrderPlaced;
+            orderDetails = fallback.orderDetails;
+          }
+        } else {
+          // Fallback heuristic offline AI
+          const fallback = heuristicWhatsAppAI(queryText || '');
+          replyText = fallback.replyText;
+          isOrderPlaced = fallback.isOrderPlaced;
+          orderDetails = fallback.orderDetails;
+        }
+
+        // Push AI Response message
+        thread.messages.push({
+          id: 'wa_msg_sys_' + Date.now(),
+          sender: 'system',
+          text: replyText,
+          created_at: new Date().toISOString()
+        });
+
+        thread.unread = false;
+
+        // Automatically inject order if detected
+        if (isOrderPlaced && orderDetails && orderDetails.customer_name) {
+          const phoneNum = orderDetails.customer_phone || cleanPhone;
+          const orderNum = 'AI-' + Math.floor(3000 + Math.random() * 6000);
+          const autoConfirm = settings.autoConfirmOrders;
+          
+          const newOrder = {
+            id: 'ai_ord_' + Date.now(),
+            order_number: orderNum,
+            customer_name: orderDetails.customer_name,
+            customer_phone: phoneNum,
+            customer_address: orderDetails.customer_address || "ঠিকানা দেওয়া হয়নি",
+            product_name: orderDetails.product_name || (products[0]?.name || "Premium Product"),
+            total: orderDetails.total || `৳ ${(products[0]?.price || 850) + 60}`,
+            quantity: orderDetails.quantity || 1,
+            status: autoConfirm ? 'confirmed' : 'pending_review',
+            created_at: new Date().toISOString()
+          };
+
+          if (!data.aiOrders) data.aiOrders = [];
+          data.aiOrders.unshift(newOrder);
+
+          // For backward compatibility / dual view, also inject into WooCommerce list
+          if (!data.wooOrders) data.wooOrders = [];
+          data.wooOrders.unshift({
+            id: 'woo_ai_' + Date.now(),
+            order_number: '#' + orderNum,
+            customer_name: orderDetails.customer_name,
+            customer_email: orderDetails.customer_name.toLowerCase().replace(/\s+/g, '') + '@gmail.com',
+            customer_phone: phoneNum,
+            customer_address: orderDetails.customer_address || "ঠিকানা দেওয়া হয়নি",
+            product_number: 'PRD-' + Math.floor(1000 + Math.random() * 9000),
+            total: orderDetails.total || `৳ ${(products[0]?.price || 850) + 60}`,
+            items: `1x ${orderDetails.product_name || (products[0]?.name || "Premium Product")}`,
+            payment_status: 'cash_on_delivery',
+            status: autoConfirm ? 'confirmed' : 'pending',
+            delivery_status: 'pending_shipment',
+            tracking_history: [
+              { time: new Date().toISOString(), status: "অর্ডার রিসিভড", notes: "WhatsApp AI Auto-Order System থেকে সরাসরি যুক্ত হয়েছে।" }
+            ],
+            created_at: new Date().toISOString()
+          });
+        }
+      }
+
       saveIntegrationsData(data);
-      res.json({ success: true, message: 'Facebook Webhook message received', thread });
+      res.json({ success: true, thread, hasGeminiKey: !!process.env.GEMINI_API_KEY });
     } catch (err: any) {
-      console.error('Error simulating Facebook webhook message:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to simulate Facebook message' });
+      console.error('Error simulating WhatsApp inbound message:', err);
+      res.status(500).json({ success: false, error: err.message || 'Failed to simulate WhatsApp message' });
     }
   });
 
-  // Facebook reply
-  app.post('/api/integrations/facebook/reply', (req: express.Request, res: express.Response) => {
+  // Update WhatsApp Bot Settings
+  app.post('/api/integrations/whatsapp/settings', (req: express.Request, res: express.Response) => {
+    try {
+      const { agentName, autoConfirmOrders, systemPrompt, failureFallbackMessage } = req.body;
+      const data = getIntegrationsData();
+      if (!data.aiSettings) data.aiSettings = {};
+      data.aiSettings.agentName = agentName !== undefined ? agentName : data.aiSettings.agentName;
+      data.aiSettings.autoConfirmOrders = typeof autoConfirmOrders === 'boolean' ? autoConfirmOrders : data.aiSettings.autoConfirmOrders;
+      data.aiSettings.systemPrompt = systemPrompt !== undefined ? systemPrompt : data.aiSettings.systemPrompt;
+      data.aiSettings.failureFallbackMessage = failureFallbackMessage !== undefined ? failureFallbackMessage : data.aiSettings.failureFallbackMessage;
+      saveIntegrationsData(data);
+      res.json({ success: true, aiSettings: data.aiSettings });
+    } catch (err: any) {
+      console.error('Error updating WhatsApp settings:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Add a product to dynamic AI Products Catalog
+  app.post('/api/integrations/whatsapp/products/add', (req: express.Request, res: express.Response) => {
+    try {
+      const { name, sku, price, stock, description } = req.body;
+      const data = getIntegrationsData();
+      if (!data.aiProducts) data.aiProducts = [];
+      const newProduct = {
+        id: 'prod_' + Date.now(),
+        sku: sku || 'SKU-' + Math.floor(100 + Math.random() * 900),
+        name: name || 'Unnamed Product',
+        price: Number(price) || 0,
+        stock: Number(stock) || 0,
+        description: description || ''
+      };
+      data.aiProducts.unshift(newProduct);
+      saveIntegrationsData(data);
+      res.json({ success: true, aiProducts: data.aiProducts });
+    } catch (err: any) {
+      console.error('Error adding AI product:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Edit a product in dynamic AI Products Catalog
+  app.post('/api/integrations/whatsapp/products/edit', (req: express.Request, res: express.Response) => {
+    try {
+      const { id, name, sku, price, stock, description } = req.body;
+      const data = getIntegrationsData();
+      if (!data.aiProducts) data.aiProducts = [];
+      const product = data.aiProducts.find((p: any) => p.id === id);
+      if (product) {
+        product.sku = sku !== undefined ? sku : product.sku;
+        product.name = name !== undefined ? name : product.name;
+        product.price = price !== undefined ? Number(price) : product.price;
+        product.stock = stock !== undefined ? Number(stock) : product.stock;
+        product.description = description !== undefined ? description : product.description;
+        saveIntegrationsData(data);
+        res.json({ success: true, aiProducts: data.aiProducts });
+      } else {
+        res.status(404).json({ success: false, error: 'Product not found' });
+      }
+    } catch (err: any) {
+      console.error('Error editing AI product:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Delete a product from dynamic AI Products Catalog
+  app.post('/api/integrations/whatsapp/products/delete', (req: express.Request, res: express.Response) => {
+    try {
+      const { id } = req.body;
+      const data = getIntegrationsData();
+      if (!data.aiProducts) data.aiProducts = [];
+      data.aiProducts = data.aiProducts.filter((p: any) => p.id !== id);
+      saveIntegrationsData(data);
+      res.json({ success: true, aiProducts: data.aiProducts });
+    } catch (err: any) {
+      console.error('Error deleting AI product:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Update order status in AI Orders
+  app.post('/api/integrations/whatsapp/orders/update-status', (req: express.Request, res: express.Response) => {
+    try {
+      const { id, status } = req.body;
+      const data = getIntegrationsData();
+      if (!data.aiOrders) data.aiOrders = [];
+      const order = data.aiOrders.find((o: any) => o.id === id);
+      if (order) {
+        const oldStatus = order.status;
+        order.status = status;
+
+        // If newly confirmed, send automated WhatsApp message
+        if (status === 'confirmed' && oldStatus !== 'confirmed') {
+          if (!data.waChats) data.waChats = [];
+          const cleanPhone = String(order.customer_phone).trim();
+          let thread = data.waChats.find((t: any) => t.customer_phone === cleanPhone);
+          const targetThreadId = 'wa_thread_' + cleanPhone;
+          if (!thread) {
+            thread = {
+              id: targetThreadId,
+              customer_name: order.customer_name,
+              customer_phone: cleanPhone,
+              unread: false,
+              ai_automated: true,
+              messages: []
+            };
+            data.waChats.unshift(thread);
+          }
+          const agentName = (data.aiSettings && data.aiSettings.agentName) || 'SellersCampus AI Copilot';
+          thread.messages.push({
+            id: 'wa_msg_sys_' + Date.now(),
+            sender: 'system',
+            text: `প্রিয় ${order.customer_name},\n\nআপনার অর্ডারটি সফলভাবে কনফার্ম করা হয়েছে! 🎉\n\n📌 অর্ডার নম্বর: ${order.order_number}\n🛍️ প্রোডাক্ট: ${order.product_name} (${order.quantity} টি)\n💵 সর্বমোট বিল: ${order.total}\n📍 ডেলিভারি ঠিকানা: ${order.customer_address}\n\nআপনার সাথে থাকার জন্য ধন্যবাদ।\n— ${agentName}`,
+            created_at: new Date().toISOString()
+          });
+          thread.unread = false;
+        } else if (status !== 'confirmed' && oldStatus === 'confirmed') {
+          if (!data.waChats) data.waChats = [];
+          const cleanPhone = String(order.customer_phone).trim();
+          let thread = data.waChats.find((t: any) => t.customer_phone === cleanPhone);
+          if (thread) {
+            const agentName = (data.aiSettings && data.aiSettings.agentName) || 'SellersCampus AI Copilot';
+            thread.messages.push({
+              id: 'wa_msg_sys_' + Date.now(),
+              sender: 'system',
+              text: `প্রিয় ${order.customer_name},\n\nআপনার অর্ডারটি (অর্ডার নম্বর: ${order.order_number}) বর্তমানে হোল্ডে (অপেক্ষমাণ) রাখা হয়েছে। কোনো তথ্যের প্রয়োজন হলে আমরা আপনার সাথে যোগাযোগ করবো।\n\nধন্যবাদ,\n— ${agentName}`,
+              created_at: new Date().toISOString()
+            });
+          }
+        }
+
+        saveIntegrationsData(data);
+        res.json({ success: true, aiOrders: data.aiOrders, waChats: data.waChats });
+      } else {
+        res.status(404).json({ success: false, error: 'Order not found' });
+      }
+    } catch (err: any) {
+      console.error('Error updating AI order status:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Delete an AI Order
+  app.post('/api/integrations/whatsapp/orders/delete', (req: express.Request, res: express.Response) => {
+    try {
+      const { id } = req.body;
+      const data = getIntegrationsData();
+      if (!data.aiOrders) data.aiOrders = [];
+      const order = data.aiOrders.find((o: any) => o.id === id);
+      if (order) {
+        // Send cancellation message
+        if (!data.waChats) data.waChats = [];
+        const cleanPhone = String(order.customer_phone).trim();
+        let thread = data.waChats.find((t: any) => t.customer_phone === cleanPhone);
+        const targetThreadId = 'wa_thread_' + cleanPhone;
+        if (!thread) {
+          thread = {
+            id: targetThreadId,
+            customer_name: order.customer_name,
+            customer_phone: cleanPhone,
+            unread: false,
+            ai_automated: true,
+            messages: []
+          };
+          data.waChats.unshift(thread);
+        }
+        const agentName = (data.aiSettings && data.aiSettings.agentName) || 'SellersCampus AI Copilot';
+        thread.messages.push({
+          id: 'wa_msg_sys_' + Date.now(),
+          sender: 'system',
+          text: `প্রিয় ${order.customer_name},\n\nদুঃখিত, আপনার অর্ডারটি (অর্ডার নম্বর: ${order.order_number}) বাতিল/মুছে ফেলা হয়েছে। ❌\n\nযদি এটি ভুলবশত হয়ে থাকে, অনুগ্রহ করে আমাদের জানান।\n\nধন্যবাদ,\n— ${agentName}`,
+          created_at: new Date().toISOString()
+        });
+        thread.unread = false;
+
+        data.aiOrders = data.aiOrders.filter((o: any) => o.id !== id);
+        saveIntegrationsData(data);
+        res.json({ success: true, aiOrders: data.aiOrders, waChats: data.waChats });
+      } else {
+        res.status(404).json({ success: false, error: 'Order not found' });
+      }
+    } catch (err: any) {
+      console.error('Error deleting AI order:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST: Send Manual WhatsApp reply to customer
+  app.post('/api/integrations/whatsapp/reply', (req: express.Request, res: express.Response) => {
     try {
       const { threadId, text } = req.body;
       const data = getIntegrationsData();
-      const thread = data.fbChats.find((t: any) => t.id === threadId);
+      if (!data.waChats) data.waChats = [];
+
+      const thread = data.waChats.find((t: any) => t.id === threadId);
       if (!thread) {
-        return res.status(404).json({ success: false, error: 'Facebook thread not found' });
+        return res.status(404).json({ success: false, error: 'WhatsApp thread not found' });
       }
 
       thread.messages.push({
-        id: 'msg_reply_' + Date.now(),
+        id: 'wa_msg_reply_' + Date.now(),
         sender: 'system',
         text: text || '',
         created_at: new Date().toISOString()
@@ -1539,10 +2139,30 @@ async function startServer() {
       thread.unread = false;
 
       saveIntegrationsData(data);
-      res.json({ success: true, message: 'Facebook reply dispatched successfully via Meta Graph API simulation', thread });
+      res.json({ success: true, thread });
     } catch (err: any) {
-      console.error('Error processing Facebook reply:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to execute reply' });
+      console.error('Error replying to WhatsApp:', err);
+      res.status(500).json({ success: false, error: err.message || 'Failed to send WhatsApp reply' });
+    }
+  });
+
+  // POST: Toggle AI Automated reply state for specific thread
+  app.post('/api/integrations/whatsapp/ai-toggle', (req: express.Request, res: express.Response) => {
+    try {
+      const { threadId, ai_automated } = req.body;
+      const data = getIntegrationsData();
+      if (!data.waChats) data.waChats = [];
+
+      const thread = data.waChats.find((t: any) => t.id === threadId);
+      if (thread) {
+        thread.ai_automated = !!ai_automated;
+      }
+
+      saveIntegrationsData(data);
+      res.json({ success: true, thread });
+    } catch (err: any) {
+      console.error('Error toggling AI state:', err);
+      res.status(500).json({ success: false, error: err.message || 'Failed to toggle AI state' });
     }
   });
 
@@ -1567,6 +2187,12 @@ async function startServer() {
   // API 404 Catch-all (must be before SPA fallback)
   app.use('/api', (req, res) => {
     res.status(404).json({ success: false, error: `API route not found: ${req.method} ${req.path}` });
+  });
+
+  // API Global Error Handler to guarantee JSON responses
+  app.use('/api', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error('Unhandled API Error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
   });
 
   // For development (AI Studio / Local dev)

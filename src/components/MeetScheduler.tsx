@@ -28,9 +28,7 @@ import {
   auth, 
   googleProvider, 
   getCachedAccessToken, 
-  setCachedAccessToken 
-} from '../firebase';
-import { 
+  setCachedAccessToken,
   collection, 
   addDoc, 
   getDocs, 
@@ -39,7 +37,7 @@ import {
   query, 
   where, 
   orderBy 
-} from 'firebase/firestore';
+} from '../firebase';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 
 interface MeetSession {

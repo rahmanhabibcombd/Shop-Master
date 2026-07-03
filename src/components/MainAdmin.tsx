@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ImageIcon } from 'lucide-react';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, doc, setDoc } from '../firebase';
 
 export default function MainAdmin({ platformBranding, setPlatformBranding, setNotification }: { platformBranding: any, setPlatformBranding: any, setNotification: any }) {
   const [logoPreview, setLogoPreview] = useState<string | null>(platformBranding?.logoBase64 || null);

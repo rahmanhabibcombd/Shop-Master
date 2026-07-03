@@ -4,8 +4,7 @@ import {
   Building2, Calendar, CreditCard, DollarSign, Phone, User, 
   Clock, Plus, Banknote, Search, AlertCircle, TrendingUp, CheckCircle, Package, Bell
 } from 'lucide-react';
-import { db } from '../firebase';
-import { collection, addDoc, updateDoc, doc, deleteDoc, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { db, collection, addDoc, updateDoc, doc, deleteDoc, query, orderBy, onSnapshot } from '../firebase';
 
 interface LoanManagementProps {
   products: any[];

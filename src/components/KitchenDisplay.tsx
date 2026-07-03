@@ -20,8 +20,7 @@ import {
   Volume2,
   VolumeX
 } from 'lucide-react';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, doc, updateDoc } from '../firebase';
 
 interface CartItemData {
   productId: string;

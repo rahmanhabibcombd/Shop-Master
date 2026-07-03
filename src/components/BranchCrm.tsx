@@ -19,8 +19,7 @@ import {
   Network
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../firebase';
-import { collection, onSnapshot, query, where, addDoc, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore';
+import { db, collection, onSnapshot, query, where, addDoc, doc, updateDoc, deleteDoc, setDoc } from '../firebase';
 
 interface Branch {
   id: string;

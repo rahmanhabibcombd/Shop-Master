@@ -1,5 +1,4 @@
-import { getCachedAccessToken, db } from '../firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { getCachedAccessToken, db, doc, setDoc, serverTimestamp } from '../firebase';
 
 export class GoogleWorkspaceService {
   private static instance: GoogleWorkspaceService;

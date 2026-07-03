@@ -41,8 +41,7 @@ import {
   ResponsiveContainer,
   Cell
 } from 'recharts';
-import { doc, updateDoc, addDoc, collection, setDoc, onSnapshot, query, where, deleteDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, doc, updateDoc, addDoc, collection, setDoc, onSnapshot, query, where, deleteDoc } from '../firebase';
 
 interface Product {
   id: string;

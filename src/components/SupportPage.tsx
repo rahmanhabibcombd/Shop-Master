@@ -27,8 +27,7 @@ import {
   Sliders,
   Settings
 } from 'lucide-react';
-import { db, auth } from '../firebase';
-import { 
+import { db, auth, 
   collection, 
   addDoc, 
   getDocs, 
@@ -39,7 +38,7 @@ import {
   orderBy, 
   onSnapshot,
   updateDoc
-} from 'firebase/firestore';
+} from '../firebase';
 
 interface SupportTicket {
   id: string;

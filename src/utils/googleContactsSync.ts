@@ -1,7 +1,5 @@
-import { auth, googleProvider, db } from '../firebase';
+import { auth, googleProvider, db, collection, getDocs, setDoc, doc, serverTimestamp, writeBatch, getCachedAccessToken, setCachedAccessToken } from '../firebase';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { collection, getDocs, setDoc, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { getCachedAccessToken, setCachedAccessToken } from '../firebase';
 
 export async function syncGoogleContacts(
   shopId: string, 
