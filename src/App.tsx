@@ -6022,7 +6022,7 @@ export default function App() {
     }
   }, [products]);
 
-  const [shopSettings, setShopSettings] = useState<ShopSettings>({
+  const [rawShopSettings, setShopSettings] = useState<ShopSettings>({
     name: 'Bismillah Store',
     platformTitle: 'Bismillah Store - ShopMaster',
     address: 'Your Shop Address',
@@ -6042,6 +6042,21 @@ export default function App() {
     jarvisLanguage: 'bn',
     jarvisVoiceGender: 'male',
   });
+
+  const [masterSettings, setMasterSettings] = useState<any>(null);
+
+  const shopSettings = useMemo(() => {
+    if (user?.shopId === 'master') return rawShopSettings;
+    return {
+      ...rawShopSettings,
+      sidebarConfig: masterSettings?.sidebarConfig || rawShopSettings?.sidebarConfig,
+      customPageContents: {
+        ...masterSettings?.customPageContents,
+        ...rawShopSettings?.customPageContents,
+      },
+      customLockMessage: masterSettings?.customLockMessage || rawShopSettings?.customLockMessage,
+    };
+  }, [rawShopSettings, masterSettings, user?.shopId]);
 
   useEffect(() => {
     if (shopSettings?.multiBranchEnabled === false && activeBranchId === 'all' && branches.length > 0) {
@@ -6535,6 +6550,16 @@ export default function App() {
       }
     }, (err) => console.error("Settings sync error", err));
 
+    // Also sync the global master settings to get the system-wide sidebar layout and page permissions
+    let unsubMasterSettings: (() => void) | undefined = undefined;
+    if (currentShopId !== 'master') {
+      unsubMasterSettings = onSnapshot(doc(db, 'settings', 'master'), (snapshot) => {
+        if (snapshot.exists()) {
+          setMasterSettings(snapshot.data());
+        }
+      }, (err) => console.error("Master settings sync error", err));
+    }
+
     // Sync users for this specific shop
     const unsubUsers = onSnapshot(query(collection(db, 'users'), where('shopId', '==', currentShopId)), (snapshot) => {
       setAppUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser)));
@@ -6690,6 +6715,7 @@ export default function App() {
 
     return () => {
       unsubSettings();
+      if (unsubMasterSettings) unsubMasterSettings();
       unsubUsers();
       unsubProducts();
       unsubSales();
@@ -8415,7 +8441,7 @@ export default function App() {
         items: mappedItems
       };
     });
-  }, [shopSettings?.sidebarConfig]);
+  }, [shopSettings]);
 
   // Master Map: Check if current activeTab is locked
   const dynamicLockInfo = useMemo(() => {
@@ -8485,7 +8511,7 @@ export default function App() {
     }
     
     return { isLocked: false, title: '', message: '' };
-  }, [shopSettings?.sidebarConfig, shopSettings?.customLockMessage, activeTab, user?.email, shopSettings?.systemLanguage]);
+  }, [shopSettings, activeTab, user?.email]);
 
   if (loading || (user && isOnboarded === null)) {
     return (

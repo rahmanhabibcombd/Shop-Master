@@ -4146,6 +4146,53 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
   const [addingSection, setAddingSection] = useState(false);
   const [addingPage, setAddingPage] = useState<{ sectionId: string; parentPageId?: string } | null>(null);
 
+  // New Page creation states
+  const [newPageId, setNewPageId] = useState('');
+  const [newPageLabel, setNewPageLabel] = useState('');
+  const [newPageLabelBn, setNewPageLabelBn] = useState('');
+  const [newPageIcon, setNewPageIcon] = useState('FileText');
+  const [autoGenId, setAutoGenId] = useState(true);
+
+  // Helper to slugify page label into a clean ID
+  const slugify = (text: string) => {
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '') // remove non-alphanumeric except space/hyphen
+      .replace(/[\s_-]+/g, '_')   // replace spaces and hyphens with a single underscore
+      .replace(/^_+|_+$/g, '');   // trim underscores from ends
+  };
+
+  // Check if a page ID already exists in any section
+  const checkPageIdExists = (idToCheck: string) => {
+    const cleanedId = idToCheck.trim().toLowerCase();
+    if (!cleanedId) return false;
+    for (const s of sections) {
+      if (s.items) {
+        for (const item of s.items) {
+          if (item.id === cleanedId) return true;
+          if (item.subItems) {
+            for (const sub of item.subItems) {
+              if (sub.id === cleanedId) return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  };
+
+  // Reset page creation state when opening/closing modal
+  useEffect(() => {
+    if (addingPage) {
+      setNewPageId('');
+      setNewPageLabel('');
+      setNewPageLabelBn('');
+      setNewPageIcon('FileText');
+      setAutoGenId(true);
+    }
+  }, [addingPage]);
+
   // Load from shopSettings
   useEffect(() => {
     if (shopSettings?.sidebarConfig?.sections) {
@@ -4333,16 +4380,31 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
     if (!addingPage) return;
 
     const { sectionId, parentPageId } = addingPage;
-    const form = e.currentTarget;
-    const id = (form.elements.namedItem('pageId') as HTMLInputElement).value.trim().toLowerCase();
-    const label = (form.elements.namedItem('pageLabel') as HTMLInputElement).value.trim();
-    const label_bn = (form.elements.namedItem('pageLabelBn') as HTMLInputElement).value.trim();
-    const iconName = (form.elements.namedItem('pageIcon') as HTMLSelectElement).value;
+    let finalId = newPageId.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const label = newPageLabel.trim();
+    const label_bn = newPageLabelBn.trim();
+    const iconName = newPageIcon;
 
-    if (!id || !label) return;
+    if (!label) {
+      if (setNotification) setNotification({ type: 'error', message: 'English Label is required!' });
+      return;
+    }
+
+    if (!finalId) {
+      finalId = slugify(label);
+    }
+
+    // Auto resolve duplicate ID collisions elegantly
+    let counter = 1;
+    let checkedId = finalId;
+    while (checkPageIdExists(checkedId)) {
+      checkedId = `${finalId}_${counter}`;
+      counter++;
+    }
+    finalId = checkedId;
 
     const newPage = {
-      id,
+      id: finalId,
       label,
       label_bn: label_bn || label,
       iconName,
@@ -4374,7 +4436,14 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
     }));
 
     setAddingPage(null);
-    if (setNotification) setNotification({ type: 'success', message: 'নতুন পেজ যোগ হয়েছে!' });
+    if (setNotification) {
+      setNotification({ 
+        type: 'success', 
+        message: shopSettings?.systemLanguage === 'bn'
+          ? `পেইজটি সফলভাবে যোগ করা হয়েছে! (আইডি: ${finalId})`
+          : `New page successfully added! (ID: ${finalId})` 
+      });
+    }
   };
 
   // Reordering helpers (simple up/down)
@@ -5080,28 +5149,94 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
                   </h4>
                   <button onClick={() => setAddingPage(null)} className="text-xs text-gray-400 font-bold uppercase hover:text-rose-500 cursor-pointer">Cancel</button>
                 </div>
-                <form onSubmit={handleCreatePage} className="space-y-3 text-left">
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Unique Page ID (Route/ActiveTab)</label>
-                    <input type="text" name="pageId" placeholder="custom_route" required className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200" />
-                  </div>
+                <form onSubmit={handleCreatePage} className="space-y-4 text-left">
                   <div>
                     <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">English Label</label>
-                    <input type="text" name="pageLabel" placeholder="Custom Page" required className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200" />
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Login" 
+                      required 
+                      value={newPageLabel}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNewPageLabel(val);
+                        if (autoGenId) {
+                          setNewPageId(slugify(val));
+                        }
+                      }}
+                      className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200" 
+                    />
                   </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest">Unique Page ID (Route/ActiveTab)</label>
+                      <label className="flex items-center gap-1 cursor-pointer text-[10px] font-bold text-indigo-600">
+                        <input 
+                          type="checkbox" 
+                          checked={autoGenId} 
+                          onChange={(e) => {
+                            setAutoGenId(e.target.checked);
+                            if (e.target.checked) {
+                              setNewPageId(slugify(newPageLabel));
+                            }
+                          }}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3 h-3"
+                        />
+                        Auto-generate
+                      </label>
+                    </div>
+                    <input 
+                      type="text" 
+                      placeholder="custom_route" 
+                      required 
+                      disabled={autoGenId}
+                      value={newPageId}
+                      onChange={(e) => setNewPageId(e.target.value.toLowerCase().trim().replace(/[^a-z0-9_]/g, ''))}
+                      className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200 disabled:opacity-75 disabled:bg-slate-100/50 dark:disabled:bg-slate-950/20" 
+                    />
+                    
+                    {/* Real-time Unique check display */}
+                    {newPageId && (
+                      <div className="mt-1.5 text-[10px] font-semibold space-y-0.5">
+                        {checkPageIdExists(newPageId) ? (
+                          <div className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                            <span>⚠️ {shopSettings?.systemLanguage === 'bn' ? 'এই আইডিটি ইতিমধ্যে ব্যবহৃত হচ্ছে! সিস্টেম স্বয়ংক্রিয়ভাবে একটি ইউনিক আইডি তৈরি করবে।' : 'This ID already exists! We will auto-append a suffix to ensure uniqueness.'}</span>
+                          </div>
+                        ) : (
+                          <div className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                            <span>✅ {shopSettings?.systemLanguage === 'bn' ? 'আইডিটি খালি আছে এবং ব্যবহারের উপযোগী।' : 'Page ID is unique and ready to use.'}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   <div>
                     <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Bengali Label (বাংলা নাম)</label>
-                    <input type="text" name="pageLabelBn" placeholder="আমার কাস্টম পেইজ" className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200" />
+                    <input 
+                      type="text" 
+                      placeholder="আমার কাস্টম পেইজ" 
+                      value={newPageLabelBn}
+                      onChange={(e) => setNewPageLabelBn(e.target.value)}
+                      className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200" 
+                    />
                   </div>
+
                   <div>
                     <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Lucide Icon Name</label>
-                    <select name="pageIcon" className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200">
+                    <select 
+                      value={newPageIcon}
+                      onChange={(e) => setNewPageIcon(e.target.value)}
+                      className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200"
+                    >
                       {POPULAR_ICONS.map(ic => (
                         <option key={ic} value={ic}>{ic}</option>
                       ))}
                     </select>
                   </div>
-                  <button type="submit" className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer">
+
+                  <button type="submit" className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-md shadow-emerald-500/10">
                     Create Page
                   </button>
                 </form>
