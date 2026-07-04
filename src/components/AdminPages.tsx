@@ -4218,7 +4218,25 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
   };
 
   const handleSectionDeleteToggle = (sectionId: string) => {
-    setSections(prev => prev.map(s => s.id === sectionId ? { ...s, isDeleted: !s.isDeleted } : s));
+    const sec = sections.find(s => s.id === sectionId);
+    if (!sec) return;
+    
+    const isBn = shopSettings?.systemLanguage === 'bn';
+    const message = isBn
+      ? `আপনি কি নিশ্চিতভাবে "${sec.label_bn || sec.label}" সেকশনটি এবং এর ভেতরের সব পেজ সম্পূর্ণ মুছে ফেলতে চান?\n(এটি পরিবর্তনটি চূড়ান্ত করতে নিচে "Layout সেভ করুন" বাটনে ক্লিক করতে হবে)`
+      : `Are you sure you want to permanently delete the section "${sec.label}" and all of its pages?\n(You must click "Save Layout" below to persist this change to the cloud database)`;
+
+    if (window.confirm(message)) {
+      setSections(prev => prev.filter(s => s.id !== sectionId));
+      if (setNotification) {
+        setNotification({ 
+          type: 'success', 
+          message: isBn 
+            ? 'সেকশনটি সফলভাবে মুছে ফেলা হয়েছে! পরিবর্তনটি স্থায়ী করতে নিচে "Layout সেভ করুন" চাপুন।' 
+            : 'Section removed successfully! To make this permanent, click "Save Layout" below.' 
+        });
+      }
+    }
   };
 
   const handleSaveSectionEdit = (e: React.FormEvent) => {
@@ -4285,22 +4303,57 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
   };
 
   const handlePageDeleteToggle = (sectionId: string, pageId: string) => {
-    setSections(prev => prev.map(s => {
-      if (s.id !== sectionId) return s;
-      return {
-        ...s,
-        items: (s.items || []).map((item: any) => {
-          if (item.id === pageId) return { ...item, isDeleted: !item.isDeleted };
-          if (item.subItems) {
-            return {
-              ...item,
-              subItems: item.subItems.map((sub: any) => sub.id === pageId ? { ...sub, isDeleted: !sub.isDeleted } : sub)
-            };
+    let pageLabel = pageId;
+    const sec = sections.find(s => s.id === sectionId);
+    if (sec) {
+      const item = (sec.items || []).find((it: any) => it.id === pageId);
+      if (item) {
+        pageLabel = item.label_bn || item.label;
+      } else {
+        for (const it of (sec.items || [])) {
+          const sub = (it.subItems || []).find((s: any) => s.id === pageId);
+          if (sub) {
+            pageLabel = sub.label_bn || sub.label;
+            break;
           }
-          return item;
-        })
-      };
-    }));
+        }
+      }
+    }
+
+    const isBn = shopSettings?.systemLanguage === 'bn';
+    const message = isBn
+      ? `আপনি কি নিশ্চিতভাবে "${pageLabel}" পেজটি সম্পূর্ণ ডিলিট করতে চান?\n(এটি পরিবর্তনটি চূড়ান্ত করতে নিচে "Layout সেভ করুন" বাটনে ক্লিক করতে হবে)`
+      : `Are you sure you want to permanently delete the page "${pageLabel}"?\n(You must click "Save Layout" below to persist this change to the cloud database)`;
+
+    if (window.confirm(message)) {
+      setSections(prev => prev.map(s => {
+        if (s.id !== sectionId) return s;
+        
+        // Completely remove/filter out the page from top-level and also from subItems
+        const updatedItems = (s.items || [])
+          .filter((item: any) => item.id !== pageId)
+          .map((item: any) => {
+            if (item.subItems) {
+              return {
+                ...item,
+                subItems: item.subItems.filter((sub: any) => sub.id !== pageId)
+              };
+            }
+            return item;
+          });
+
+        return { ...s, items: updatedItems };
+      }));
+
+      if (setNotification) {
+        setNotification({ 
+          type: 'success', 
+          message: isBn 
+            ? 'পেজটি সফলভাবে ডিলিট করা হয়েছে! পরিবর্তনটি স্থায়ী করতে নিচে "Layout সেভ করুন" চাপুন।' 
+            : 'Page deleted successfully! To make this permanent, click "Save Layout" below.' 
+        });
+      }
+    }
   };
 
   const handleSavePageEdit = (e: React.FormEvent) => {
@@ -4417,14 +4470,15 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
     setSections(prev => prev.map(s => {
       if (s.id !== sectionId) return s;
 
+      const currentItems = s.items || [];
       if (!parentPageId) {
         // Add as top-level page
-        return { ...s, items: [...(s.items || []), newPage] };
+        return { ...s, items: [...currentItems, newPage] };
       } else {
         // Add as subItem
         return {
           ...s,
-          items: s.items.map((item: any) => {
+          items: currentItems.map((item: any) => {
             if (item.id === parentPageId) {
               const currentSubs = item.subItems || [];
               return { ...item, subItems: [...currentSubs, newPage] };
@@ -5150,6 +5204,63 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
                   <button onClick={() => setAddingPage(null)} className="text-xs text-gray-400 font-bold uppercase hover:text-rose-500 cursor-pointer">Cancel</button>
                 </div>
                 <form onSubmit={handleCreatePage} className="space-y-4 text-left">
+                  {/* Target Section Selector */}
+                  <div>
+                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Target Section (সেকশন নির্বাচন করুন)</label>
+                    <select 
+                      value={addingPage.sectionId}
+                      onChange={e => {
+                        if (addingPage) {
+                          setAddingPage({
+                            ...addingPage,
+                            sectionId: e.target.value,
+                            parentPageId: undefined // Reset parent page on section change
+                          });
+                        }
+                      }}
+                      className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200 font-bold"
+                    >
+                      {sections.map((s: any) => (
+                        <option key={s.id} value={s.id}>
+                          {s.label_bn && s.label_bn !== s.label ? `${s.label} (${s.label_bn})` : s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Optional Parent Page Selector */}
+                  {(() => {
+                    const targetSec = sections.find((s: any) => s.id === addingPage.sectionId);
+                    const potentialParents = targetSec ? (targetSec.items || []).filter((item: any) => item.id.endsWith('_dashboard')) : [];
+                    if (potentialParents.length === 0) return null;
+
+                    return (
+                      <div>
+                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Parent Page / Container (প্যারেন্ট পেজ)</label>
+                        <select 
+                          value={addingPage.parentPageId || 'none'} 
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (addingPage) {
+                              setAddingPage({
+                                ...addingPage,
+                                parentPageId: val === 'none' ? undefined : val
+                              });
+                            }
+                          }}
+                          className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200 font-bold"
+                        >
+                          <option value="none">None (Top-Level Page / মেইন পেজ)</option>
+                          {potentialParents.map((p: any) => (
+                            <option key={p.id} value={p.id}>
+                              {p.label_bn && p.label_bn !== p.label ? `${p.label} (${p.label_bn})` : p.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })()}
+
                   <div>
                     <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">English Label</label>
                     <input 
