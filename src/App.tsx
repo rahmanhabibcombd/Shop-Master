@@ -8336,12 +8336,75 @@ export default function App() {
 
   const handleDeleteEmployee = async (id: string) => {
     try {
-      const employeeToDelete = employees.find(e => e.id === id);
-      if (employeeToDelete) {
-        await moveToRecycleBin('employee', id, employeeToDelete, employeeToDelete.shopId || user?.shopId);
+      const emp = employees.find(e => e.id === id);
+      if (!emp) return;
+
+      // 1. Delete secondary auth user if credentials exist
+      if (emp.username && emp.password) {
+        try {
+          const email = `${emp.username.trim().toLowerCase()}@bismillahstore.local`;
+          const userCred = await signInWithEmailAndPassword(secondaryAuth, email, emp.password);
+          if (userCred.user) {
+            await userCred.user.delete();
+          }
+        } catch (authErr) {
+          console.warn("Auth user deletion warning:", authErr);
+        }
       }
+
+      // 2. Delete user login documents from 'users' collection
+      const usersQuery = query(collection(db, 'users'), where('employeeId', '==', id));
+      const usersSnap = await getDocs(usersQuery);
+      for (const d of usersSnap.docs) {
+        await deleteDoc(doc(db, 'users', d.id));
+      }
+
+      // 3. Delete leave requests from 'hrm_leaves' collection
+      const leavesQuery = query(collection(db, 'hrm_leaves'), where('employeeId', '==', id));
+      const leavesSnap = await getDocs(leavesQuery);
+      for (const d of leavesSnap.docs) {
+        await deleteDoc(doc(db, 'hrm_leaves', d.id));
+      }
+
+      // 4. Delete payroll records from 'hrm_payroll' collection
+      const payrollQuery = query(collection(db, 'hrm_payroll'), where('employeeId', '==', id));
+      const payrollSnap = await getDocs(payrollQuery);
+      for (const d of payrollSnap.docs) {
+        await deleteDoc(doc(db, 'hrm_payroll', d.id));
+      }
+
+      // 5. Delete generated slips/certificates from 'hrm_records' collection
+      const recordsQuery = query(collection(db, 'hrm_records'), where('employeeId', '==', id));
+      const recordsSnap = await getDocs(recordsQuery);
+      for (const d of recordsSnap.docs) {
+        await deleteDoc(doc(db, 'hrm_records', d.id));
+      }
+
+      // 6. Delete from 'employees' collection
       await deleteDoc(doc(db, 'employees', id));
-      setNotification({ message: 'Employee moved to Recycle Bin', type: 'success' });
+
+      // 7. Delete recycleBin items with matching entityId or originalId
+      const rbQuery1 = query(collection(db, 'recycleBin'), where('entityId', '==', id));
+      const rbSnap1 = await getDocs(rbQuery1);
+      for (const d of rbSnap1.docs) {
+        await deleteDoc(doc(db, 'recycleBin', d.id));
+      }
+      const rbQuery2 = query(collection(db, 'recycleBin'), where('originalId', '==', id));
+      const rbSnap2 = await getDocs(rbQuery2);
+      for (const d of rbSnap2.docs) {
+        await deleteDoc(doc(db, 'recycleBin', d.id));
+      }
+
+      // 8. Delete from staff_salaries collection where staffName matches
+      if (emp.name) {
+        const salaryQuery = query(collection(db, 'staff_salaries'), where('staffName', '==', emp.name));
+        const salarySnap = await getDocs(salaryQuery);
+        for (const d of salarySnap.docs) {
+          await deleteDoc(doc(db, 'staff_salaries', d.id));
+        }
+      }
+
+      setNotification({ message: 'Employee and all associated records permanently deleted', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'employees');
     }
