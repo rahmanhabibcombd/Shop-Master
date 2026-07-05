@@ -149,7 +149,7 @@ service cloud.firestore {
           resource != null && 
           resource.data.shopId != null && 
           isOwnerOrStaff(resource.data.shopId) && 
-          collection in ['recycleBin', 'daily_closings', 'expenses', 'investments', 'staff_salaries', 'stockRecords', 'branches', 'employees', 'notes', 'customer_logs', 'due_payments', 'warranty_records', 'meet_sessions', 'ai_memories', 'ai_synonyms', 'ai_settings', 'suppliers', 'draft_invoices']
+          collection in ['recycleBin', 'daily_closings', 'expenses', 'investments', 'staff_salaries', 'stockRecords', 'branches', 'employees', 'notes', 'customer_logs', 'due_payments', 'warranty_records', 'meet_sessions', 'ai_memories', 'ai_synonyms', 'ai_settings', 'suppliers', 'draft_invoices', 'hrm_leaves', 'hrm_payroll', 'hrm_records', 'hrm_settings']
         )
       );
     }

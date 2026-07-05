@@ -49,6 +49,85 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'fire
 import { motion } from 'motion/react';
 import html2canvas from 'html2canvas';
 
+const numberToWordsEn = (num: number): string => {
+  const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
+  const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  if (num === 0) return 'Zero Taka Only';
+  
+  const g = (n: number): string => {
+    if (n < 20) return a[n];
+    const digit = n % 10;
+    return b[Math.floor(n / 10)] + (digit ? '-' + a[digit].trim() : '') + ' ';
+  };
+
+  const h = (n: number): string => {
+    if (n < 100) return g(n);
+    return a[Math.floor(n / 100)] + 'Hundred ' + (n % 100 !== 0 ? 'and ' + g(n % 100) : '');
+  };
+
+  let str = '';
+  let temp = num;
+
+  if (temp >= 10000000) {
+    str += h(Math.floor(temp / 10000000)) + 'Crore ';
+    temp %= 10000000;
+  }
+  if (temp >= 100000) {
+    str += h(Math.floor(temp / 100000)) + 'Lakh ';
+    temp %= 100000;
+  }
+  if (temp >= 1000) {
+    str += h(Math.floor(temp / 1000)) + 'Thousand ';
+    temp %= 1000;
+  }
+  if (temp > 0) {
+    str += h(temp);
+  }
+  
+  return str.trim() + ' Taka Only';
+};
+
+const numberToWordsBn = (num: number): string => {
+  const bnUnits = ['', 'এক', 'দুই', 'তিন', 'চার', 'পাঁচ', 'ছয়', 'সাত', 'আট', 'নয়', 'দশ', 'এগারো', 'বারো', 'তেরো', 'চোদ্দ', 'পনেরো', 'ষোলো', 'সতেরো', 'আটোরো', 'উনিশ', 'বিশ'];
+  const bnTens = ['', '', 'বিশ', 'ত্রিশ', 'চল্লিশ', 'পঞ্চাশ', 'ষাট', 'সত্তর', 'আশি', 'নব্বই'];
+
+  if (num === 0) return 'শূণ্য টাকা মাত্র';
+
+  const formatBn = (n: number): string => {
+    if (n === 0) return '';
+    if (n <= 20) return bnUnits[n] + ' ';
+    if (n < 100) {
+      const unit = n % 10;
+      return bnTens[Math.floor(n / 10)] + (unit ? ' ' + bnUnits[unit] : '') + ' ';
+    }
+    const hundred = Math.floor(n / 100);
+    const rem = n % 100;
+    return bnUnits[hundred] + 'শত ' + (rem ? formatBn(rem) : '');
+  };
+
+  let str = '';
+  let temp = num;
+
+  if (temp >= 10000000) {
+    str += formatBn(Math.floor(temp / 10000000)) + 'কোটি ';
+    temp %= 10000000;
+  }
+  if (temp >= 100000) {
+    str += formatBn(Math.floor(temp / 100000)) + 'লক্ষ ';
+    temp %= 100000;
+  }
+  if (temp >= 1000) {
+    str += formatBn(Math.floor(temp / 1000)) + 'হাজার ';
+    temp %= 1000;
+  }
+  if (temp > 0) {
+    str += formatBn(temp);
+  }
+
+  return str.trim() + ' টাকা মাত্র';
+};
+
 interface Employee {
   id: string;
   name: string;
@@ -208,6 +287,21 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
   const [payrollHistory, setPayrollHistory] = useState<any[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<any[]>([]);
 
+  // Advanced HRM PERSISTENCE & Custom Settings
+  const [hrmSettings, setHrmSettings] = useState({
+    watermarkUrl: '',
+    watermarkOpacity: 0.06,
+    watermarkSize: 160,
+    signatureUrl: '',
+    sealUrl: '',
+    prePrintedPad: false,
+    headerText: settings?.shopName || 'ShopSync Corporation',
+    footerText: 'Verified Digital Document © ShopSync'
+  });
+  const [hrmRecords, setHrmRecords] = useState<any[]>([]);
+  const [advanceDaysDeducted, setAdvanceDaysDeducted] = useState(0);
+  const [printLayoutMode, setPrintLayoutMode] = useState<'digital' | 'preprinted'>('digital');
+
   // Local Form state
   const [formData, setFormData] = useState<Partial<Employee>>({
     name: '',
@@ -240,10 +334,20 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
 
   // Certificate generator print states
   const [selectedCertEmployee, setSelectedCertEmployee] = useState<Employee | null>(null);
-  const [certType, setCertType] = useState<'contract' | 'experience'>('experience');
+  const [certType, setCertType] = useState<'contract' | 'experience' | 'noc_visa' | 'noc_bank'>('experience');
+  const [certLanguage, setCertLanguage] = useState<'en' | 'bn'>(isBn ? 'bn' : 'en');
+  const [currentDocId, setCurrentDocId] = useState('');
   const [leavingDate, setLeavingDate] = useState(new Date().toISOString().split('T')[0]);
   const [leavingReason, setLeavingReason] = useState(isBn ? 'ব্যক্তিগত কারণ' : 'Personal Reasons');
   const [certPraise, setCertPraise] = useState(isBn ? 'অত্যন্ত পরিশ্রমী এবং বিশ্বস্ত কর্মী।' : 'He has been extremely diligent, hard-working, and trustworthy.');
+
+  useEffect(() => {
+    if (selectedCertEmployee) {
+      setCurrentDocId(`DOC-${selectedCertEmployee.id.substring(0, 5).toUpperCase()}-${Date.now().toString().slice(-4)}`);
+    } else {
+      setCurrentDocId('');
+    }
+  }, [selectedCertEmployee, certType, certLanguage]);
 
   // Simulated live attendance system
   useEffect(() => {
@@ -264,54 +368,97 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
     }
   }, [employees]);
 
-  // Seeding default leave requests if empty
+  // Advanced HRM settings real-time sync
   useEffect(() => {
-    if (employees.length > 0 && leaveRequests.length === 0) {
-      setLeaveRequests([
-        {
-          id: 'leave-1',
-          employeeId: employees[0].id,
-          employeeName: employees[0].name,
-          leaveType: isBn ? 'অসুস্থতাজনিত ছুটি (Sick Leave)' : 'Sick Leave',
-          startDate: '2026-06-22',
-          endDate: '2026-06-23',
-          daysCount: 2,
-          reason: isBn ? 'জ্বর এবং সর্দি' : 'Severe fever and cold',
-          status: 'Pending'
-        },
-        {
-          id: 'leave-2',
-          employeeId: employees[1]?.id || 'emp-demo',
-          employeeName: employees[1]?.name || 'Demo Waiter',
-          leaveType: isBn ? 'আকস্মিক ছুটি (Casual Leave)' : 'Casual Leave',
-          startDate: '2026-06-28',
-          endDate: '2026-06-29',
-          daysCount: 2,
-          reason: isBn ? 'ব্যক্তিগত কাজ' : 'Family emergency work',
-          status: 'Approved'
-        }
-      ]);
-    }
-  }, [employees]);
+    if (!user?.shopId) return;
+    const hrmSettingsRef = doc(db, 'hrm_settings', user.shopId);
+    const unsub = onSnapshot(hrmSettingsRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setHrmSettings({
+          watermarkUrl: data.watermarkUrl || '',
+          watermarkOpacity: Number(data.watermarkOpacity) || 0.06,
+          watermarkSize: Number(data.watermarkSize) || 160,
+          signatureUrl: data.signatureUrl || '',
+          sealUrl: data.sealUrl || '',
+          prePrintedPad: !!data.prePrintedPad,
+          headerText: data.headerText || settings?.shopName || 'ShopSync Corporation',
+          footerText: data.footerText || 'Verified Digital Document © ShopSync'
+        });
+      }
+    });
+    return () => unsub();
+  }, [user?.shopId, settings?.shopName]);
 
-  // Seeding default payroll history
+  // Real-time leaves sync with auto-seeding
   useEffect(() => {
-    if (employees.length > 0 && payrollHistory.length === 0) {
-      setPayrollHistory([
-        {
+    if (!user?.shopId) return;
+    const q = query(collection(db, 'hrm_leaves'), where('shopId', '==', user.shopId));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (list.length > 0) {
+        setLeaveRequests(list);
+      } else {
+        const defaultLeaves = [
+          {
+            id: 'leave-1',
+            shopId: user.shopId,
+            employeeId: employees[0]?.id || 'emp-demo-1',
+            employeeName: employees[0]?.name || 'Demo Employee',
+            leaveType: isBn ? 'অসুস্থতাজনিত ছুটি (Sick Leave)' : 'Sick Leave',
+            startDate: '2026-06-22',
+            endDate: '2026-06-23',
+            daysCount: 2,
+            reason: isBn ? 'জ্বর এবং সর্দি' : 'Severe fever and cold',
+            status: 'Pending'
+          }
+        ];
+        defaultLeaves.forEach(async (lv) => {
+          await setDoc(doc(db, 'hrm_leaves', lv.id), lv);
+        });
+      }
+    });
+    return () => unsub();
+  }, [user?.shopId, employees]);
+
+  // Real-time payroll sync with auto-seeding
+  useEffect(() => {
+    if (!user?.shopId) return;
+    const q = query(collection(db, 'hrm_payroll'), where('shopId', '==', user.shopId));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (list.length > 0) {
+        setPayrollHistory(list);
+      } else if (employees.length > 0) {
+        const defaultPay = {
           id: 'pay-1',
+          shopId: user.shopId,
           employeeName: employees[0].name,
           month: '2026-05',
-          baseSalary: employees[0].salary,
+          baseSalary: Number(employees[0].salary) || 12000,
           bonus: 1000,
           deduction: 0,
-          finalPay: employees[0].salary + 1000,
+          finalPay: (Number(employees[0].salary) || 12000) + 1000,
           paymentMode: 'Bank Transfer',
           date: '2026-06-02'
-        }
-      ]);
-    }
-  }, [employees]);
+        };
+        setDoc(doc(db, 'hrm_payroll', 'pay-1'), defaultPay);
+      }
+    });
+    return () => unsub();
+  }, [user?.shopId, employees]);
+
+  // Real-time dynamic documents sync
+  useEffect(() => {
+    if (!user?.shopId) return;
+    const q = query(collection(db, 'hrm_records'), where('shopId', '==', user.shopId));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a: any, b: any) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime());
+      setHrmRecords(list);
+    });
+    return () => unsub();
+  }, [user?.shopId]);
 
   const uniqueDesignations = useMemo(() => {
     const list = employees.map(emp => emp.designation).filter(Boolean);
@@ -340,6 +487,38 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
 
     return { totalStaff, activeStaff, presentToday, pendingLeaves, totalSalaryPromise };
   }, [employees, attendanceLogs, leaveRequests]);
+
+  const employeeLeaveLedgers = useMemo(() => {
+    return employees.map(emp => {
+      const quota = Number(emp.yearlyLeaves) || 15;
+      const empLeaves = leaveRequests.filter(req => req.employeeId === emp.id && req.status === 'Approved');
+      
+      let approvedDays = 0;
+      let advanceDays = 0;
+      
+      empLeaves.forEach(req => {
+        const days = Number(req.daysCount) || 1;
+        approvedDays += days;
+      });
+
+      if (approvedDays > quota) {
+        advanceDays = approvedDays - quota;
+        approvedDays = quota;
+      }
+
+      const remaining = quota - approvedDays;
+
+      return {
+        id: emp.id,
+        name: emp.name,
+        designation: emp.designation,
+        quota,
+        used: approvedDays,
+        remaining,
+        advance: advanceDays
+      };
+    });
+  }, [employees, leaveRequests]);
 
   const handleOpenAddModal = (emp?: Employee) => {
     if (emp) {
@@ -510,7 +689,8 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
     const overtimePayout = overtimeHours * otRateHourly;
     const deductionDaily = Math.round(base / 30);
     const regularDeductions = unpaidDays * deductionDaily;
-    const finalAmount = base + overtimePayout + Number(bonusAmount) - regularDeductions;
+    const advanceDeduction = advanceDaysDeducted * deductionDaily;
+    const finalAmount = base + overtimePayout + Number(bonusAmount) - regularDeductions - advanceDeduction;
 
     return {
       base,
@@ -520,44 +700,81 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
       unpaidDaysCount: unpaidDays,
       perDayDeduction: deductionDaily,
       payoutDeductions: regularDeductions,
+      advanceDeduction,
+      advanceDaysCount: advanceDaysDeducted,
       bonus: Number(bonusAmount),
       netSalaryPayable: finalAmount,
       empName: selectedEmp.name,
       empDesignation: selectedEmp.designation,
       paymentModeChosen: selectedEmp.paymentMode || 'cash'
     };
-  }, [employees, payrollStaffId, overtimeHours, unpaidDays, bonusAmount]);
+  }, [employees, payrollStaffId, overtimeHours, unpaidDays, bonusAmount, advanceDaysDeducted]);
 
-  const handlePaySalary = () => {
+  const handlePaySalary = async () => {
     if (!computedSalaryDetails) return;
 
+    const payrollId = `payroll-${Date.now()}`;
     const newPayment = {
-      id: `payroll-${Date.now()}`,
+      id: payrollId,
+      shopId: user.shopId,
+      employeeId: payrollStaffId,
       employeeName: computedSalaryDetails.empName,
       month: selectedMonth,
       baseSalary: computedSalaryDetails.base,
       bonus: computedSalaryDetails.bonus,
-      deduction: computedSalaryDetails.payoutDeductions,
+      deduction: computedSalaryDetails.payoutDeductions + computedSalaryDetails.advanceDeduction,
       finalPay: computedSalaryDetails.netSalaryPayable,
       paymentMode: computedSalaryDetails.paymentModeChosen === 'bank' ? 'Bank Transfer' : computedSalaryDetails.paymentModeChosen === 'mfs' ? 'MFS Wallet' : 'Cash in Hand',
-      date: new Date().toISOString().split('T')[0]
+      date: new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString()
     };
 
-    setPayrollHistory([newPayment, ...payrollHistory]);
-    setNotification({
-      message: isBn 
-        ? `সফলভাবে ${computedSalaryDetails.empName}-এর বেতন (${selectedMonth}) পরিশোধ করা হয়েছে!` 
-        : `Successfully paid salary to ${computedSalaryDetails.empName} for ${selectedMonth}!`,
-      type: 'success'
-    });
+    try {
+      // 1. Save payroll payment record
+      await setDoc(doc(db, 'hrm_payroll', payrollId), newPayment);
 
-    // Reset fields
-    setOvertimeHours(0);
-    setUnpaidDays(0);
-    setBonusAmount(0);
+      // 2. Save public dynamic verification document record
+      await setDoc(doc(db, 'hrm_records', payrollId), {
+        id: payrollId,
+        shopId: user.shopId,
+        type: 'payslip',
+        employeeId: payrollStaffId,
+        employeeName: computedSalaryDetails.empName,
+        employeeDesignation: computedSalaryDetails.empDesignation,
+        date: newPayment.date,
+        details: {
+          month: selectedMonth,
+          base: computedSalaryDetails.base,
+          bonus: computedSalaryDetails.bonus,
+          payoutDeductions: computedSalaryDetails.payoutDeductions + computedSalaryDetails.advanceDeduction,
+          netSalaryPayable: computedSalaryDetails.netSalaryPayable,
+          amountInWordsBn: numberToWordsBn(computedSalaryDetails.netSalaryPayable),
+          amountInWordsEn: numberToWordsEn(computedSalaryDetails.netSalaryPayable),
+          signatureUrl: hrmSettings.signatureUrl,
+          sealUrl: hrmSettings.sealUrl
+        },
+        createdAt: new Date().toISOString()
+      });
+
+      setNotification({
+        message: isBn 
+          ? `সফলভাবে ${computedSalaryDetails.empName}-এর বেতন (${selectedMonth}) পরিশোধ করা হয়েছে!` 
+          : `Successfully paid salary to ${computedSalaryDetails.empName} for ${selectedMonth}!`,
+        type: 'success'
+      });
+
+      // Reset fields
+      setOvertimeHours(0);
+      setUnpaidDays(0);
+      setBonusAmount(0);
+      setAdvanceDaysDeducted(0);
+    } catch (err: any) {
+      console.error(err);
+      setNotification({ message: 'Error processing payroll disbursal', type: 'error' });
+    }
   };
 
-  const handleAddCustomLeaveRequest = (e: React.FormEvent) => {
+  const handleAddCustomLeaveRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const fd = new FormData(form);
@@ -574,9 +791,11 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
     const end = fd.get('endDate') as string;
 
     const daysCount = Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    const newLeaveId = `leave-${Date.now()}`;
 
     const newLeave = {
-      id: `leave-${Date.now()}`,
+      id: newLeaveId,
+      shopId: user.shopId,
       employeeId: emp.id,
       employeeName: emp.name,
       leaveType: fd.get('leaveType') as string,
@@ -584,31 +803,36 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
       endDate: end,
       daysCount,
       reason: fd.get('reason') as string,
-      status: 'Pending'
+      status: 'Pending',
+      createdAt: new Date().toISOString()
     };
 
-    setLeaveRequests([newLeave, ...leaveRequests]);
-    setNotification({
-      message: isBn ? 'ছুটির আবেদন দাখিল করা হয়েছে।' : 'Leave application submitted successfully.',
-      type: 'success'
-    });
-    form.reset();
+    try {
+      await setDoc(doc(db, 'hrm_leaves', newLeaveId), newLeave);
+      setNotification({
+        message: isBn ? 'ছুটির আবেদন দাখিল করা হয়েছে।' : 'Leave application submitted successfully.',
+        type: 'success'
+      });
+      form.reset();
+    } catch (err: any) {
+      console.error(err);
+      setNotification({ message: 'Error submitting leave request', type: 'error' });
+    }
   };
 
-  const handleApproveLeave = (leaveId: string, nextStatus: 'Approved' | 'Rejected') => {
-    setLeaveRequests(leaveRequests.map(req => {
-      if (req.id === leaveId) {
-        return { ...req, status: nextStatus };
-      }
-      return req;
-    }));
-
-    setNotification({
-      message: isBn 
-        ? `আবেদনটি ${nextStatus === 'Approved' ? 'অনুমোদন' : 'বাতিল'} করা হয়েছে।` 
-        : `Leave application ${nextStatus}.`,
-      type: 'success'
-    });
+  const handleApproveLeave = async (leaveId: string, nextStatus: 'Approved' | 'Rejected') => {
+    try {
+      await updateDoc(doc(db, 'hrm_leaves', leaveId), { status: nextStatus });
+      setNotification({
+        message: isBn 
+          ? `আবেদনটি ${nextStatus === 'Approved' ? 'অনুমোদন' : 'বাতিল'} করা হয়েছে।` 
+          : `Leave application ${nextStatus}.`,
+        type: 'success'
+      });
+    } catch (err: any) {
+      console.error(err);
+      setNotification({ message: 'Error updating leave status', type: 'error' });
+    }
   };
 
   const [isUpdatingCredentials, setIsUpdatingCredentials] = useState<Record<string, boolean>>({});
@@ -1112,204 +1336,464 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
                     </div>
                   </div>
 
-                  {/* Absolute Badge for Print ID Badge */}
-                    <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Absolute Badge for Print ID Badge - Always visible as requested */}
+                    <div className="absolute top-2 right-2 z-20 flex flex-col gap-1.5 bg-slate-900/10 p-1.5 rounded-xl backdrop-blur-md shadow-md border border-white/30">
                       <button
                         onClick={async () => {
-                          const btn = document.getElementById(`print-btn-${emp.id}`);
-                          if (btn) btn.innerHTML = '<span class="animate-pulse">Generating...</span>';
+                          const btn = document.getElementById(`print-btn-v1-${emp.id}`);
+                          if (btn) btn.innerHTML = '<span class="animate-pulse">Style A...</span>';
                           
                           const idCardFront = document.getElementById(`id-card-front-${emp.id}`);
                           const idCardBack = document.getElementById(`id-card-back-${emp.id}`);
                           if (idCardFront && idCardBack) {
-                            const originalFrontDisplay = idCardFront.style.display;
-                            const originalBackDisplay = idCardBack.style.display;
-                            
-                            idCardFront.style.display = 'block';
-                            idCardBack.style.display = 'flex'; // Restore flex layout
-                            
                             try {
                               const canvasFront = await html2canvas(idCardFront, { scale: 5, useCORS: true, backgroundColor: '#ffffff', logging: false });
                               const linkFront = document.createElement('a');
                               linkFront.href = canvasFront.toDataURL('image/png', 1.0);
-                              linkFront.download = `ID_Front_${emp.name.replace(/\s+/g, '_')}_HQ.png`;
+                              linkFront.download = `ID_Front_Classic_${emp.name.replace(/\s+/g, '_')}_HQ.png`;
                               linkFront.click();
 
                               const canvasBack = await html2canvas(idCardBack, { scale: 5, useCORS: true, backgroundColor: '#ffffff', logging: false });
                               const linkBack = document.createElement('a');
                               linkBack.href = canvasBack.toDataURL('image/png', 1.0);
-                              linkBack.download = `ID_Back_${emp.name.replace(/\s+/g, '_')}_HQ.png`;
+                              linkBack.download = `ID_Back_Classic_${emp.name.replace(/\s+/g, '_')}_HQ.png`;
                               linkBack.click();
                             } catch (err) {
                               console.error("ID card download error", err);
                               alert("Sorry, there was an issue generating the ID card.");
                             } finally {
-                              idCardFront.style.display = originalFrontDisplay;
-                              idCardBack.style.display = originalBackDisplay;
-                              if (btn) btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg> HQ ID CARD';
+                              if (btn) btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3 h-3 text-red-500"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg> CLASSIC RED';
                             }
                           }
                         }}
-                        id={`print-btn-${emp.id}`}
-                        className="p-1 px-2.5 bg-white shadow-md border hover:bg-indigo-50 text-indigo-600 rounded-xl text-[9px] font-black flex items-center gap-1"
+                        id={`print-btn-v1-${emp.id}`}
+                        className="p-1 px-2.5 bg-white shadow-md border hover:bg-slate-50 text-slate-800 rounded-lg text-[8px] font-black flex items-center gap-1 cursor-pointer transition-all"
                       >
-                        <Download className="w-3 h-3" /> HQ ID CARD
+                        <Download className="w-2.5 h-2.5 text-red-500" /> {isBn ? 'ক্লাসিক রেড' : 'Classic Red'}
+                      </button>
+
+                      <button
+                        onClick={async () => {
+                          const btn = document.getElementById(`print-btn-v2-${emp.id}`);
+                          if (btn) btn.innerHTML = '<span class="animate-pulse">Style B...</span>';
+                          
+                          const idCardFront = document.getElementById(`id-card-front-v2-${emp.id}`);
+                          const idCardBack = document.getElementById(`id-card-back-v2-${emp.id}`);
+                          if (idCardFront && idCardBack) {
+                            try {
+                              const canvasFront = await html2canvas(idCardFront, { scale: 5, useCORS: true, backgroundColor: '#ffffff', logging: false });
+                              const linkFront = document.createElement('a');
+                              linkFront.href = canvasFront.toDataURL('image/png', 1.0);
+                              linkFront.download = `ID_Front_Corp_${emp.name.replace(/\s+/g, '_')}_HQ.png`;
+                              linkFront.click();
+
+                              const canvasBack = await html2canvas(idCardBack, { scale: 5, useCORS: true, backgroundColor: '#ffffff', logging: false });
+                              const linkBack = document.createElement('a');
+                              linkBack.href = canvasBack.toDataURL('image/png', 1.0);
+                              linkBack.download = `ID_Back_Corp_${emp.name.replace(/\s+/g, '_')}_HQ.png`;
+                              linkBack.click();
+                            } catch (err) {
+                              console.error("ID card download error", err);
+                              alert("Sorry, there was an issue generating the ID card.");
+                            } finally {
+                              if (btn) btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3 h-3 text-indigo-500"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg> CORP INDIGO';
+                            }
+                          }
+                        }}
+                        id={`print-btn-v2-${emp.id}`}
+                        className="p-1 px-2 bg-white shadow-md border hover:bg-slate-50 text-slate-800 rounded-lg text-[8px] font-black flex items-center gap-1 cursor-pointer transition-all"
+                      >
+                        <Download className="w-2.5 h-2.5 text-indigo-500" /> {isBn ? 'কর্পোরেট ব্লু' : 'Corp Indigo'}
                       </button>
                     </div>
 
-                    {/* Hidden ID badge printable structure - FRONT */}
-                    <div 
-                      id={`id-card-front-${emp.id}`} 
-                      style={{
-                        display: 'none',
-                        width: '350px',
-                        minHeight: '580px',
-                        background: '#ffffff',
-                        boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        fontFamily: "'Inter', sans-serif",
-                        paddingBottom: '80px'
-                      }}
-                    >
-                      {/* Top Red Shapes using pure CSS for html2canvas compatibility */}
-                      <div style={{
-                        position: 'absolute',
-                        top: 0, left: 0,
-                        width: '100%',
-                        height: '240px',
-                        background: 'linear-gradient(135deg, #e63946 0%, #b21f2d 100%)',
-                        clipPath: 'polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%)',
-                        zIndex: 0
-                      }}></div>
-                      <div style={{
-                        position: 'absolute',
-                        top: 0, left: 0,
-                        width: '100%',
-                        height: '245px',
-                        background: 'rgba(230, 57, 70, 0.2)',
-                        clipPath: 'polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%)',
-                        zIndex: 0
-                      }}></div>
-
-                      <div style={{ position: 'relative', zIndex: 1, padding: '25px 15px 15px 15px', color: 'white' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', fontWeight: '900', fontSize: '20px', textAlign: 'center', letterSpacing: '1.5px', textTransform: 'uppercase' }}>
-                              <div style={{background: 'white', padding: '5px', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)'}}>
-                                <img src={(settings as any).logoBase64 || (settings as any).logoUrl || "https://e7.pngegg.com/pngimages/922/926/png-clipart-islamic-calligraphy-desktop-arabic-calligraphy-bismillah-white-logo-thumbnail.png"} alt="Logo" style={{ width: '60px', height: '60px', objectFit: 'contain' }} crossOrigin="anonymous"/>
-                              </div>
-                              <span style={{textShadow: '0 2px 4px rgba(0,0,0,0.3)'}}>{(settings as any).name || 'BISMILLAH STORE'}</span>
-                          </div>
-                      </div>
-
-                      {/* Hexagon Border/Photo using pure CSS borders and clip-path for html2canvas compatibility */}
-                      <div style={{
-                          width: '180px', 
-                          height: '200px', 
-                          background: 'linear-gradient(135deg, #111111 0%, #D4AF37 40%, #FFDF73 60%, #111111 100%)',
-                          margin: '5px auto 15px auto',
-                          clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
-                          display: 'flex', 
-                          justifyContent: 'center', 
-                          alignItems: 'center',
+                    {/* ALWAYS-RENDERED OFF-SCREEN CONTAINER FOR PIXEL-PERFECT IMAGE EXPORTS WITH ZERO DISTORTION */}
+                    <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '350px', pointerEvents: 'none', zIndex: -999 }}>
+                      
+                      {/* STYLE A: CLASSIC RED - FRONT */}
+                      <div 
+                        id={`id-card-front-${emp.id}`} 
+                        style={{
+                          width: '350px',
+                          minHeight: '580px',
+                          background: '#ffffff',
                           position: 'relative',
-                          zIndex: 2,
-                      }}>
-                          <img src={emp.photoUrl || "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT1JUUgjucKIHw5ATD788OLzTarRpNciei4S_qm5PAqRQ&s=10"} style={{
-                              width: '168px', 
-                              height: '188px', 
-                              objectFit: 'cover',
-                              background: '#f8f9fa',
-                              clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)'
-                          }} alt="Employee" crossOrigin="anonymous" />
-                      </div>
+                          overflow: 'hidden',
+                          fontFamily: "'Inter', sans-serif",
+                          paddingBottom: '80px',
+                          boxShadow: '0 10px 30px rgba(0,0,0,0.15)'
+                        }}
+                      >
+                        {/* Curved Red Headers for 100% html2canvas Compatibility */}
+                        <div style={{
+                          position: 'absolute',
+                          top: 0, left: 0,
+                          width: '100%',
+                          height: '220px',
+                          background: 'linear-gradient(135deg, #e63946 0%, #b21f2d 100%)',
+                          borderBottomLeftRadius: '50% 30px',
+                          borderBottomRightRadius: '50% 30px',
+                          zIndex: 0
+                        }}></div>
+                        <div style={{
+                          position: 'absolute',
+                          top: 0, left: 0,
+                          width: '100%',
+                          height: '228px',
+                          background: 'rgba(230, 57, 70, 0.15)',
+                          borderBottomLeftRadius: '50% 34px',
+                          borderBottomRightRadius: '50% 34px',
+                          zIndex: 0
+                        }}></div>
 
-                      <div style={{ padding: '0 20px', textAlign: 'center', position: 'relative', zIndex: 2 }}>
-                        <h2 style={{ margin: '0 0 5px 0', fontSize: '26px', color: '#111', fontWeight: 800, letterSpacing: '-0.5px' }}>{emp.name}</h2>
-                        <div style={{ 
-                            background: '#e63946', 
-                            color: 'white', 
-                            display: 'inline-block', 
-                            padding: '6px 30px', 
-                            fontWeight: 700, 
-                            fontSize: '14px',
-                            letterSpacing: '1px',
-                            textTransform: 'uppercase',
-                            marginTop: '5px',
-                            borderRadius: '4px'
+                        <div style={{ position: 'relative', zIndex: 1, padding: '25px 15px 15px 15px', color: 'white' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', fontWeight: '900', fontSize: '20px', textAlign: 'center', letterSpacing: '1.5px', textTransform: 'uppercase' }}>
+                                <div style={{background: 'white', padding: '5px', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', display: 'flex', justifyContent: 'center', alignItems: 'center'}}>
+                                  <img src={(settings as any).logoBase64 || (settings as any).logoUrl || "https://e7.pngegg.com/pngimages/922/926/png-clipart-islamic-calligraphy-desktop-arabic-calligraphy-bismillah-white-logo-thumbnail.png"} alt="Logo" style={{ width: '60px', height: '60px', objectFit: 'contain' }} crossOrigin="anonymous"/>
+                                </div>
+                                <span style={{textShadow: '0 2px 4px rgba(0,0,0,0.3)', fontSize: '18px'}}>{(settings as any).name || 'BISMILLAH STORE'}</span>
+                            </div>
+                        </div>
+
+                        {/* Elegant Gold Rounded-Rect Picture Frame for 100% html2canvas Compatibility */}
+                        <div style={{
+                            width: '160px', 
+                            height: '160px', 
+                            background: 'linear-gradient(135deg, #bf953f 0%, #fcf6ba 25%, #b38728 50%, #fbf5b7 75%, #aa771c 100%)',
+                            margin: '10px auto 15px auto',
+                            borderRadius: '24px',
+                            display: 'flex', 
+                            justifyContent: 'center', 
+                            alignItems: 'center',
+                            position: 'relative',
+                            zIndex: 2,
+                            boxShadow: '0 8px 20px rgba(178, 31, 45, 0.25)',
+                            padding: '4px'
                         }}>
-                            {emp.designation}
+                            <div style={{
+                                width: '100%',
+                                height: '100%',
+                                background: '#ffffff',
+                                borderRadius: '20px',
+                                overflow: 'hidden',
+                                display: 'flex',
+                                justifyContent: 'center',
+                                alignItems: 'center'
+                            }}>
+                                <img src={emp.photoUrl || "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT1JUUgjucKIHw5ATD788OLzTarRpNciei4S_qm5PAqRQ&s=10"} style={{
+                                    width: '100%', 
+                                    height: '100%', 
+                                    objectFit: 'cover',
+                                    background: '#f8f9fa'
+                                }} alt="Employee" crossOrigin="anonymous" />
+                            </div>
+                        </div>
+
+                        <div style={{ padding: '0 20px', textAlign: 'center', position: 'relative', zIndex: 2 }}>
+                          <h2 style={{ margin: '0 0 5px 0', fontSize: '26px', color: '#111', fontWeight: 800, letterSpacing: '-0.5px' }}>{emp.name}</h2>
+                          <div style={{ 
+                              background: '#e63946', 
+                              color: 'white', 
+                              display: 'inline-block', 
+                              padding: '6px 30px', 
+                              fontWeight: 700, 
+                              fontSize: '14px',
+                              letterSpacing: '1px',
+                              textTransform: 'uppercase',
+                              marginTop: '5px',
+                              borderRadius: '4px',
+                              boxShadow: '0 2px 8px rgba(230, 57, 70, 0.3)'
+                          }}>
+                              {emp.designation}
+                          </div>
+                        </div>
+
+                        <div style={{ padding: '0 30px', marginTop: '30px', color: '#444' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'min-content 1fr', gap: '15px 10px', fontSize: '13px', fontWeight: 600, alignItems: 'center' }}>
+                                <span style={{ color: '#888', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px', fontWeight: 700 }}>ID&nbsp;No</span>
+                                <strong style={{ fontSize: '15px', color: '#111' }}>{emp.id.substring(0, 8).toUpperCase()}</strong>
+                                
+                                <span style={{ color: '#888', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px', fontWeight: 700 }}>Phone</span>
+                                <strong style={{ fontSize: '14px', color: '#333' }}>{emp.phone || 'N/A'}</strong>
+                                
+                                <span style={{ color: '#888', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px', fontWeight: 700 }}>Blood</span>
+                                <strong style={{ fontSize: '16px', color: '#e63946' }}>{emp.bloodGroup || 'N/A'}</strong>
+                                
+                                <span style={{ color: '#888', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px', fontWeight: 700 }}>Emg.</span>
+                                <strong style={{ fontSize: '14px', color: '#333' }}>{emp.emergencyPhone || emp.phone || 'N/A'}</strong>
+                            </div>
+                        </div>
+
+                        <div style={{ position: 'absolute', bottom: '0', left: '0', right: '0', background: '#f8f9fa', borderTop: '1px solid #e2e8f0', padding: '15px 0', textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }}></span>
+                            <span style={{ fontWeight: 700, fontSize: '13px', color: '#64748b', letterSpacing: '0.5px' }}>CARD VALID TILL: 31ST DEC 2028</span>
+                          </div>
                         </div>
                       </div>
 
-                      <div style={{ padding: '0 30px', marginTop: '30px', color: '#444' }}>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'min-content 1fr', gap: '15px 10px', fontSize: '13px', fontWeight: 600, alignItems: 'center' }}>
-                              <span style={{ color: '#888', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px' }}>ID&nbsp;No</span>
-                              <strong style={{ fontSize: '15px', color: '#111' }}>{emp.id.substring(0, 8).toUpperCase()}</strong>
-                              
-                              <span style={{ color: '#888', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px' }}>Phone</span>
-                              <strong style={{ fontSize: '14px', color: '#333' }}>{emp.phone || 'N/A'}</strong>
-                              
-                              <span style={{ color: '#888', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px' }}>Blood</span>
-                              <strong style={{ fontSize: '16px', color: '#e63946' }}>{emp.bloodGroup || 'N/A'}</strong>
-                              
-                              <span style={{ color: '#888', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px' }}>Emg.</span>
-                              <strong style={{ fontSize: '14px', color: '#333' }}>{emp.emergencyPhone || emp.phone || 'N/A'}</strong>
-                          </div>
-                      </div>
+                      {/* STYLE A: CLASSIC RED - BACK */}
+                      <div 
+                        id={`id-card-back-${emp.id}`} 
+                        style={{
+                          width: '350px',
+                          minHeight: '580px',
+                          background: '#ffffff',
+                          position: 'relative',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          fontFamily: "'Inter', sans-serif",
+                          boxShadow: '0 10px 30px rgba(0,0,0,0.15)'
+                        }}
+                      >
+                        <div style={{ background: '#e63946', height: '15px', width: '100%' }}></div>
 
-                      <div style={{ position: 'absolute', bottom: '0', left: '0', right: '0', background: '#f8f9fa', borderTop: '1px solid #e2e8f0', padding: '15px 0', textAlign: 'center' }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }}></span>
-                          <span style={{ fontWeight: 700, fontSize: '13px', color: '#64748b', letterSpacing: '0.5px' }}>CARD VALID TILL: 31ST DEC 2028</span>
+                        <div style={{ padding: '30px 25px', flexGrow: 1, color: '#333' }}>
+                            <h3 style={{ textAlign: 'center', color: '#e63946', marginTop: 0, textTransform: 'uppercase', fontSize: '18px', letterSpacing: '1px', fontWeight: 800 }}>Terms & Conditions</h3>
+                            
+                            <div style={{ fontSize: '13px', lineHeight: '1.6', marginBottom: '20px', textAlign: 'justify' }}>
+                                This card is the property of <strong style={{ textTransform: 'uppercase', color: '#e63946' }}>{(settings as any).name || 'BISMILLAH STORE'}</strong>. Use of this card is governed by company policy.
+                                <ul style={{ paddingLeft: '18px', marginTop: '10px', listStyleType: 'disc' }}>
+                                    <li style={{ marginBottom: '8px' }}>This ID card must be worn and clearly visible at all times while on company premises.</li>
+                                    <li style={{ marginBottom: '8px' }}>Do not lend, transfer, or alter this card in any way.</li>
+                                    <li style={{ marginBottom: '8px' }}>Report loss or theft of this card immediately to the HR or Admin department.</li>
+                                    <li style={{ marginBottom: '8px' }}>Must be surrendered upon termination of employment.</li>
+                                </ul>
+                            </div>
+
+                            <div style={{ textAlign: 'center', margin: '25px 0' }}>
+                                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent((((settings as any).website && (settings as any).website !== '') ? (settings as any).website : window.location.origin) + '/' + (((settings as any).name || 'company').replace(/\s+/g, '').toLowerCase()) + '/' + emp.id)}`} style={{ width: '90px', height: '90px', margin: '0 auto', border: '2px solid #333', padding: '5px', borderRadius: '8px', objectFit: 'contain' }} alt="QR Code" crossOrigin="anonymous" />
+                            </div>
+                        </div>
+
+                        {/* Curved Red Bottom Shape for 100% html2canvas Compatibility */}
+                        <div style={{ position: 'relative', marginTop: 'auto', textAlign: 'center', padding: '40px 20px 25px 20px', color: 'white', overflow: 'hidden' }}>
+                            <div style={{ 
+                              position: 'absolute', 
+                              bottom: 0, 
+                              left: 0, 
+                              width: '100%', 
+                              height: '100%', 
+                              background: 'linear-gradient(135deg, #e63946 0%, #b21f2d 100%)', 
+                              borderTopLeftRadius: '30px',
+                              borderTopRightRadius: '30px',
+                              zIndex: 0 
+                            }}></div>
+                            <div style={{ position: 'relative', zIndex: 1 }}>
+                              <strong style={{ fontSize: '15px', display: 'block', marginBottom: '8px', letterSpacing: '0.5px', color: '#fbbf24' }}>If found, please return to:</strong>
+                              <p style={{ margin: '4px 0', fontSize: '13px' }}>{((settings as any).name || 'Bismillah Store')} Head Office</p>
+                              <p style={{ margin: '4px 0', fontSize: '13px' }}>{(settings as any).address || 'Dhaka, Bangladesh'}</p> 
+                              <p style={{ margin: '4px 0', fontSize: '13px' }}>Phone: {(settings as any).phone || '+123-456-7890'}</p>
+                              <p style={{ margin: '4px 0', fontSize: '13px' }}>Web: {((settings as any).website && (settings as any).website !== '') ? (settings as any).website : window.location.origin}</p>
+                            </div>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Hidden ID badge printable structure - BACK */}
-                    <div 
-                      id={`id-card-back-${emp.id}`} 
-                      style={{
-                        display: 'none',
-                        width: '350px',
-                        minHeight: '580px',
-                        background: 'white',
-                        boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        flexDirection: 'column',
-                        fontFamily: 'sans-serif'
-                      }}
-                    >
-                      <div style={{ background: '#e63946', height: '15px', width: '100%' }}></div>
+                      {/* STYLE B: CORPORATE INDIGO - FRONT */}
+                      <div 
+                        id={`id-card-front-v2-${emp.id}`} 
+                        style={{
+                          width: '350px',
+                          minHeight: '580px',
+                          background: '#ffffff',
+                          position: 'relative',
+                          overflow: 'hidden',
+                          fontFamily: "'Inter', sans-serif",
+                          paddingBottom: '80px',
+                          boxShadow: '0 10px 30px rgba(0,0,0,0.15)'
+                        }}
+                      >
+                        {/* Elite Sapphire Blue Header with Sleek Gold Line (100% html2canvas Compatible) */}
+                        <div style={{
+                          position: 'absolute',
+                          top: 0, left: 0,
+                          width: '100%',
+                          height: '215px',
+                          background: 'linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)',
+                          borderBottom: '5px solid #fbbf24',
+                          zIndex: 0
+                        }}></div>
 
-                      <div style={{ padding: '30px 25px', flexGrow: 1, color: '#333' }}>
-                          <h3 style={{ textAlign: 'center', color: '#e63946', marginTop: 0, textTransform: 'uppercase', fontSize: '18px', letterSpacing: '1px' }}>Terms & Conditions</h3>
-                          
-                          <div style={{ fontSize: '13px', lineHeight: '1.6', marginBottom: '20px', textAlign: 'justify' }}>
-                              This card is the property of <strong style={{ textTransform: 'uppercase' }}>{(settings as any).name || 'BISMILLAH STORE'}</strong>. Use of this card is governed by company policy.
-                              <ul style={{ paddingLeft: '18px', marginTop: '10px' }}>
-                                  <li style={{ marginBottom: '8px' }}>This ID card must be worn and clearly visible at all times while on company premises.</li>
-                                  <li style={{ marginBottom: '8px' }}>Do not lend, transfer, or alter this card in any way.</li>
-                                  <li style={{ marginBottom: '8px' }}>Report loss or theft of this card immediately to the HR or Admin department.</li>
-                                  <li style={{ marginBottom: '8px' }}>Must be surrendered upon termination of employment.</li>
-                              </ul>
+                        <div style={{ position: 'relative', zIndex: 1, padding: '25px 15px 15px 15px', color: 'white' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', fontWeight: '900', fontSize: '20px', textAlign: 'center', letterSpacing: '1.5px', textTransform: 'uppercase' }}>
+                                <div style={{background: 'white', padding: '5px', borderRadius: '50%', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', display: 'flex', justifyContent: 'center', alignItems: 'center', width: '70px', height: '70px'}}>
+                                  <img src={(settings as any).logoBase64 || (settings as any).logoUrl || "https://e7.pngegg.com/pngimages/922/926/png-clipart-islamic-calligraphy-desktop-arabic-calligraphy-bismillah-white-logo-thumbnail.png"} alt="Logo" style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '50%' }} crossOrigin="anonymous"/>
+                                </div>
+                                <span style={{textShadow: '0 2px 4px rgba(0,0,0,0.4)', fontSize: '18px'}}>{(settings as any).name || 'BISMILLAH STORE'}</span>
+                            </div>
+                        </div>
+
+                        {/* Double-Ring Gold & White Circular Frame for 100% html2canvas Compatibility */}
+                        <div style={{
+                            width: '160px', 
+                            height: '160px', 
+                            margin: '15px auto 15px auto',
+                            borderRadius: '50%',
+                            display: 'flex', 
+                            justifyContent: 'center', 
+                            alignItems: 'center',
+                            position: 'relative',
+                            zIndex: 2,
+                            background: '#ffffff',
+                            border: '4px solid #ffffff',
+                            boxShadow: '0 0 0 4px #fbbf24, 0 6px 20px rgba(30, 58, 138, 0.25)',
+                            overflow: 'hidden'
+                        }}>
+                            <img src={emp.photoUrl || "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT1JUUgjucKIHw5ATD788OLzTarRpNciei4S_qm5PAqRQ&s=10"} style={{
+                                width: '100%', 
+                                height: '100%', 
+                                objectFit: 'cover',
+                                background: '#f8f9fa'
+                            }} alt="Employee" crossOrigin="anonymous" />
+                        </div>
+
+                        <div style={{ padding: '0 20px', textAlign: 'center', position: 'relative', zIndex: 2 }}>
+                          <h2 style={{ margin: '0 0 5px 0', fontSize: '24px', color: '#1e293b', fontWeight: 800, letterSpacing: '-0.5px' }}>{emp.name}</h2>
+                          <div style={{ 
+                              background: '#1e3a8a', 
+                              color: 'white', 
+                              display: 'inline-block', 
+                              padding: '5px 25px', 
+                              fontWeight: 700, 
+                              fontSize: '13px',
+                              letterSpacing: '1px',
+                              textTransform: 'uppercase',
+                              marginTop: '5px',
+                              borderRadius: '9999px',
+                              boxShadow: '0 2px 8px rgba(30, 58, 138, 0.2)'
+                          }}>
+                              {emp.designation}
                           </div>
+                        </div>
 
-                          <div style={{ textAlign: 'center', margin: '25px 0' }}>
-                              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent((((settings as any).website && (settings as any).website !== '') ? (settings as any).website : window.location.origin) + '/' + (((settings as any).name || 'company').replace(/\s+/g, '').toLowerCase()) + '/' + emp.id)}`} style={{ width: '90px', height: '90px', margin: '0 auto', border: '2px solid #333', padding: '5px', borderRadius: '8px', objectFit: 'contain' }} alt="QR Code" crossOrigin="anonymous" />
+                        <div style={{ padding: '0 30px', marginTop: '25px', color: '#334155' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'min-content 1fr', gap: '12px 15px', fontSize: '13px', fontWeight: 600, alignItems: 'center' }}>
+                                <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px', fontWeight: 700 }}>ID&nbsp;No</span>
+                                <strong style={{ fontSize: '14px', color: '#0f172a' }}>{emp.id.substring(0, 8).toUpperCase()}</strong>
+                                
+                                <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px', fontWeight: 700 }}>Phone</span>
+                                <strong style={{ fontSize: '13px', color: '#334155' }}>{emp.phone || 'N/A'}</strong>
+                                
+                                <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px', fontWeight: 700 }}>Blood</span>
+                                <strong style={{ fontSize: '14px', color: '#e63946' }}>{emp.bloodGroup || 'N/A'}</strong>
+                                
+                                <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px', fontWeight: 700 }}>Emg.</span>
+                                <strong style={{ fontSize: '13px', color: '#334155' }}>{emp.emergencyPhone || emp.phone || 'N/A'}</strong>
+                            </div>
+                        </div>
+
+                        <div style={{ position: 'absolute', bottom: '0', left: '0', right: '0', background: '#f1f5f9', borderTop: '1px solid #e2e8f0', padding: '15px 0', textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
+                            <span style={{ fontWeight: 700, fontSize: '12px', color: '#475569', letterSpacing: '0.5px' }}>CARD VALID TILL: 31ST DEC 2028</span>
                           </div>
+                        </div>
                       </div>
 
-                      <div style={{ position: 'relative', marginTop: 'auto', textAlign: 'center', padding: '40px 20px 25px 20px', color: 'white', overflow: 'hidden' }}>
-                          <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '100%', background: '#e63946', clipPath: 'polygon(0 25%, 50% 0, 100% 25%, 100% 100%, 0 100%)', zIndex: 0 }}></div>
-                          <div style={{ position: 'relative', zIndex: 1 }}>
-                            <strong style={{ fontSize: '15px', display: 'block', marginBottom: '8px', letterSpacing: '0.5px' }}>If found, please return to:</strong>
-                            <p style={{ margin: '4px 0', fontSize: '13px' }}>{((settings as any).name || 'Bismillah Store')} Head Office</p>
-                            <p style={{ margin: '4px 0', fontSize: '13px' }}>{(settings as any).address || 'Dhaka, Bangladesh'}</p> 
-                            <p style={{ margin: '4px 0', fontSize: '13px' }}>Phone: {(settings as any).phone || '+123-456-7890'}</p>
-                            <p style={{ margin: '4px 0', fontSize: '13px' }}>Web: {((settings as any).website && (settings as any).website !== '') ? (settings as any).website : window.location.origin}</p>
-                          </div>
+                      {/* STYLE B: CORPORATE INDIGO - BACK (NO QR, NO WEBSITE LINK) */}
+                      <div 
+                        id={`id-card-back-v2-${emp.id}`} 
+                        style={{
+                          width: '350px',
+                          minHeight: '580px',
+                          background: '#ffffff',
+                          position: 'relative',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          fontFamily: "'Inter', sans-serif",
+                          boxShadow: '0 10px 30px rgba(0,0,0,0.15)'
+                        }}
+                      >
+                        <div style={{ background: '#1e3a8a', height: '15px', width: '100%' }}></div>
+
+                        <div style={{ padding: '30px 25px', flexGrow: 1, color: '#334155' }}>
+                            <h3 style={{ textAlign: 'center', color: '#1e3a8a', marginTop: 0, textTransform: 'uppercase', fontSize: '18px', letterSpacing: '1px', fontWeight: 800 }}>Terms & Conditions</h3>
+                            
+                            <div style={{ fontSize: '12px', lineHeight: '1.6', marginBottom: '20px', textAlign: 'justify' }}>
+                                This card is the property of <strong style={{ textTransform: 'uppercase', color: '#1e3a8a' }}>{(settings as any).name || 'BISMILLAH STORE'}</strong>. Use of this card is governed by company policy.
+                                <ul style={{ paddingLeft: '18px', marginTop: '10px', listStyleType: 'disc' }}>
+                                    <li style={{ marginBottom: '8px' }}>This ID card must be worn and clearly visible at all times while on company premises.</li>
+                                    <li style={{ marginBottom: '8px' }}>Do not lend, transfer, or alter this card in any way.</li>
+                                    <li style={{ marginBottom: '8px' }}>Report loss or theft of this card immediately to the HR or Admin department.</li>
+                                    <li style={{ marginBottom: '8px' }}>Must be surrendered upon termination of employment.</li>
+                                </ul>
+                            </div>
+
+                            {/* Styled corporate watermark / emblem instead of QR code as requested */}
+                            <div style={{ textAlign: 'center', margin: '30px 0', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                {/* Subtle elegant badge with double gold ring */}
+                                <div style={{
+                                    width: '110px',
+                                    height: '110px',
+                                    borderRadius: '50%',
+                                    border: '2px dashed #fbbf24',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    background: '#f8fafc',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
+                                    boxSizing: 'border-box'
+                                }}>
+                                    <div style={{
+                                        width: '94px',
+                                        height: '94px',
+                                        borderRadius: '50%',
+                                        background: 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%)',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        color: '#ffffff',
+                                        padding: '6px',
+                                        boxSizing: 'border-box',
+                                        boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.2)'
+                                    }}>
+                                        <span style={{ display: 'block', fontSize: '11px', fontWeight: 900, color: '#fbbf24', letterSpacing: '0.5px', lineHeight: '1.2', textAlign: 'center' }}>OFFICIAL</span>
+                                        <span style={{ 
+                                            display: 'block', 
+                                            textTransform: 'uppercase', 
+                                            fontSize: '8px', 
+                                            fontWeight: 800, 
+                                            color: '#ffffff', 
+                                            opacity: 0.95, 
+                                            marginTop: '3px', 
+                                            marginBottom: '3px', 
+                                            lineHeight: '1.2', 
+                                            wordBreak: 'break-word', 
+                                            textAlign: 'center', 
+                                            width: '100%',
+                                            padding: '0 2px'
+                                        }}>{((settings as any).name || 'Company')}</span>
+                                        <span style={{ display: 'block', fontSize: '8px', fontWeight: 800, letterSpacing: '0.5px', color: '#93c5fd', lineHeight: '1.2', textAlign: 'center' }}>ID BADGE</span>
+                                    </div>
+                                </div>
+                                <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, marginTop: '10px', textTransform: 'uppercase', letterSpacing: '1px' }}>Verified Employee</span>
+                            </div>
+                        </div>
+
+                        {/* Flat sapphire blue header bottom (NO QR CODE, NO WEBSITE as requested) */}
+                        <div style={{ position: 'relative', marginTop: 'auto', textAlign: 'center', padding: '40px 20px 25px 20px', color: 'white', overflow: 'hidden' }}>
+                            <div style={{ 
+                              position: 'absolute', 
+                              bottom: 0, 
+                              left: 0, 
+                              width: '100%', 
+                              height: '100%', 
+                              background: 'linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)', 
+                              borderTop: '5px solid #fbbf24',
+                              zIndex: 0 
+                            }}></div>
+                            <div style={{ position: 'relative', zIndex: 1 }}>
+                              <strong style={{ fontSize: '14px', display: 'block', marginBottom: '8px', letterSpacing: '0.5px', color: '#fbbf24' }}>If found, please return to:</strong>
+                              <p style={{ margin: '4px 0', fontSize: '12px', fontWeight: 600 }}>{((settings as any).name || 'Bismillah Store')} Head Office</p>
+                              <p style={{ margin: '4px 0', fontSize: '12px', opacity: 0.9 }}>{(settings as any).address || 'Dhaka, Bangladesh'}</p> 
+                              <p style={{ margin: '4px 0', fontSize: '12px', opacity: 0.9 }}>Phone: {(settings as any).phone || '+123-456-7890'}</p>
+                            </div>
+                        </div>
                       </div>
+
                     </div>
 
                 </div>
@@ -1472,16 +1956,29 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-1">
-                    {isBn ? 'উৎসব ভাতা / বোনাস' : 'Festival Bonus Amount'}
-                  </label>
-                  <input
-                    type="number"
-                    className="w-full bg-slate-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-xs font-black font-mono"
-                    value={bonusAmount}
-                    onChange={e => setBonusAmount(Math.max(0, parseInt(e.target.value) || 0))}
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-1">
+                      {isBn ? 'উৎসব ভাতা / বোনাস' : 'Festival Bonus Amount'}
+                    </label>
+                    <input
+                      type="number"
+                      className="w-full bg-slate-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-xl px-3 py-2 text-xs font-black font-mono"
+                      value={bonusAmount}
+                      onChange={e => setBonusAmount(Math.max(0, parseInt(e.target.value) || 0))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-1">
+                      {isBn ? 'অগ্রিম ছুটি সমন্বয় (দিন)' : 'Deduct Advance Leaves'}
+                    </label>
+                    <input
+                      type="number"
+                      className="w-full bg-slate-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-xl px-3 py-2 text-xs font-black font-mono"
+                      value={advanceDaysDeducted}
+                      onChange={e => setAdvanceDaysDeducted(Math.max(0, parseInt(e.target.value) || 0))}
+                    />
+                  </div>
                 </div>
 
                 <div>
@@ -1520,6 +2017,12 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
                       <div className="flex justify-between font-semibold text-red-500">
                         <span>{isBn ? 'ছুটি কর্তন:' : 'Leave Deductions:'}</span>
                         <span className="font-mono font-semibold">-{computedSalaryDetails.payoutDeductions.toLocaleString()}{currencySymbol} <span className="text-[9px] font-bold">({computedSalaryDetails.unpaidDaysCount}d)</span></span>
+                      </div>
+                    )}
+                    {computedSalaryDetails.advanceDeduction > 0 && (
+                      <div className="flex justify-between font-semibold text-red-500">
+                        <span>{isBn ? 'অগ্রিম ছুটি সমন্বয় কর্তন:' : 'Advance Leave Deductions:'}</span>
+                        <span className="font-mono font-semibold">-{computedSalaryDetails.advanceDeduction.toLocaleString()}{currencySymbol} <span className="text-[9px] font-bold">({computedSalaryDetails.advanceDaysCount}d)</span></span>
                       </div>
                     )}
                     <div className="border-t border-dashed border-gray-300 pt-2 flex justify-between font-black text-sm text-slate-900">
@@ -1687,6 +2190,72 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
       {/* 5. Leaves & Holidays */}
       {activeTab === 'leave_planner' && (
         <div className="space-y-6">
+          {/* Dynamic Leave Ledger Section */}
+          <div className="bg-white p-6 rounded-3xl border border-gray-150/70 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b pb-3.5">
+              <div>
+                <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
+                  <span>📊 {isBn ? 'স্টাফ ছুটির খতিয়ান ও অগ্রিম ব্যালেন্স' : 'Staff Leave Ledger & Advance Tracking'}</span>
+                </h3>
+                <p className="text-[11px] text-gray-500 font-medium">
+                  {isBn 
+                    ? 'প্রতিটি স্টাফের বাৎসরিক বরাদ্দকৃত ছুটি, ব্যবহৃত ছুটি, অবশিষ্ট এবং অতিরিক্ত অগ্রিম ছুটির লাইভ হিসাব।'
+                    : 'Track annual leave quota, approved leaves, balance, and advanced leaves taken in advance.'}
+                </p>
+              </div>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs font-medium text-gray-500">
+                <thead className="text-[10px] uppercase text-gray-400 tracking-wider bg-slate-50/50">
+                  <tr>
+                    <th className="py-2.5 px-4 font-black">{isBn ? 'স্টাফের নাম' : 'Employee Name'}</th>
+                    <th className="py-2.5 px-4 font-black">{isBn ? 'পদবি' : 'Designation'}</th>
+                    <th className="py-2.5 px-4 text-center font-black">{isBn ? 'বাৎসরিক কোটা' : 'Annual Quota'}</th>
+                    <th className="py-2.5 px-4 text-center text-emerald-600 font-black">{isBn ? 'ব্যবহৃত ছুটি' : 'Used Leaves'}</th>
+                    <th className="py-2.5 px-4 text-center text-indigo-600 font-black">{isBn ? 'অবশিষ্ট ব্যালেন্স' : 'Remaining Balance'}</th>
+                    <th className="py-2.5 px-4 text-center text-red-600 font-black">{isBn ? 'অগ্রিম ছুটি (Advance)' : 'Leaves in Advance'}</th>
+                    <th className="py-2.5 px-4 font-black text-center">{isBn ? 'অবস্থা' : 'Status'}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-105">
+                  {employeeLeaveLedgers.map(ledger => {
+                    const isExceeded = ledger.advance > 0;
+                    return (
+                      <tr key={ledger.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3 px-4 font-bold text-gray-950">{ledger.name}</td>
+                        <td className="py-3 px-4 font-semibold text-gray-500">{ledger.designation}</td>
+                        <td className="py-3 px-4 text-center font-mono font-bold">{ledger.quota} {isBn ? 'দিন' : 'days'}</td>
+                        <td className="py-3 px-4 text-center font-mono font-black text-emerald-600">{ledger.used} {isBn ? 'দিন' : 'days'}</td>
+                        <td className="py-3 px-4 text-center font-mono font-black text-indigo-600">{ledger.remaining} {isBn ? 'দিন' : 'days'}</td>
+                        <td className="py-3 px-4 text-center font-mono font-black text-red-650">
+                          {ledger.advance > 0 ? (
+                            <span className="bg-red-50 text-red-650 px-2.5 py-0.5 rounded-full text-[10.5px]">
+                              +{ledger.advance} {isBn ? 'দিন (অগ্রিম)' : 'days (Advance)'}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300">0 {isBn ? 'দিন' : 'days'}</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          {isExceeded ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-red-650 uppercase bg-red-50/50 px-2 py-0.5 rounded">
+                              ⚠️ {isBn ? 'কোটা শেষ (অগ্রিম শুরু)' : 'Quota Over'}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-600 uppercase bg-emerald-50 px-2 py-0.5 rounded">
+                              ✅ {isBn ? 'সুরক্ষিত' : 'Safe'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
             {/* Create Leave Request form */}
             <div className="bg-white p-6 rounded-3xl border border-gray-150/70 shadow-sm md:col-span-5 space-y-4">
@@ -2074,17 +2643,17 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => setCertType('contract')}
-                      className={`py-2 px-3 text-xs font-black rounded-xl transition-all border ${
+                      className={`py-2 px-1 text-[10px] font-black rounded-xl transition-all border ${
                         certType === 'contract' 
                           ? 'bg-slate-900 border-slate-950 text-white' 
                           : 'bg-white hover:bg-slate-50 text-slate-600'
                       }`}
                     >
-                      📜 {isBn ? 'চুক্তিপত্র (Contract)' : 'Employment Contract'}
+                      📜 {isBn ? 'চুক্তিপত্র' : 'Employment Contract'}
                     </button>
                     <button
                       onClick={() => setCertType('experience')}
-                      className={`py-2 px-3 text-xs font-black rounded-xl transition-all border ${
+                      className={`py-2 px-1 text-[10px] font-black rounded-xl transition-all border ${
                         certType === 'experience' 
                           ? 'bg-slate-900 border-slate-950 text-white' 
                           : 'bg-white hover:bg-slate-50 text-slate-600'
@@ -2092,7 +2661,98 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
                     >
                       🏅 {isBn ? 'অভিজ্ঞতা সনদ' : 'Experience Release'}
                     </button>
+                    <button
+                      onClick={() => setCertType('noc_visa')}
+                      className={`py-2 px-1 text-[10px] font-black rounded-xl transition-all border ${
+                        certType === 'noc_visa' 
+                          ? 'bg-slate-900 border-slate-950 text-white' 
+                          : 'bg-white hover:bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      ✈️ {isBn ? 'ভিসা এনওসি' : 'Visa NOC'}
+                    </button>
+                    <button
+                      onClick={() => setCertType('noc_bank')}
+                      className={`py-2 px-1 text-[10px] font-black rounded-xl transition-all border ${
+                        certType === 'noc_bank' 
+                          ? 'bg-slate-900 border-slate-950 text-white' 
+                          : 'bg-white hover:bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      🏦 {isBn ? 'ব্যাংক এনওসি' : 'Bank NOC'}
+                    </button>
                   </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-1">
+                    {isBn ? 'সনদপত্রের ভাষা' : 'Document Language'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCertLanguage('en');
+                        setLeavingReason('Personal Reasons');
+                        setCertPraise('He has been extremely diligent, hard-working, and trustworthy.');
+                      }}
+                      className={`py-2 px-1 text-[10px] font-black rounded-xl transition-all border ${
+                        certLanguage === 'en' 
+                          ? 'bg-indigo-650 border-indigo-750 text-white shadow-xs' 
+                          : 'bg-white hover:bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      🇬🇧 English Version
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCertLanguage('bn');
+                        setLeavingReason('ব্যক্তিগত কারণ');
+                        setCertPraise('অত্যন্ত পরিশ্রমী এবং বিশ্বস্ত কর্মী।');
+                      }}
+                      className={`py-2 px-1 text-[10px] font-black rounded-xl transition-all border ${
+                        certLanguage === 'bn' 
+                          ? 'bg-indigo-650 border-indigo-750 text-white shadow-xs' 
+                          : 'bg-white hover:bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      🇧🇩 বাংলা সংস্করণ
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-1">
+                    {isBn ? 'প্রিন্ট লেআউট মোড' : 'Print Layout Mode'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setPrintLayoutMode('digital')}
+                      className={`py-2 px-3 text-xs font-black rounded-xl transition-all border ${
+                        printLayoutMode === 'digital' 
+                          ? 'bg-indigo-650 border-indigo-750 text-white' 
+                          : 'bg-white hover:bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      💻 {isBn ? 'ডিজিটাল মোড' : 'Digital Mode'}
+                    </button>
+                    <button
+                      onClick={() => setPrintLayoutMode('preprinted')}
+                      className={`py-2 px-3 text-xs font-black rounded-xl transition-all border ${
+                        printLayoutMode === 'preprinted' 
+                          ? 'bg-indigo-650 border-indigo-750 text-white' 
+                          : 'bg-white hover:bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      📑 {isBn ? 'প্রি-প্রিন্টেড প্যাড' : 'Pre-Printed Pad'}
+                    </button>
+                  </div>
+                  <p className="text-[9.5px] text-gray-450 mt-1 font-sans">
+                    {isBn 
+                      ? 'প্রি-প্রিন্টেড প্যাড সিলেক্ট করলে হেডার, লোগো এবং সিগনেচার হাইড হবে যাতে সরাসরি কোম্পানির প্যাডে প্রিন্ট করতে পারেন।'
+                      : 'Choose Pre-Printed Pad to hide header and signatures to print directly inside physical company pads.'}
+                  </p>
                 </div>
 
                 <div>
@@ -2156,23 +2816,58 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
                 )}
 
                 {selectedCertEmployee && (
-                  <button
-                    onClick={() => {
-                      const containerNode = document.getElementById('certificate-render-node');
-                      if (containerNode) {
+                  <div className="space-y-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const containerNode = document.getElementById('certificate-render-node');
+                        if (!containerNode) return;
+
+                        // Create verification record in Firestore
+                        try {
+                          await setDoc(doc(db, 'hrm_records', currentDocId), {
+                            id: currentDocId,
+                            shopId: user.shopId,
+                            type: certType,
+                            employeeId: selectedCertEmployee.id,
+                            employeeName: selectedCertEmployee.name,
+                            employeeDesignation: selectedCertEmployee.designation,
+                            date: new Date().toISOString().split('T')[0],
+                            details: {
+                              leavingDate: leavingDate || '',
+                              leavingReason: leavingReason || '',
+                              certPraise: certPraise || '',
+                              certType: certType,
+                              printLayoutMode,
+                              signatureUrl: hrmSettings.signatureUrl,
+                              sealUrl: hrmSettings.sealUrl
+                            },
+                            createdAt: new Date().toISOString()
+                          });
+                        } catch (err) {
+                          console.error("Error logging document verification code:", err);
+                        }
+
                         const printWin = window.open('', '_blank');
                         if (printWin) {
                           printWin.document.write(`
                             <html>
                             <head>
-                              <title>${certType === 'contract' ? 'Agreement' : 'Certificate'}</title>
+                              <title>${certType === 'contract' ? 'Agreement' : 'Certificate'} - ${currentDocId}</title>
                               <style>
-                                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Noto+Serif+Bengali:wght@400;700;900&display=swap');
-                                body { font-family: 'Inter', 'Noto Serif Bengali', sans-serif; display: flex; justify-content: center; padding: 40px; margin: 0; background: #fff; }
+                                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=Noto+Serif+Bengali:wght@400;700;900&display=swap');
+                                body { 
+                                  font-family: 'Inter', 'Noto Serif Bengali', sans-serif; 
+                                  display: flex; 
+                                  justify-content: center; 
+                                  padding: 0; 
+                                  margin: 0; 
+                                  background: #fff; 
+                                }
                                 #certificate-render-node {
                                   width: 595px;
                                   height: 842px;
-                                  border: 12px double #1e1b4b;
+                                  border: ${printLayoutMode === 'digital' ? '12px double #1e1b4b' : 'none'};
                                   padding: 48px;
                                   background: white;
                                   font-family: 'Noto Serif Bengali', serif;
@@ -2182,25 +2877,103 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
                                   box-sizing: border-box;
                                   text-align: center;
                                   color: #1e293b;
+                                  position: relative;
+                                }
+                                @media print {
+                                  body { padding: 0; background: none; }
+                                  #certificate-render-node { 
+                                    border: ${printLayoutMode === 'digital' ? '12px double #1e1b4b !important' : 'none !important'}; 
+                                    -webkit-print-color-adjust: exact;
+                                    print-color-adjust: exact;
+                                  }
                                 }
                               </style>
                             </head>
                             <body onload="window.print(); window.close();">
-                              <div style="width: 800px; padding: 20px; display: flex; justify-content: center;">
-                                ${containerNode.outerHTML}
+                              <div style="width: 595px; height: 842px; display: flex; justify-content: center; align-items: center;">
+                                <div id="certificate-render-node">
+                                  ${containerNode.innerHTML}
+                                </div>
                               </div>
                             </body>
                             </html>
                           `);
                           printWin.document.close();
                         }
-                      }
-                    }}
-                    className="w-full py-3 bg-slate-900 hover:bg-slate-950 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-colors flex items-center justify-center gap-2 shadow-md"
-                  >
-                    <Printer className="w-4 h-4 text-emerald-400" />
-                    {isBn ? 'সরাসরি A4 প্রিন্ট আউট দিন' : 'Print A4 Certificate'}
-                  </button>
+                      }}
+                      className="w-full py-3 bg-slate-900 hover:bg-slate-950 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4 text-emerald-400" />
+                      {isBn ? 'সরাসরি A4 প্রিন্ট করুন' : 'Print A4 Certificate'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const containerNode = document.getElementById('certificate-render-node');
+                        if (!containerNode) return;
+
+                        try {
+                          const originalShadow = containerNode.style.boxShadow;
+                          containerNode.style.boxShadow = 'none';
+
+                          const canvas = await html2canvas(containerNode, {
+                            scale: 3, // Premium high-resolution
+                            useCORS: true,
+                            backgroundColor: '#ffffff',
+                            logging: false
+                          });
+
+                          containerNode.style.boxShadow = originalShadow;
+
+                          // Save dynamic verification record
+                          try {
+                            await setDoc(doc(db, 'hrm_records', currentDocId), {
+                              id: currentDocId,
+                              shopId: user.shopId,
+                              type: certType,
+                              employeeId: selectedCertEmployee.id,
+                              employeeName: selectedCertEmployee.name,
+                              employeeDesignation: selectedCertEmployee.designation,
+                              date: new Date().toISOString().split('T')[0],
+                              details: {
+                                leavingDate: leavingDate || '',
+                                leavingReason: leavingReason || '',
+                                certPraise: certPraise || '',
+                                certType: certType,
+                                printLayoutMode,
+                                signatureUrl: hrmSettings.signatureUrl,
+                                sealUrl: hrmSettings.sealUrl
+                              },
+                              createdAt: new Date().toISOString()
+                            });
+                          } catch (fErr) {
+                            console.error("Error creating verification record:", fErr);
+                          }
+
+                          const link = document.createElement('a');
+                          link.href = canvas.toDataURL('image/png', 1.0);
+                          link.download = `${certType.toUpperCase()}_${selectedCertEmployee.name.replace(/\s+/g, '_')}_${currentDocId}.png`;
+                          link.click();
+
+                          setNotification({
+                            message: isBn ? 'ইমেজ ফাইলটি সফলভাবে ডাউনলোড করা হয়েছে!' : 'Certificate downloaded successfully as high-resolution image!',
+                            type: 'success'
+                          });
+                        } catch (err) {
+                          console.error("HTML2Canvas Error:", err);
+                          setNotification({
+                            message: isBn ? 'ডাউনলোড ব্যর্থ হয়েছে' : 'Failed to download certificate',
+                            type: 'error'
+                          });
+                        }
+                      }}
+                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                    >
+                      <Download className="w-4 h-4 text-amber-300" />
+                      {isBn ? 'হাই-রেজুলেশন ইমেজ ডাউনলোড' : 'Download High-Res Image'}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -2210,11 +2983,11 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
               {selectedCertEmployee ? (
                 <div 
                   id="certificate-render-node" 
-                  className="bg-white border-[12px] border-double border-indigo-900 p-12 text-center w-[595px] h-[842px] relative shadow-lg box-border flex flex-col justify-between" 
+                  className={`bg-white p-12 text-center w-[595px] h-[842px] relative shadow-lg box-border flex flex-col justify-between`} 
                   style={{
                     width: '595px',
                     height: '842px',
-                    border: '12px double #1e1b4b',
+                    border: printLayoutMode === 'digital' ? '12px double #1e1b4b' : 'none',
                     padding: '48px',
                     background: 'white',
                     fontFamily: "'Noto Serif Bengali', serif",
@@ -2227,68 +3000,226 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
                   }}
                 >
                   
-                  {/* Bangladesh traditional patterns */}
-                  <div>
-                    <h5 style={{ fontSize: '11px', fontWeight: 'bold', margin: '0', letterSpacing: '2px' }}>بِسْمِ اللهِ الرَّحْمٰنِ الرَّحِيْمِ</h5>
-                    <h2 style={{ fontSize: '20px', fontWeight: '900', color: '#1e1b4b', textTransform: 'uppercase', margin: '12px 0 2px 0' }}>{settings.shopName || 'Merchant LLC'}</h2>
-                    <p style={{ fontSize: '9px', margin: '0', fontFamily: 'Inter', letterSpacing: '1px', color: '#64748b' }}>{settings.shopPhone || 'Registered National Corporate Hub'}</p>
-                    <div style={{ width: '80px', height: '3px', background: '#c2410c', margin: '12px auto' }}></div>
-                  </div>
+                  {/* CSS Watermark Tech */}
+                  {printLayoutMode === 'digital' && (hrmSettings.watermarkUrl || settings.logoBase64 || settings.logoUrl) && (
+                    <div 
+                      style={{
+                        position: 'absolute',
+                        left: '50%',
+                        top: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        opacity: hrmSettings.watermarkOpacity || 0.06,
+                        width: `${hrmSettings.watermarkSize || 160}px`,
+                        height: `${hrmSettings.watermarkSize || 160}px`,
+                        backgroundImage: `url(${hrmSettings.watermarkUrl || settings.logoBase64 || settings.logoUrl})`,
+                        backgroundSize: 'contain',
+                        backgroundPosition: 'center',
+                        backgroundRepeat: 'no-repeat',
+                        pointerEvents: 'none',
+                        zIndex: 0
+                      }}
+                    />
+                  )}
+
+                  {printLayoutMode === 'digital' ? (
+                    <div style={{ zIndex: 1, borderBottom: '2px solid #1e1b4b', paddingBottom: '12px', marginBottom: '20px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+                        {/* Company Logo on Left */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          {(settings.logoBase64 || settings.logoUrl) ? (
+                            <img 
+                              src={settings.logoBase64 || settings.logoUrl} 
+                              alt="Company Logo" 
+                              style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '8px' }} 
+                            />
+                          ) : (
+                            <div style={{ width: '56px', height: '56px', background: '#1e1b4b', color: '#ffffff', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: '900' }}>
+                              {(settings.name || settings.shopName || 'M')[0].toUpperCase()}
+                            </div>
+                          )}
+                          <div style={{ textAlign: 'left' }}>
+                            <h2 style={{ fontSize: '18px', fontWeight: '900', color: '#1e1b4b', margin: '0', textTransform: 'uppercase', lineHeight: '1.2' }}>
+                              {settings.name || settings.shopName || hrmSettings.headerText || 'ShopSync Ltd.'}
+                            </h2>
+                            <p style={{ fontSize: '8px', margin: '2px 0 0 0', color: '#64748b', fontFamily: 'Inter', fontWeight: '600' }}>
+                              {certLanguage === 'bn' ? 'মানব সম্পদ বিভাগ (HR Department)' : 'Human Resources Department'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Company Contact Details on Right */}
+                        <div style={{ textAlign: 'right', fontSize: '9px', color: '#475569', fontFamily: 'Inter', lineHeight: '1.4' }}>
+                          <p style={{ margin: '0', fontWeight: '700' }}>{settings.phone || settings.shopPhone || 'Hotline: N/A'}</p>
+                          <p style={{ margin: '2px 0 0 0' }}>{settings.address || 'Dhaka, Bangladesh'}</p>
+                          <p style={{ margin: '2px 0 0 0', fontSize: '8px', color: '#94a3b8' }}>Date: {new Date().toLocaleDateString(certLanguage === 'bn' ? 'bn-BD' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Pre-printed Pad offset spacing to allow physical header paper space */
+                    <div style={{ height: '140px' }}></div>
+                  )}
 
                   {certType === 'experience' ? (
-                    /* INTERACTIVE EXPERIENCE CERTIFICATE */
-                    <div style={{ flex: 1, margin: '48px 0', textAlign: 'left' }} className="text-left font-serif py-4">
-                      
+                    <div style={{ flex: 1, margin: '24px 0', textAlign: 'left', zIndex: 1 }} className="text-left font-serif py-4">
                       <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-                        <span style={{ fontSize: '16px', fontWeight: '950', textTransform: 'uppercase', background: '#1e1b4b', color: 'white', padding: '4px 16px', borderRadius: '4px' }}>{isBn ? 'অভিজ্ঞতা সনদপত্র' : 'CERTIFICATE OF EXPERIENCE'}</span>
+                        <span style={{ fontSize: '15px', fontWeight: '950', textTransform: 'uppercase', background: '#1e1b4b', color: 'white', padding: '6px 18px', borderRadius: '4px', letterSpacing: '1px' }}>
+                          {certLanguage === 'bn' ? 'অভিজ্ঞতা ও অবমুক্তি সনদপত্র' : 'CERTIFICATE OF EXPERIENCE & RELEASE'}
+                        </span>
                       </div>
-
-                      <p style={{ fontSize: '11.5px', lineHeight: '1.8', textIndent: '30px' }} dangerouslySetInnerHTML={{
-                        __html: isBn 
-                          ? `ইহা অত্যন্ত আনন্দের সাথে প্রত্যয়ন করা যাইতেছে যে, <strong>${selectedCertEmployee.name}</strong>, যিনি দীর্ঘকাল যাবত আমাদের প্রতিষ্ঠানে অত্যন্ত নিষ্ঠা ও দক্ষতার সাথে <strong>${selectedCertEmployee.designation}</strong> পদে কর্মরত ছিলেন। তিনি আমাদের সংস্থায় যোগ দেন <strong>${selectedCertEmployee.joiningDate || '---'}</strong> তারিখে এবং শেষ কার্যদিবস ছিল <strong>${leavingDate}</strong>।`
-                          : `This is to formally certify that <strong>${selectedCertEmployee.name}</strong> was actively employed at our esteemed enterprise as a dedicated <strong>${selectedCertEmployee.designation}</strong>. He officially joined our organization on <strong>${selectedCertEmployee.joiningDate || '---'}</strong> and successfully accomplished his tenure on <strong>${leavingDate}</strong>.`
-                      }} />
-
-                      <p style={{ fontSize: '11.5px', lineHeight: '1.8', textIndent: '30px', marginTop: '12px' }} dangerouslySetInnerHTML={{
-                        __html: isBn
-                          ? `কর্মকালীন সময়ে তাহার চারিত্রিক স্বভাব অত্যন্ত প্রশংসনীয় ছিল এবং তিনি কঠোর পরিশ্রমী ছিলেন। তাহার চলে যাওয়ার মূল কারণ: <strong>${leavingReason}</strong>। মন্তব্য: <em>"${certPraise}"</em>`
-                          : `During his tenure, we found him highly motivated and loyal towards responsibilities. The primary reason for his graceful exit was: <strong>${leavingReason}</strong>. Appraisals comments: <em>"${certPraise}"</em>`
-                      }} />
-
-                      <p style={{ fontSize: '11.5px', lineHeight: '1.8', textIndent: '30px', marginTop: '12px' }}>
-                        {isBn
-                          ? `আমরা তাহার উজ্জ্বল ভবিষ্যৎ এবং সর্বাঙ্গীণ মঙ্গল কামনা করি।`
-                          : `We sincerely wish him prosperity, health, and a magnificent future ahead in all professional domains.`
-                        }
+                      <p style={{ fontSize: '12px', lineHeight: '2.0', textIndent: '30px', margin: '0 0 12px 0', color: '#1e293b' }}>
+                        {certLanguage === 'bn' ? (
+                          <>এই মর্মে প্রত্যয়ন করা যাইতেছে যে, <strong>{selectedCertEmployee.name}</strong>, অত্যন্ত নিষ্ঠা ও দক্ষতার সাথে আমাদের প্রতিষ্ঠানে <strong>{selectedCertEmployee.designation}</strong> পদে কর্মরত ছিলেন। তিনি আমাদের সংস্থায় <strong>{selectedCertEmployee.joiningDate || '---'}</strong> তারিখে যোগদান করেন এবং <strong>{leavingDate}</strong> তারিখে তাঁহার সফল কার্যকাল সম্পন্ন করেন।</>
+                        ) : (
+                          <>This is to formally certify that <strong>{selectedCertEmployee.name}</strong> was actively employed at our esteemed enterprise as a dedicated <strong>{selectedCertEmployee.designation}</strong>. He officially joined our organization on <strong>{selectedCertEmployee.joiningDate || '---'}</strong> and successfully accomplished his tenure on <strong>{leavingDate}</strong>.</>
+                        )}
+                      </p>
+                      <p style={{ fontSize: '12px', lineHeight: '2.0', textIndent: '30px', margin: '0 0 12px 0', color: '#1e293b' }}>
+                        {certLanguage === 'bn' ? (
+                          <>তাঁহার দায়িত্ব পালনকালে আমরা তাঁহাকে অত্যন্ত বিনয়ী, কঠোর পরিশ্রমী এবং সৎচরিত্রের অধিকারী পাইয়াছি। তাঁহার চাকরি অবমুক্তির প্রধান কারণ: <strong>{leavingReason}</strong>। তাঁহার কর্মদক্ষতার মূল্যায়ন মন্তব্য: <em>"{certPraise}"</em>।</>
+                        ) : (
+                          <>During his tenure, we found him highly motivated, efficient, and loyal towards his responsibilities. The primary reason for his graceful exit was: <strong>{leavingReason}</strong>. Appraisal and management comments: <em>"{certPraise}"</em>.</>
+                        )}
+                      </p>
+                      <p style={{ fontSize: '12px', lineHeight: '2.0', textIndent: '30px', margin: '0', color: '#1e293b' }}>
+                        {certLanguage === 'bn' ? (
+                          <>আমরা তাঁহার উজ্জ্বল ভবিষ্যৎ, সুhealthy জীবন এবং সর্বাঙ্গীন মঙ্গল কামনা করি।</>
+                        ) : (
+                          <>We sincerely wish him prosperity, health, and a magnificent future ahead in all professional domains.</>
+                        )}
+                      </p>
+                    </div>
+                  ) : certType === 'contract' ? (
+                    <div style={{ flex: 1, margin: '16px 0', textAlign: 'left', zIndex: 1 }} className="text-left font-serif py-1">
+                      <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+                        <span style={{ fontSize: '14px', fontWeight: '950', textTransform: 'uppercase', background: '#0f172a', color: 'white', padding: '4px 16px', borderRadius: '4px' }}>
+                          {certLanguage === 'bn' ? 'গোপনীয়তা রক্ষা ও কর্মসংস্থান চুক্তিপত্র' : 'NON-DISCLOSURE & EMPLOYMENT AGREEMENT'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '11px', lineHeight: '1.8', color: '#334155' }}>
+                        <p style={{ marginBottom: '8px' }}>
+                          {certLanguage === 'bn' ? (
+                            <><strong>১. চুক্তিভুক্ত পক্ষদ্বয়:</strong> এই চুক্তিপত্রটি সফলভাবে সম্পাদিত হইল প্রথম পক্ষ <strong>{settings.name || settings.shopName || 'Merchant LLC'}</strong> (নিয়োগকর্তা) এবং দ্বিতীয় পক্ষ জনাব/জনাবা <strong>{selectedCertEmployee.name}</strong> (কর্মীপক্ষ), পদবি: <strong>{selectedCertEmployee.designation}</strong>-এর মধ্যে।</>
+                          ) : (
+                            <><strong>1. Contractual Parties:</strong> This agreement is formally executed between First Party/Employer <strong>{settings.name || settings.shopName || 'Merchant LLC'}</strong> and Mr./Ms. <strong>{selectedCertEmployee.name}</strong> (Second Party/Employee), holding the designation of <strong>{selectedCertEmployee.designation}</strong>.</>
+                          )}
+                        </p>
+                        <p style={{ marginBottom: '8px' }}>
+                          {certLanguage === 'bn' ? (
+                            <><strong>২. বেতন ও দৈনিক শিফট:</strong> কর্মীপক্ষের প্রারম্ভিক মাসিক মূল বেতন নির্ধারিত হইয়াছে <strong>{selectedCertEmployee.salary?.toLocaleString()} {currencySymbol}</strong>। তাঁহার দৈনিক নিয়মিত কর্মঘণ্টা ও শিফট হইবে: <strong>{selectedCertEmployee.schedule || '০৯:০০ AM - ০৬:০০ PM'}</strong>।</>
+                          ) : (
+                            <><strong>2. Compensation & Duty Schedule:</strong> The initial monthly basic salary of the Employee shall be <strong>{selectedCertEmployee.salary?.toLocaleString()} {currencySymbol}</strong>. Regular shift hours are scheduled as: <strong>{selectedCertEmployee.schedule || '09:00 AM - 06:00 PM'}</strong>.</>
+                          )}
+                        </p>
+                        <p style={{ marginBottom: '8px' }}>
+                          {certLanguage === 'bn' ? (
+                            <><strong>৩. গোপনীয়তা রক্ষা নীতি (NDA):</strong> কর্মী তাঁহার দায়িত্ব পালনকালে বা পরবর্তীতে কোনো সময়ে প্রতিষ্ঠানের সমস্ত তথ্য, কাস্টমার তালিকা, ফর্মুলা এবং ব্যবসায়িক মেথড সম্পূর্ণ গোপন রাখিতে বাধ্য থাকিবেন। কোনো প্রকার তথ্য চুরির দায়ে চাকরি অবসান সহ আইনি দণ্ড কার্যকর হইবে।</>
+                          ) : (
+                            <><strong>3. Non-Disclosure & Data Integrity (NDA):</strong> The Employee strictly undertakes to protect and keep completely confidential all proprietary business data, customer lists, recipes, software secrets, and transaction systems. Any leakage or replication of data will result in instant termination and legal liabilities.</>
+                          )}
+                        </p>
+                        <p style={{ marginBottom: '8px' }}>
+                          {certLanguage === 'bn' ? (
+                            <><strong>৪. চাকরি অবসান ও নোটিশ:</strong> উভয় পক্ষই একে অপরকে অন্ততঃ ৩০ দিন পূর্বে লিখিত নোটিশ প্রদান করিয়া এই চুক্তির অবসান ঘটাইতে পারিবেন।</>
+                          ) : (
+                            <><strong>4. Notice Period & Exit Clause:</strong> Both parties are required to provide a minimum of 30 days prior written notice before executing any service resignation or termination.</>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  ) : certType === 'noc_visa' ? (
+                    <div style={{ flex: 1, margin: '24px 0', textAlign: 'left', zIndex: 1 }} className="text-left font-serif py-4">
+                      <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                        <span style={{ fontSize: '14px', fontWeight: '950', textTransform: 'uppercase', background: '#0284c7', color: 'white', padding: '6px 18px', borderRadius: '4px' }}>
+                          {certLanguage === 'bn' ? 'ভিসা আবেদনের জন্য অনাপত্তি পত্র (NOC)' : 'NO OBJECTION CERTIFICATE (VISA APPLICATION)'}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '12px', lineHeight: '2.0', textIndent: '30px', margin: '0 0 12px 0', color: '#1e293b' }}>
+                        {certLanguage === 'bn' ? (
+                          <>এই মর্মে প্রত্যয়ন করা যাইতেছে যে, <strong>{selectedCertEmployee.name}</strong> আমাদের প্রতিষ্ঠানের একজন নিয়মিত কর্মকর্তা/কর্মচারী, যিনি সফলভাবে <strong>{selectedCertEmployee.designation}</strong> পদে কর্মরত রহিয়াছেন। তিনি আমাদের সংস্থায় <strong>{selectedCertEmployee.joiningDate || '---'}</strong> তারিখে যোগদান করিয়াছেন। বর্তমানে তাঁহার মাসিক মূল বেতন <strong>{selectedCertEmployee.salary?.toLocaleString()} {currencySymbol}</strong> টাকা।</>
+                        ) : (
+                          <>This is to formally certify that Mr./Ms. <strong>{selectedCertEmployee.name}</strong> is a bona fide employee of our organization, holding the designation of <strong>{selectedCertEmployee.designation}</strong>. He officially joined our enterprise on <strong>{selectedCertEmployee.joiningDate || '---'}</strong>. His current monthly salary is <strong>{selectedCertEmployee.salary?.toLocaleString()} {currencySymbol}</strong>.</>
+                        )}
+                      </p>
+                      <p style={{ fontSize: '12px', lineHeight: '2.0', textIndent: '30px', margin: '0', color: '#1e293b' }}>
+                        {certLanguage === 'bn' ? (
+                          <>আমরা নিশ্চয়তা প্রদান করিতেছি যে, তাঁহার ব্যক্তিগত কারণে বিদেশ ভ্রমণ এবং visa আবেদনের ব্যাপারে আমাদের প্রতিষ্ঠানের কোন প্রকার আপত্তি নাই। তাঁহার বিদেশ ভ্রমণকালীন সময়ের জন্য আনুষ্ঠানিক ছুটি মঞ্জুর করা হইয়াছে এবং তাঁহার অনুপস্থিতিকালে তাঁহার চাকরি ও পদ সম্পূর্ণ সুরক্ষিত ও বহাল থাকিবে।</>
+                        ) : (
+                          <>We confirm that we have absolutely no objection regarding his visa application and travel plans to travel abroad for personal holidays. He has been granted official leave for his trip, and his job security and designation are fully guaranteed during his travel period.</>
+                        )}
                       </p>
                     </div>
                   ) : (
-                    /* INTERACTIVE CONTRACTS SHEET */
-                    <div style={{ flex: 1, margin: '24px 0', textAlign: 'left' }} className="text-left font-serif py-1">
-                      
-                      <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-                        <span style={{ fontSize: '14px', fontWeight: '950', textTransform: 'uppercase', background: '#0f172a', color: 'white', padding: '4px 16px', borderRadius: '4px' }}>{isBn ? 'কর্মসংস্থান চুক্তিপত্র' : 'NON-DISCLOSURE & EMPLOYMENT AGREEMENT'}</span>
+                    <div style={{ flex: 1, margin: '24px 0', textAlign: 'left', zIndex: 1 }} className="text-left font-serif py-4">
+                      <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                        <span style={{ fontSize: '14px', fontWeight: '950', textTransform: 'uppercase', background: '#059669', color: 'white', padding: '6px 18px', borderRadius: '4px' }}>
+                          {certLanguage === 'bn' ? 'ব্যাংক লোন ও ক্রেডিট কার্ড প্রাপ্তির অনাপত্তি পত্র' : 'NO OBJECTION CERTIFICATE (FINANCIAL & BANKING)'}
+                        </span>
                       </div>
-
-                      <div style={{ fontSize: '10px', lineHeight: '1.6', color: '#334155' }}>
-                        <p style={{ marginBottom: '8px' }}><strong>১. পক্ষসমূহ / Parties:</strong> এই চুক্তিপত্রটি <strong>{settings.shopName || 'Merchant LLC'}</strong> (মালিকপক্ষ) এবং জনাব/জনাবা <strong>{selectedCertEmployee.name}</strong> (কর্মীপক্ষ), পদবি: <strong>{selectedCertEmployee.designation}</strong>-এর মধ্যে সম্পাদিত হইল।</p>
-                        <p style={{ marginBottom: '8px' }}><strong>২. বেতন ও শিফট / Remuneration:</strong> কর্মীপক্ষের প্রারম্ভিক মাসিক মূল বেতন হইবে <strong>{selectedCertEmployee.salary?.toLocaleString()}৳</strong> (বাংলাদেশী টাকা)। দৈনিক কর্মঘণ্টা হইবে: <strong>{selectedCertEmployee.schedule || '09:00 AM - 06:00 PM'}</strong>।</p>
-                        <p style={{ marginBottom: '8px' }}><strong>৩. গোপনীয়তা / NDA Policy:</strong> কর্মী তাহার দায়িত্ব পালনের সময় প্রতিষ্ঠানের সমস্ত অভ্যন্তরীণ তথ্য, কাস্টমার ফোন তালিকা, এবং প্রযুক্তিগত মেথড সম্পূর্ণ গোপন রাখিতে বাধ্য থাকিবেন। কোনো তথ্য চুরি তথ্য ফাঁসের ক্ষেত্রে আইনি ব্যবস্থা নেয়া হইবে।</p>
-                        <p style={{ marginBottom: '8px' }}><strong>৪. চাকরি অবসান / Release Rule:</strong> উভয় পক্ষই একে অপরকে অন্ততঃ ৩০ দিন পূর্বে নোটিশ প্রদান করিয়া চাকরির অবসান ঘটাইতে পারিবেন।</p>
-                      </div>
+                      <p style={{ fontSize: '12px', lineHeight: '2.0', textIndent: '30px', margin: '0 0 12px 0', color: '#1e293b' }}>
+                        {certLanguage === 'bn' ? (
+                          <>এই মর্মে প্রত্যয়ন করা যাইতেছে যে, <strong>{selectedCertEmployee.name}</strong> আমাদের প্রতিষ্ঠানে অত্যন্ত নিষ্ঠা ও সততার সহিত <strong>{selectedCertEmployee.designation}</strong> পদে <strong>{selectedCertEmployee.joiningDate || '---'}</strong> তারিখ হইতে কর্মরত আছেন। বর্তমানে তাঁহার মাসিক সর্বমোট বেতন <strong>{selectedCertEmployee.salary?.toLocaleString()} {currencySymbol}</strong> টাকা যাহা প্রতি মাসের প্রথম সপ্তাহের মধ্যে নিয়মিত পরিশোধ করা হয়।</>
+                        ) : (
+                          <>This is to formally certify that Mr./Ms. <strong>{selectedCertEmployee.name}</strong> has been actively employed at our organization as a dedicated <strong>{selectedCertEmployee.designation}</strong> since <strong>{selectedCertEmployee.joiningDate || '---'}</strong>. His current net monthly remuneration package is <strong>{selectedCertEmployee.salary?.toLocaleString()} {currencySymbol}</strong>, which is credited in the first week of every month.</>
+                        )}
+                      </p>
+                      <p style={{ fontSize: '12px', lineHeight: '2.0', textIndent: '30px', margin: '0', color: '#1e293b' }}>
+                        {certLanguage === 'bn' ? (
+                          <>তাঁহার ব্যক্তিগত প্রয়োজনে ব্যাংক লোন, ক্রেডিট কার্ড ফিন্যান্সিয়াল সেবা অথবা ব্যাংক হিসাব খোলার আবেদনের ব্যাপারে আমাদের প্রতিষ্ঠানের পক্ষ হইতে কোনো আপত্তি নাই। তাঁহার আয়ের উৎস নিশ্চিত করার সুবিধার্থে আমরা এই অনাপত্তি পত্র প্রদান করিলাম। উক্ত ঋণ বা ক্রেডিট পরিশোধের দায় সম্পূর্ণরূপে আবেদনকারীর নিজস্ব দায়িত্ব বলিয়া গণ্য হইবে।</>
+                        ) : (
+                          <>We have no objection to his application for banking credit facilities, loan accounts, or financial credit card options. He is fully authorized to process necessary background salary credit verifications. Please note that the repayment liability for any financial obligations rests solely with him personally.</>
+                        )}
+                      </p>
                     </div>
                   )}
 
                   {/* Stamp & Seal placeholder signatures */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '50px', fontSize: '10.5px', fontFamily: "'Inter'", fontWeight: 'bold' }}>
-                    <div>
-                      <div style={{ borderTop: '1.5px solid #1e293b', width: '140px', textAlign: 'center', paddingTop: '4px' }}>{isBn ? 'নিয়োগকর্তার স্বাক্ষর' : 'Employer Signature'}</div>
-                      <div style={{ fontSize: '8px', color: '#94a3b8', textAlign: 'center', marginTop: '2px' }}>Seal & Stamp</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '30px', fontSize: '11px', fontFamily: "'Inter'", fontWeight: 'bold', position: 'relative', zIndex: 1 }}>
+                    <div style={{ textAlign: 'left' }}>
+                      {printLayoutMode === 'digital' && hrmSettings.signatureUrl ? (
+                        <img src={hrmSettings.signatureUrl} alt="Signature" style={{ height: '35px', marginBottom: '4px', mixBlendMode: 'darken' }} />
+                      ) : (
+                        <div style={{ height: '39px' }}></div>
+                      )}
+                      <div style={{ borderTop: '1.5px solid #1e293b', width: '150px', paddingTop: '4px' }}>
+                        {certLanguage === 'bn' ? 'নিয়োগকর্তার স্বাক্ষর' : 'Authorized Signature'}
+                      </div>
+                      <div style={{ fontSize: '8px', color: '#94a3b8', marginTop: '2px' }}>
+                        {hrmSettings.footerText || 'Verified Official Document'}
+                      </div>
                     </div>
-                    <div>
-                      <div style={{ borderTop: '1.5px solid #1e293b', width: '140px', textAlign: 'center', paddingTop: '4px' }}>{isBn ? 'কর্মীর অঙ্গীকার স্বাক্ষর' : 'Employee Acceptance'}</div>
+                    
+                    {printLayoutMode === 'digital' && hrmSettings.sealUrl && (
+                      <div style={{ position: 'absolute', bottom: '20px', left: '160px' }}>
+                        <img src={hrmSettings.sealUrl} alt="Official Seal" style={{ height: '70px', width: '70px', mixBlendMode: 'multiply', opacity: 0.85 }} />
+                      </div>
+                    )}
+
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ borderTop: '1.5px solid #1e293b', width: '150px', paddingTop: '4px', display: 'inline-block' }}>
+                        {certLanguage === 'bn' ? 'গ্রহীতার অঙ্গীকার' : 'Signature of Bearer'}
+                      </div>
                     </div>
                   </div>
+
+                  {/* QR Verification Watermark Badge inside live template */}
+                  {printLayoutMode === 'digital' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '20px', borderTop: '1px dashed #e2e8f0', paddingTop: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: "'Inter', sans-serif", zIndex: 10, textAlign: 'left' }}>
+                        <div style={{ width: '38px', height: '38px', border: '1px solid #1e293b', padding: '1px', display: 'flex', alignItems: 'center', justify: 'center', background: 'white' }}>
+                          <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`${window.location.origin}/?verifyDoc=${currentDocId}`)}`} style={{ width: '34px', height: '34px' }} />
+                        </div>
+                        <div style={{ textAlign: 'left', lineHeight: '1.1' }}>
+                          <p style={{ fontSize: '6.5px', color: '#475569', margin: '0', fontWeight: 'bold', textTransform: 'uppercase' }}>Scan to Verify Authenticity</p>
+                          <p style={{ fontSize: '7.5px', color: '#0f172a', margin: '0', fontWeight: '900', fontFamily: 'monospace' }}>ID: {currentDocId || 'PENDING'}</p>
+                        </div>
+                      </div>
+                      
+                      <div style={{ fontSize: '8px', color: '#94a3b8', fontStyle: 'italic', fontFamily: 'Inter' }}>
+                        {certLanguage === 'bn' ? '✓ এটি একটি সিস্টেমে ভেরিফাইড ডিজিটাল কপি।' : '✓ Secure electronic copy, no physical stamp required.'}
+                      </div>
+                    </div>
+                  )}
 
                 </div>
               ) : (
@@ -2301,6 +3232,7 @@ export function HRM({ activeTab, setActiveTab, employees, onAddEmployee, user, s
           </div>
         </div>
       )}
+
 
 
       {/* Adding / Editing Modal form details (Accessible via onAdd / onUpdate) */}

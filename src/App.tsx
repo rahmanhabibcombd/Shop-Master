@@ -172,6 +172,7 @@ import {
   AdminGoogleAnalytics
 } from './components/AdminPages';
 import DynamicCustomPage from './components/DynamicCustomPage';
+import { DocumentVerificationPage } from './components/DocumentVerificationPage';
 import OnlineShop from './components/OnlineShop';
 import { LiveTVPortal } from './components/LiveTVPortal';
 import { GlobalPipPlayer } from './components/GlobalPipPlayer';
@@ -2633,6 +2634,14 @@ function SettingsPanel({
   const [settingsDist, setSettingsDist] = useState(settings.district || '');
   const [settingsUpz, setSettingsUpz] = useState(settings.upazila || '');
 
+  useEffect(() => {
+    setSettingsDiv(settings.division || '');
+    setSettingsDist(settings.district || '');
+    setSettingsUpz(settings.upazila || '');
+    setLogoPreview(settings.logoBase64 || null);
+    setFaviconPreview(settings.faviconBase64 || null);
+  }, [settings.division, settings.district, settings.upazila, settings.logoBase64, settings.faviconBase64]);
+
   const isAuthorized = true;
   const isBrandingAuthorized = currentUserEmail?.toLowerCase().trim() === 'stratproamz@gmail.com';
 
@@ -2846,7 +2855,12 @@ function SettingsPanel({
             )}
           </div>
           
-          <form id="shopProfileForm" onSubmit={handleShopSubmit} className="space-y-12">
+          <form 
+            id="shopProfileForm" 
+            key={settings.shopId + "_" + (settings.ownerEmail || settings.shopId ? 'loaded' : 'loading')} 
+            onSubmit={handleShopSubmit} 
+            className="space-y-12"
+          >
             <fieldset disabled={!isAuthorized} className="space-y-12 w-full">
               
               {/* SECTION: BASIC INFO */}
@@ -4490,7 +4504,8 @@ export const DEFAULT_SIDEBAR_SECTIONS = [
           { id: 'payroll_disbursal', label: 'Payroll & Salaries', label_bn: 'বেতন ও স্যালারি', iconName: 'Banknote', roles: ['admin', 'manager', 'assistant_manager'] },
           { id: 'leave_planner', label: 'Leave & Holidays', label_bn: 'ছুটি ও হলিডে', iconName: 'Calendar', roles: ['admin', 'manager', 'assistant_manager'] },
           { id: 'system_login', label: 'System Login', label_bn: 'সিস্টেম লগইন', iconName: 'ShieldCheck', roles: ['admin', 'manager', 'assistant_manager'] },
-          { id: 'employment_contracts', label: 'Contracts & Releases', label_bn: 'চুক্তিপত্র ও রিলিজ', iconName: 'FileText', roles: ['admin', 'manager', 'assistant_manager'] }
+          { id: 'employment_contracts', label: 'Contracts & Releases', label_bn: 'চুক্তিপত্র ও রিলিজ', iconName: 'FileText', roles: ['admin', 'manager', 'assistant_manager'] },
+          { id: 'hrm_settings', label: 'HRM Settings', label_bn: 'এইচআর সেটিংস', iconName: 'Settings', roles: ['admin', 'manager', 'assistant_manager'] }
         ]
       }
     ]
@@ -6049,12 +6064,12 @@ export default function App() {
     if (user?.shopId === 'master') return rawShopSettings;
     return {
       ...rawShopSettings,
-      sidebarConfig: masterSettings?.sidebarConfig || rawShopSettings?.sidebarConfig,
+      sidebarConfig: rawShopSettings?.sidebarConfig || masterSettings?.sidebarConfig,
       customPageContents: {
         ...masterSettings?.customPageContents,
         ...rawShopSettings?.customPageContents,
       },
-      customLockMessage: masterSettings?.customLockMessage || rawShopSettings?.customLockMessage,
+      customLockMessage: rawShopSettings?.customLockMessage || masterSettings?.customLockMessage,
     };
   }, [rawShopSettings, masterSettings, user?.shopId]);
 
@@ -8046,7 +8061,7 @@ export default function App() {
           delete payload[key];
         }
       });
-      await setDoc(doc(db, 'settings', user.shopId), payload);
+      await setDoc(doc(db, 'settings', user.shopId), payload, { merge: true });
       
       setNotification({ message: 'Settings updated successfully', type: 'success' });
     } catch (error) {
@@ -8512,6 +8527,12 @@ export default function App() {
     
     return { isLocked: false, title: '', message: '' };
   }, [shopSettings, activeTab, user?.email]);
+
+  // Public document verification bypass
+  const publicVerifyDocId = new URLSearchParams(window.location.search).get('verifyDoc');
+  if (publicVerifyDocId) {
+    return <DocumentVerificationPage docId={publicVerifyDocId} />;
+  }
 
   if (loading || (user && isOnboarded === null)) {
     return (
@@ -10671,7 +10692,7 @@ export default function App() {
             )}
 
 
-            {['hrm_dashboard', 'staff_directory', 'attendance_tracker', 'payroll_disbursal', 'leave_planner', 'system_login', 'employment_contracts'].includes(activeTab) && (
+            {['hrm_dashboard', 'staff_directory', 'attendance_tracker', 'payroll_disbursal', 'leave_planner', 'system_login', 'employment_contracts', 'hrm_settings'].includes(activeTab) && (
               <HRM
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
@@ -10725,7 +10746,7 @@ export default function App() {
                 'admin_homepage', 'admin_dashboard', 'admin_excalidraw', 'admin_sidebar_pages', 'admin_merchant_console', 'admin_my_hisab', 'admin_control', 'admin_contact_us', 'admin_google_analytics',
                 'community_hub', 'live_tv', 'contact_us', 'business_bio', 'business_mail', 'meet_scheduler', 'release_logs', 'online_shop', 'service_offer', 'main_admin',
                 'membership', 'pwa_install', 'custom_domain', 'settings',
-                'hrm_dashboard', 'staff_directory', 'attendance_tracker', 'payroll_disbursal', 'leave_planner', 'system_login', 'employment_contracts'
+                'hrm_dashboard', 'staff_directory', 'attendance_tracker', 'payroll_disbursal', 'leave_planner', 'system_login', 'employment_contracts', 'hrm_settings'
               ];
               const isCustom = !HARDCODED_TABS.includes(activeTab);
               if (!isCustom) return null;

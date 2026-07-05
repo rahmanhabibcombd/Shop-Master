@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { db, doc, updateDoc } from '../firebase';
+import { db, doc, updateDoc, setDoc } from '../firebase';
 import { 
   Home, 
   PenTool, 
@@ -4145,6 +4145,7 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
   const [editingPage, setEditingPage] = useState<{ page: any; sectionId: string; parentPageId?: string } | null>(null);
   const [addingSection, setAddingSection] = useState(false);
   const [addingPage, setAddingPage] = useState<{ sectionId: string; parentPageId?: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'section' | 'page'; sectionId: string; pageId?: string; label: string } | null>(null);
 
   // New Page creation states
   const [newPageId, setNewPageId] = useState('');
@@ -4221,22 +4222,11 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
     const sec = sections.find(s => s.id === sectionId);
     if (!sec) return;
     
-    const isBn = shopSettings?.systemLanguage === 'bn';
-    const message = isBn
-      ? `আপনি কি নিশ্চিতভাবে "${sec.label_bn || sec.label}" সেকশনটি এবং এর ভেতরের সব পেজ সম্পূর্ণ মুছে ফেলতে চান?\n(এটি পরিবর্তনটি চূড়ান্ত করতে নিচে "Layout সেভ করুন" বাটনে ক্লিক করতে হবে)`
-      : `Are you sure you want to permanently delete the section "${sec.label}" and all of its pages?\n(You must click "Save Layout" below to persist this change to the cloud database)`;
-
-    if (window.confirm(message)) {
-      setSections(prev => prev.filter(s => s.id !== sectionId));
-      if (setNotification) {
-        setNotification({ 
-          type: 'success', 
-          message: isBn 
-            ? 'সেকশনটি সফলভাবে মুছে ফেলা হয়েছে! পরিবর্তনটি স্থায়ী করতে নিচে "Layout সেভ করুন" চাপুন।' 
-            : 'Section removed successfully! To make this permanent, click "Save Layout" below.' 
-        });
-      }
-    }
+    setDeleteConfirm({
+      type: 'section',
+      sectionId,
+      label: sec.label_bn || sec.label
+    });
   };
 
   const handleSaveSectionEdit = (e: React.FormEvent) => {
@@ -4320,12 +4310,30 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
       }
     }
 
-    const isBn = shopSettings?.systemLanguage === 'bn';
-    const message = isBn
-      ? `আপনি কি নিশ্চিতভাবে "${pageLabel}" পেজটি সম্পূর্ণ ডিলিট করতে চান?\n(এটি পরিবর্তনটি চূড়ান্ত করতে নিচে "Layout সেভ করুন" বাটনে ক্লিক করতে হবে)`
-      : `Are you sure you want to permanently delete the page "${pageLabel}"?\n(You must click "Save Layout" below to persist this change to the cloud database)`;
+    setDeleteConfirm({
+      type: 'page',
+      sectionId,
+      pageId,
+      label: pageLabel
+    });
+  };
 
-    if (window.confirm(message)) {
+  const confirmDeletion = () => {
+    if (!deleteConfirm) return;
+    const { type, sectionId, pageId } = deleteConfirm;
+    const isBn = shopSettings?.systemLanguage === 'bn';
+
+    if (type === 'section') {
+      setSections(prev => prev.filter(s => s.id !== sectionId));
+      if (setNotification) {
+        setNotification({ 
+          type: 'success', 
+          message: isBn 
+            ? 'সেকশনটি সফলভাবে মুছে ফেলা হয়েছে! পরিবর্তনটি স্থায়ী করতে নিচে "Layout সেভ করুন" চাপুন।' 
+            : 'Section removed successfully! To make this permanent, click "Save Layout" below.' 
+        });
+      }
+    } else if (type === 'page' && pageId) {
       setSections(prev => prev.map(s => {
         if (s.id !== sectionId) return s;
         
@@ -4354,6 +4362,7 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
         });
       }
     }
+    setDeleteConfirm(null);
   };
 
   const handleSavePageEdit = (e: React.FormEvent) => {
@@ -4564,10 +4573,40 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
       const shopId = shopSettings?.id || user?.shopId;
       if (!shopId) throw new Error('Shop ID missing.');
 
+      // Helper function to deep clean any undefined properties that Firestore rejects
+      const cleanUndefined = (val: any): any => {
+        if (val === undefined) return null;
+        if (val === null) return null;
+        if (Array.isArray(val)) {
+          return val.map(cleanUndefined);
+        }
+        if (typeof val === 'object') {
+          const cleaned: any = {};
+          for (const k of Object.keys(val)) {
+            if (val[k] !== undefined) {
+              cleaned[k] = cleanUndefined(val[k]);
+            }
+          }
+          return cleaned;
+        }
+        return val;
+      };
+
+      const cleanedSections = cleanUndefined(sections);
+      const cleanedLockMessage = customLockMessage || '';
+
       await updateDoc(doc(db, 'settings', shopId), {
-        sidebarConfig: { sections },
-        customLockMessage
+        sidebarConfig: { sections: cleanedSections },
+        customLockMessage: cleanedLockMessage
       });
+
+      const isMasterAdmin = user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com' || user?.role === 'master_admin';
+      if (isMasterAdmin) {
+        await setDoc(doc(db, 'settings', 'master'), {
+          sidebarConfig: { sections: cleanedSections },
+          customLockMessage: cleanedLockMessage
+        }, { merge: true });
+      }
 
       if (setNotification) {
         setNotification({ type: 'success', message: 'সাইডবার লেআউট ও পারমিশন সফলভাবে ক্লাউড ডাটাবেজে সংরক্ষিত হয়েছে!' });
@@ -5381,6 +5420,71 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
           )}
         </button>
       </div>
+
+      {/* Custom Delete Confirmation Modal overlay */}
+      <AnimatePresence>
+        {deleteConfirm && (
+          <div className="fixed inset-0 z-[99] flex items-center justify-center p-4">
+            {/* Backdrop with blurred background */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeleteConfirm(null)}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            {/* Modal Card */}
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] p-6 space-y-5 text-center overflow-hidden"
+            >
+              {/* Decorative Warning Element */}
+              <div className="mx-auto w-12 h-12 rounded-full bg-rose-50 dark:bg-rose-950/30 flex items-center justify-center text-rose-600 dark:text-rose-400">
+                <Trash2 className="w-5 h-5 animate-pulse" />
+              </div>
+              
+              <div className="space-y-2">
+                <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider">
+                  {shopSettings?.systemLanguage === 'bn' ? 'চিরতরে মুছে ফেলার অনুমতি' : 'Confirm Permanent Deletion'}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                  {shopSettings?.systemLanguage === 'bn' ? (
+                    <>
+                      আপনি কি নিশ্চিতভাবে <span className="font-bold text-rose-500">"{deleteConfirm.label}"</span> {deleteConfirm.type === 'section' ? 'সেকশনটি এবং এর ভেতরের সব পেজ' : 'পেজটি'} সম্পূর্ণ মুছে ফেলতে চান?
+                    </>
+                  ) : (
+                    <>
+                      Are you sure you want to permanently delete the {deleteConfirm.type === 'section' ? 'section' : 'page'} <span className="font-bold text-rose-500">"{deleteConfirm.label}"</span>?
+                    </>
+                  )}
+                </p>
+                <p className="text-[10px] text-amber-500 dark:text-amber-400 font-bold uppercase tracking-wider bg-amber-50/50 dark:bg-amber-950/20 py-1.5 px-3 rounded-xl border border-amber-100/50 dark:border-amber-950/30">
+                  ⚠️ {shopSettings?.systemLanguage === 'bn' ? 'এটি কার্যকর করতে নিচে "Layout সেভ করুন" বাটনে ক্লিক করতে হবে' : 'You must click "Save Layout" below to persist this deletion.'}
+                </p>
+              </div>
+
+              <div className="flex gap-3 justify-center">
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirm(null)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  {shopSettings?.systemLanguage === 'bn' ? 'বাতিল করুন' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeletion}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-colors cursor-pointer shadow-lg shadow-rose-500/20"
+                >
+                  {shopSettings?.systemLanguage === 'bn' ? 'চিরতরে ডিলিট' : 'Delete'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
