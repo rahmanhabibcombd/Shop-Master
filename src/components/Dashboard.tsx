@@ -3,11 +3,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   LayoutDashboard, DollarSign, TrendingUp, AlertCircle, ShoppingCart, 
   CheckCircle2, Smartphone, MonitorIcon, AlertTriangle, Package, Users, X, Info,
-  Pill, Coffee, Truck, Sparkles
+  Pill, Coffee, Truck, Sparkles, Star, RefreshCw
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { db, collection, query, where, onSnapshot } from '../firebase';
+import { db, collection, query, where, onSnapshot, addDoc, updateDoc, getDocs, doc } from '../firebase';
 
 // Helper for localizing key UI elements
 const LOCAL_TRANSLATIONS = {
@@ -269,6 +269,185 @@ export default function Dashboard({
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [switchSuccess, setSwitchSuccess] = useState<string | null>(null);
 
+  // Feedback & Review States
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState(5);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+  const [existingFeedback, setExistingFeedback] = useState<any>(null);
+  const [isCheckingFeedback, setIsCheckingFeedback] = useState(false);
+  const [localNotification, setLocalNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const systemLang = settings?.systemLanguage || 'en';
+  const activeShopId = user?.shopId;
+
+  // Fetch existing feedback in real-time for the active shop/user
+  useEffect(() => {
+    if (!activeShopId) {
+      setExistingFeedback(null);
+      return;
+    }
+    
+    setIsCheckingFeedback(true);
+    const q = query(
+      collection(db, 'support_tickets'),
+      where('shopId', '==', activeShopId),
+      where('type', '==', 'feedback')
+    );
+
+    const unsubscribe = onSnapshot(q, (snap) => {
+      if (!snap.empty) {
+        const docSnap = snap.docs[0];
+        setExistingFeedback({
+          id: docSnap.id,
+          ...docSnap.data()
+        });
+      } else {
+        setExistingFeedback(null);
+      }
+      setIsCheckingFeedback(false);
+    }, (err) => {
+      console.error("Error subscribing to feedback:", err);
+      setIsCheckingFeedback(false);
+    });
+
+    return () => unsubscribe();
+  }, [activeShopId]);
+
+  // Toast automatic clear
+  useEffect(() => {
+    if (localNotification) {
+      const timer = setTimeout(() => {
+        setLocalNotification(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [localNotification]);
+
+  const handleOpenFeedbackModal = () => {
+    if (existingFeedback) {
+      setFeedbackRating(existingFeedback.rating || 5);
+      
+      let desc = existingFeedback.description || '';
+      let tags: string[] = [];
+      if (desc.startsWith('[Tags: ')) {
+        const tagEndIndex = desc.indexOf('] ');
+        if (tagEndIndex !== -1) {
+          const tagContent = desc.substring(7, tagEndIndex);
+          tags = tagContent.split(', ').map((t: string) => t.trim());
+          desc = desc.substring(tagEndIndex + 2);
+        }
+      }
+      setSelectedTags(tags);
+      setFeedbackText(desc);
+    } else {
+      setFeedbackRating(5);
+      setSelectedTags([]);
+      setFeedbackText('');
+    }
+    setShowFeedbackModal(true);
+  };
+
+  const handleFeedbackSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!feedbackText.trim() && selectedTags.length === 0) {
+      setLocalNotification({
+        type: 'error',
+        message: systemLang === 'bn' ? 'দয়া করে কিছু মন্তব্য লিখুন অথবা অন্তত একটি ট্যাগ সিলেক্ট করুন!' : 'Please write comments or select at least one tag!'
+      });
+      return;
+    }
+
+    setIsSubmittingFeedback(true);
+
+    try {
+      const tagString = selectedTags.length > 0 ? `[Tags: ${selectedTags.join(', ')}] ` : '';
+      const fullDescription = `${tagString}${feedbackText.trim()}`;
+
+      if (existingFeedback) {
+        const docRef = doc(db, 'support_tickets', existingFeedback.id);
+        await updateDoc(docRef, {
+          rating: feedbackRating,
+          description: fullDescription,
+          approved: false, // Must be approved again by the developer!
+          status: 'open',
+          updatedAt: new Date().toISOString()
+        });
+
+        setFeedbackSuccess(true);
+        setLocalNotification({
+          type: 'success',
+          message: systemLang === 'bn' ? 'আপনার রিভিউ সফলভাবে এডিট ও সাবমিট হয়েছে! এটি পুনরায় অনুমোদনের জন্য পাঠানো হয়েছে।' : 'Your review was successfully edited & resubmitted! It has been sent for re-approval.'
+        });
+      } else {
+        const payload = {
+          shopId: activeShopId,
+          userId: user?.uid || 'anonymous',
+          userEmail: user?.email || 'anonymous',
+          title: `Merchant Feedback (${feedbackRating} Stars)`,
+          type: 'feedback',
+          description: fullDescription,
+          screenshot: '',
+          rating: feedbackRating,
+          status: 'open',
+          approved: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          developerNote: ''
+        };
+
+        await addDoc(collection(db, 'support_tickets'), payload);
+
+        setFeedbackSuccess(true);
+        setLocalNotification({
+          type: 'success',
+          message: systemLang === 'bn' ? 'আপনার মূল্যবান রিভিউ সফলভাবে সাবমিট হয়েছে!' : 'Your valuable review was submitted successfully!'
+        });
+      }
+
+      // Real-time Notification for the admin (stratproamz@gmail.com)
+      try {
+        const qAdmin = query(collection(db, 'shops'), where('ownerEmail', '==', 'stratproamz@gmail.com'));
+        const adminSnap = await getDocs(qAdmin);
+        if (!adminSnap.empty) {
+          const adminUid = adminSnap.docs[0].data().ownerUid;
+          if (adminUid && adminUid !== user?.uid) {
+            const shopLabel = settings?.shopName || activeShopId || 'Merchant';
+            const actionText = existingFeedback ? 'updated' : 'submitted';
+            await addDoc(collection(db, 'community_notifications'), {
+              recipientId: adminUid,
+              title: `⭐ Merchant "${shopLabel}" ${actionText} a ${feedbackRating}-Star Review!`,
+              type: 'info',
+              createdAt: new Date().toISOString(),
+              read: false
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error sending admin review notification:", err);
+      }
+
+      setTimeout(() => {
+        setShowFeedbackModal(false);
+        setFeedbackRating(5);
+        setFeedbackText('');
+        setSelectedTags([]);
+        setFeedbackSuccess(false);
+      }, 3000);
+
+    } catch (err: any) {
+      console.error('Error saving feedback:', err);
+      setLocalNotification({
+        type: 'error',
+        message: systemLang === 'bn' ? `রিভিউ সাবমিট করতে সমস্যা হয়েছে: ${err.message}` : `Error submitting review: ${err.message}`
+      });
+    } finally {
+      setIsSubmittingFeedback(false);
+    }
+  };
+
   const handleModelSwitch = async (modelId: any) => {
     if (settings?.businessType === modelId) return;
     setSwitchingTo(modelId);
@@ -291,7 +470,6 @@ export default function Dashboard({
     }
   };
 
-  const systemLang = settings?.systemLanguage || 'en';
   const lt = LOCAL_TRANSLATIONS[systemLang === 'bn' ? 'bn' : 'en'];
 
   // Local state for full, reactive Firestore syncing matching the strict shopId rule
@@ -301,8 +479,6 @@ export default function Dashboard({
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [dailyClosings, setDailyClosings] = useState<DailyClosing[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const activeShopId = user?.shopId;
 
   // Sync data securely based on logged in user's merchant shopId
   useEffect(() => {
@@ -664,13 +840,44 @@ export default function Dashboard({
             {settings?.shopName ? `🏪 ${settings.shopName} | ` : ''}{lt.dashboardSubtitle}
           </p>
         </div>
-        <div className="text-right flex flex-col items-start md:items-end justify-center shrink-0">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-none">
-            {systemLang === 'bn' ? 'আজকের তারিখ' : 'TODAY'}
-          </p>
-          <p className="text-xl font-black text-indigo-600 mt-1.5 bg-white shadow-sm border border-gray-100 px-5 py-2.5 rounded-2xl">
-            📅 {format(now, systemLang === 'bn' ? 'dd MMMM, yyyy' : 'MMMM dd, yyyy')}
-          </p>
+        <div className="text-right flex flex-col items-start md:items-end justify-center shrink-0 gap-3">
+          <div className="text-right flex flex-col items-start md:items-end justify-center shrink-0">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-none">
+              {systemLang === 'bn' ? 'আজকের তারিখ' : 'TODAY'}
+            </p>
+            <p className="text-xl font-black text-indigo-600 mt-1.5 bg-white shadow-sm border border-gray-100 px-5 py-2.5 rounded-2xl">
+              📅 {format(now, systemLang === 'bn' ? 'dd MMMM, yyyy' : 'MMMM dd, yyyy')}
+            </p>
+          </div>
+          <div className="flex flex-col items-start md:items-end gap-1.5 w-full">
+            <button
+              type="button"
+              onClick={handleOpenFeedbackModal}
+              className="w-full md:w-auto bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 active:scale-95 text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20 border border-amber-400/20"
+            >
+              <Star className="w-4 h-4 text-white fill-white animate-pulse" />
+              {existingFeedback 
+                ? (systemLang === 'bn' ? 'রিভিউ এডিট করুন' : 'Edit Review')
+                : (systemLang === 'bn' ? 'রিভিউ দিন / মতামত পাঠান' : 'Give Feedback')
+              }
+            </button>
+            {existingFeedback && (
+              <span className={`text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg border ${
+                existingFeedback.approved 
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' 
+                  : existingFeedback.status === 'declined'
+                    ? 'bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400'
+                    : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400 animate-pulse'
+              }`}>
+                {existingFeedback.approved 
+                  ? (systemLang === 'bn' ? '🌐 অনুমোদিত ও লাইভ' : '🌐 Approved & Live') 
+                  : existingFeedback.status === 'declined'
+                    ? (systemLang === 'bn' ? '❌ প্রত্যাখ্যান করা হয়েছে' : '❌ Declined')
+                    : (systemLang === 'bn' ? '🔒 অনুমোদনের অপেক্ষায়' : '🔒 Pending Approval')
+                }
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1041,6 +1248,218 @@ export default function Dashboard({
           </div>
         </div>
       </motion.div>
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {localNotification && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.9 }}
+            className={`fixed top-5 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3.5 rounded-2xl shadow-xl flex items-center gap-3 border ${
+              localNotification.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-300'
+                : 'bg-rose-50 dark:bg-rose-950 border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300'
+            }`}
+          >
+            {localNotification.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0" />
+            )}
+            <span className="text-xs font-bold">{localNotification.message}</span>
+            <button
+              onClick={() => setLocalNotification(null)}
+              className="ml-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg p-0.5 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Feedback & Review Modal */}
+      <AnimatePresence>
+        {showFeedbackModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-100 dark:border-slate-800 relative overflow-hidden"
+            >
+              {/* Background gradient flares */}
+              <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+
+              <div className="flex items-center justify-between pb-4 border-b border-gray-150 dark:border-slate-800/80 mb-5 relative z-10">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-amber-50 dark:bg-amber-950/40 rounded-xl">
+                    <Star className="w-5 h-5 text-amber-500 fill-amber-500 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-800 dark:text-gray-100">
+                      {existingFeedback 
+                        ? (systemLang === 'bn' ? 'রিভিউ পরিবর্তন বা এডিট করুন' : 'Edit Your Review')
+                        : (systemLang === 'bn' ? 'মতামত বা রিভিউ দিন' : 'Give Feedback / Review')
+                      }
+                    </h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
+                      {existingFeedback
+                        ? (systemLang === 'bn' ? 'আপনার রিভিউটি পুনরায় মডারেশনের জন্য পাঠানো হবে' : 'Your updated review will be sent for approval')
+                        : (systemLang === 'bn' ? 'আপনার মূল্যবান মতামত আমাদের অনুপ্রাণিত করে' : 'Help us make the system better')
+                      }
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowFeedbackModal(false)}
+                  className="p-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-all text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {feedbackSuccess ? (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="py-12 flex flex-col items-center text-center space-y-4"
+                >
+                  <div className="w-20 h-20 bg-emerald-50 dark:bg-emerald-950/40 rounded-full flex items-center justify-center text-emerald-500 relative shadow-inner animate-bounce">
+                    <CheckCircle2 className="w-10 h-10" />
+                    <Sparkles className="absolute -top-1 -right-1 w-6 h-6 text-amber-400 animate-pulse" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h4 className="text-lg font-black text-slate-850 dark:text-gray-100">
+                      {systemLang === 'bn' ? 'রিভিউ সফলভাবে গৃহীত হয়েছে!' : 'Feedback Submitted!'}
+                    </h4>
+                    <p className="text-xs text-slate-500 font-medium max-w-xs leading-relaxed">
+                      {systemLang === 'bn' 
+                        ? 'আপনার দেওয়া রিভিউর জন্য অসংখ্য ধন্যবাদ। এটি আমাদের প্ল্যাটফর্মকে আরও উন্নত করতে সাহায্য করবে এবং এডমিনের কাছে তা মডারেশনের জন্য চলে গিয়েছে।'
+                        : 'Thank you for your valuable feedback. It has been submitted for admin approval.'}
+                    </p>
+                  </div>
+                </motion.div>
+              ) : (
+                <form onSubmit={handleFeedbackSubmit} className="space-y-5 relative z-10">
+                  {/* Star rating selector */}
+                  <div className="space-y-2 text-center py-2 bg-slate-50/50 dark:bg-slate-950/30 rounded-2xl border border-slate-100/50 dark:border-slate-850/40">
+                    <span className="block text-[10px] uppercase font-black tracking-widest text-slate-400">
+                      {systemLang === 'bn' ? 'রেটিং সিলেক্ট করুন' : 'Select Rating'}
+                    </span>
+                    <div className="flex justify-center gap-2">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setFeedbackRating(star)}
+                          className="p-1 hover:scale-125 active:scale-95 transition-all cursor-pointer"
+                        >
+                          <Star 
+                            className={`w-8 h-8 transition-colors ${
+                              star <= feedbackRating 
+                                ? 'text-amber-400 fill-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.3)]' 
+                                : 'text-slate-300 dark:text-slate-700'
+                            }`}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                    <span className="block text-xs font-black text-amber-500 mt-1">
+                      {feedbackRating === 5 && (systemLang === 'bn' ? 'চমৎকার! (৫/৫)' : 'Excellent! (5/5)')}
+                      {feedbackRating === 4 && (systemLang === 'bn' ? 'খুব ভালো! (৪/৫)' : 'Very Good! (4/5)')}
+                      {feedbackRating === 3 && (systemLang === 'bn' ? 'ভালো (৩/৫)' : 'Good (3/5)')}
+                      {feedbackRating === 2 && (systemLang === 'bn' ? 'মোটামুটি (২/৫)' : 'Fair (2/5)')}
+                      {feedbackRating === 1 && (systemLang === 'bn' ? 'উন্নতি দরকার (১/৫)' : 'Needs Improvement (1/5)')}
+                    </span>
+                  </div>
+
+                  {/* Feedback tags */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] uppercase font-black tracking-widest text-slate-400">
+                      {systemLang === 'bn' ? 'আপনি সিস্টেমের কোন বিষয়টি সবচেয়ে বেশি পছন্দ করেছেন?' : 'What do you like the most?'}
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: 'UI/UX', bn: 'ডিজাইন ও ইউজার ইন্টারফেস', en: 'Design & UI/UX' },
+                        { id: 'Speed', bn: 'গতি ও পারফরম্যান্স', en: 'Speed & Performance' },
+                        { id: 'EasyToUse', bn: 'সহজ ও সাবলীল ব্যবহার', en: 'Simplicity & Easy Use' },
+                        { id: 'Features', bn: 'কার্যকরী ফিচারসমূহ', en: 'Rich Features' },
+                        { id: 'Security', bn: 'নিরাপত্তা ও গোপনীয়তা', en: 'Privacy & Security' }
+                      ].map((tag) => {
+                        const isSelected = selectedTags.includes(tag.id);
+                        return (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedTags(selectedTags.filter(t => t !== tag.id));
+                              } else {
+                                setSelectedTags([...selectedTags, tag.id]);
+                              }
+                            }}
+                            className={`px-3.5 py-1.5 rounded-xl text-[11px] font-black tracking-wide transition-all cursor-pointer border ${
+                              isSelected
+                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-500/10'
+                                : 'bg-slate-50 dark:bg-slate-950 border-slate-100 dark:border-slate-850 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {systemLang === 'bn' ? tag.bn : tag.en}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Textarea comment */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[10px] uppercase font-black tracking-widest text-slate-400">
+                      {systemLang === 'bn' ? 'আপনার মন্তব্য বা পরামর্শ লিখুন' : 'Your Detailed Review / Comments'}
+                    </label>
+                    <textarea
+                      placeholder={systemLang === 'bn' ? 'আপনার অভিজ্ঞতা শেয়ার করুন এবং কীভাবে আমরা আরও ভালো করতে পারি তা জানান...' : 'Tell us about your experience and how we can improve...'}
+                      value={feedbackText}
+                      onChange={e => setFeedbackText(e.target.value)}
+                      rows={3}
+                      className="px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-850 rounded-2xl text-xs font-bold outline-none focus:border-indigo-500 w-full resize-none placeholder-slate-400 dark:placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/10 text-slate-950 dark:text-slate-50"
+                    />
+                  </div>
+
+                  {/* Submit actions */}
+                  <div className="pt-3 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowFeedbackModal(false)}
+                      className="px-5 py-2.5 border border-slate-100 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-950 rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer"
+                    >
+                      {systemLang === 'bn' ? 'বাতিল' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSubmittingFeedback}
+                      className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer shadow-lg shadow-indigo-500/15"
+                    >
+                      {isSubmittingFeedback ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          {systemLang === 'bn' ? 'পাঠানো হচ্ছে...' : 'Submitting...'}
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          {systemLang === 'bn' ? 'জমা দিন' : 'Submit Review'}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

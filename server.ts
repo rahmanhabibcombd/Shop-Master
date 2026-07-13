@@ -2,10 +2,29 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { GoogleGenAI } from "@google/genai";
+import { initializeApp as initServerFirebase } from 'firebase/app';
+import { getFirestore as getServerFirestore, collection as getServerCollection, getDocs as getServerDocs, query as getServerQuery, where as getServerWhere } from 'firebase/firestore';
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  
+  // Initialize server-side firebase
+  let firebaseApp: any = null;
+  let firestoreDb: any = null;
+  try {
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      firebaseApp = initServerFirebase(config, 'server-app');
+      firestoreDb = getServerFirestore(firebaseApp);
+      console.log('[Server Firebase] Initialized successfully.');
+    } else {
+      console.warn('[Server Firebase] Configuration file not found at:', configPath);
+    }
+  } catch (err) {
+    console.error('[Server Firebase] Initialization error:', err);
+  }
   
   app.use((req, res, next) => {
     console.log(`[HTTP Request] ${req.method} ${req.url}`);
@@ -113,6 +132,71 @@ async function startServer() {
 
   app.post('/api/gemini/generate', handleGeminiGenerate);
   app.post('/api/gemini/voice-parse', handleGeminiGenerate);
+
+  // Serve approved feedback reviews for public homepage consumption with CORS support
+  app.options('/api/public/reviews', (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.sendStatus(200);
+  });
+
+  app.get('/api/public/reviews', async (req, res) => {
+    try {
+      if (!firestoreDb) {
+        return res.status(503).json({ error: 'Database service is temporarily unavailable.' });
+      }
+      
+      const ticketsRef = getServerCollection(firestoreDb, 'support_tickets');
+      const q = getServerQuery(
+        ticketsRef, 
+        getServerWhere('type', '==', 'feedback'), 
+        getServerWhere('approved', '==', true)
+      );
+      
+      const snap = await getServerDocs(q);
+      const reviews = snap.docs.map(docSnap => {
+        const data = docSnap.data();
+        
+        // Anonymize email: e.g. "stratproamz@gmail.com" -> "st*******@gmail.com"
+        let author = 'Anonymous';
+        if (data.userEmail && typeof data.userEmail === 'string') {
+          const emailParts = data.userEmail.split('@');
+          if (emailParts.length === 2) {
+            const prefix = emailParts[0];
+            const domain = emailParts[1];
+            if (prefix.length > 2) {
+              author = prefix.slice(0, 2) + '*'.repeat(prefix.length - 2) + '@' + domain;
+            } else {
+              author = prefix + '*@' + domain;
+            }
+          }
+        }
+        
+        return {
+          id: docSnap.id,
+          rating: data.rating || 5,
+          title: data.title || '',
+          comment: data.description || '',
+          author: author,
+          createdAt: data.createdAt || new Date().toISOString()
+        };
+      });
+      
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      
+      res.json({
+        success: true,
+        count: reviews.length,
+        reviews: reviews
+      });
+    } catch (error: any) {
+      console.error('[API Reviews Error]:', error);
+      res.status(500).json({ error: 'Failed to fetch approved reviews.' });
+    }
+  });
 
   // Secure API endpoint to test the connection handshake with SellersCampus Zender master/merchant keys
 

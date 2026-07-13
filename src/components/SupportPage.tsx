@@ -54,6 +54,7 @@ interface SupportTicket {
   developerNote?: string;
   createdAt: string;
   updatedAt: string;
+  approved?: boolean;
 }
 
 interface SupportPageProps {
@@ -1207,6 +1208,15 @@ export const SupportPage: React.FC<SupportPageProps> = ({ user, setNotification,
                             <span className="text-[10px] bg-slate-950 border border-slate-850 px-2 py-0.5 rounded-lg text-slate-400 font-mono">
                               Shop: {ticket.shopId}
                             </span>
+                            {ticket.type === 'feedback' && (
+                              <span className={`text-[10px] px-2 py-0.5 rounded-lg font-black uppercase tracking-wider border ${
+                                ticket.approved 
+                                  ? 'bg-emerald-950/40 border-emerald-900/60 text-emerald-400' 
+                                  : 'bg-slate-950 border-slate-800 text-slate-500'
+                              }`}>
+                                {ticket.approved ? '🌐 Approved for Web API' : '🔒 Internal (Pending Approval)'}
+                              </span>
+                            )}
                           </div>
 
                           <h4 className="font-extrabold text-xs text-slate-100">{ticket.title}</h4>
@@ -1302,6 +1312,50 @@ export const SupportPage: React.FC<SupportPageProps> = ({ user, setNotification,
                               >
                                 <Send className="w-3 h-3" />
                                 {isBn ? "রিপ্লাই / আপডেট" : "Reply & Update Status"}
+                              </button>
+                            </div>
+                          )}
+
+                          {ticket.type === 'feedback' && (
+                            <div className="pt-2 border-t border-slate-850/60 space-y-2">
+                              <span className="text-[8px] font-black text-slate-400 uppercase block tracking-widest">
+                                {isBn ? "হোমপেজ এপিআই মডারেশন" : "Homepage API Moderation"}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await updateDoc(doc(db, 'support_tickets', ticket.id), {
+                                      approved: !ticket.approved,
+                                      updatedAt: new Date().toISOString()
+                                    });
+                                    setNotification({
+                                      message: ticket.approved 
+                                        ? (isBn ? "রিভিউ এপিআই থেকে সরিয়ে নেওয়া হয়েছে!" : "Review removed from homepage API!")
+                                        : (isBn ? "রিভিউ এপিআইতে অনুমোদন করা হয়েছে!" : "Review approved for homepage API!"),
+                                      type: 'success'
+                                    });
+                                  } catch (err: any) {
+                                    setNotification({ message: err.message, type: 'error' });
+                                  }
+                                }}
+                                className={`w-full py-1.5 rounded-lg font-black text-[10px] uppercase transition-all flex items-center justify-center gap-1 cursor-pointer border ${
+                                  ticket.approved
+                                    ? 'bg-rose-950/40 border-rose-900/40 text-rose-400 hover:bg-rose-900/20'
+                                    : 'bg-emerald-950/40 border-emerald-900/40 text-emerald-400 hover:bg-emerald-900/20'
+                                }`}
+                              >
+                                {ticket.approved ? (
+                                  <>
+                                    <X className="w-3 h-3" />
+                                    {isBn ? "অনুমোদন বাতিল করুন" : "Revoke Approval"}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Check className="w-3 h-3" />
+                                    {isBn ? "অনুমোদন করুন" : "Approve for API"}
+                                  </>
+                                )}
                               </button>
                             </div>
                           )}

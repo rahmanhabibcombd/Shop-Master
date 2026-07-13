@@ -152,7 +152,6 @@ import Papa from 'papaparse';
 import { KitchenDisplay } from './components/KitchenDisplay';
 import { CategoryManagement } from './components/CategoryManagement';
 import { JarvisAI } from './components/JarvisAI';
-import { NetworkConsole } from './components/NetworkConsole';
 import { CustomerPortal } from './components/CustomerPortal';
 import { SellerOrdersView } from './components/SellerOrdersView';
 import { PageManagement } from './components/PageManagement';
@@ -2615,7 +2614,7 @@ function SettingsPanel({
 
   const systemLang = settings.systemLanguage || 'en';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
-  const [activeSubTab, setActiveSubTab] = useState<'shop' | 'download' | 'network'>('shop');
+  const [activeSubTab, setActiveSubTab] = useState<'shop' | 'download'>('shop');
   const shopCodeForQr = (settings.shopCode || settings.shopId || '').toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '').slice(0, 6);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(settings.logoBase64 || null);
@@ -2802,16 +2801,6 @@ function SettingsPanel({
         >
           {st('downloadTab')}
         </button>
-        {isMasterAdmin && (
-          <button 
-            onClick={() => setActiveSubTab('network')}
-            className={`px-6 py-3 font-bold transition-all border-b-2 whitespace-nowrap flex items-center gap-2 ${activeSubTab === 'network' ? 'border-red-600 text-red-600' : 'border-transparent text-gray-400 hover:text-red-500'}`}
-            title="Master Access Only (stratproamz@gmail.com)"
-          >
-            <ShieldAlert className="w-4 h-4" />
-            Network (Master)
-          </button>
-        )}
       </div>
 
       {activeSubTab === 'shop' && (
@@ -3576,13 +3565,6 @@ function SettingsPanel({
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {isMasterAdmin && activeSubTab === 'network' && (
-        <div className="bg-red-50/10 rounded-3xl shadow-xl border-2 border-red-100 overflow-hidden min-h-[600px] relative">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 via-rose-500 to-red-600 opacity-80" />
-          <NetworkConsole />
         </div>
       )}
     </motion.div>

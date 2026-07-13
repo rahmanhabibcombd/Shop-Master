@@ -30,7 +30,8 @@ import {
   Percent,
   AlertTriangle,
   Download,
-  FileText
+  FileText,
+  Star
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -206,6 +207,72 @@ export default function PersonalHisab({ user, shopSettings, setNotification }: P
   const [activeVisualTab, setActiveVisualTab] = useState<'income_expense' | 'loans_repayments' | 'budget_analytics'>('income_expense');
   const [budgetLimit, setBudgetLimit] = useState<number>(15000);
   const [isSavingBudget, setIsSavingBudget] = useState(false);
+
+  // Feedback Modal States
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState(5);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+
+  const handleFeedbackSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!feedbackText.trim() && selectedTags.length === 0) {
+      setNotification({
+        type: 'error',
+        message: isBn ? 'দয়া করে কিছু মন্তব্য লিখুন অথবা অন্তত একটি ট্যাগ সিলেক্ট করুন!' : 'Please write comments or select at least one tag!'
+      });
+      return;
+    }
+
+    setIsSubmittingFeedback(true);
+
+    try {
+      const tagString = selectedTags.length > 0 ? `[Tags: ${selectedTags.join(', ')}] ` : '';
+      const fullDescription = `${tagString}${feedbackText.trim()}`;
+
+      const payload = {
+        shopId: currentShopId,
+        userId: user?.uid || 'anonymous',
+        userEmail: user?.email || 'anonymous',
+        title: `Merchant Feedback (${feedbackRating} Stars)`,
+        type: 'feedback',
+        description: fullDescription,
+        screenshot: '',
+        rating: feedbackRating,
+        status: 'open',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        developerNote: ''
+      };
+
+      await addDoc(collection(db, 'support_tickets'), payload);
+
+      setFeedbackSuccess(true);
+      setNotification({
+        type: 'success',
+        message: isBn ? 'আপনার মূল্যবান রিভিউ সফলভাবে সাবমিট হয়েছে!' : 'Your valuable review was submitted successfully!'
+      });
+
+      setTimeout(() => {
+        setShowFeedbackModal(false);
+        setFeedbackRating(5);
+        setFeedbackText('');
+        setSelectedTags([]);
+        setFeedbackSuccess(false);
+      }, 3000);
+
+    } catch (err: any) {
+      console.error('Error saving feedback:', err);
+      setNotification({
+        type: 'error',
+        message: isBn ? `রিভিউ সাবমিট করতে সমস্যা হয়েছে: ${err.message}` : `Error submitting review: ${err.message}`
+      });
+    } finally {
+      setIsSubmittingFeedback(false);
+    }
+  };
 
   // Sync personal budget limit from Firestore
   useEffect(() => {
@@ -965,14 +1032,16 @@ export default function PersonalHisab({ user, shopSettings, setNotification }: P
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => handleOpenAddForm('income')}
-          className="lg:self-center bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-indigo-500/20 active:scale-95 z-10"
-        >
-          <Plus className="w-4 h-4 text-white" />
-          {isBn ? 'নতুন এন্ট্রি যোগ করুন' : 'Add New Transaction'}
-        </button>
+        <div className="flex flex-col sm:flex-row gap-3 lg:self-center z-10 w-full lg:w-auto">
+          <button
+            type="button"
+            onClick={() => handleOpenAddForm('income')}
+            className="bg-indigo-500 hover:bg-indigo-600 active:scale-95 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-indigo-500/20"
+          >
+            <Plus className="w-4 h-4 text-white" />
+            {isBn ? 'নতুন এন্ট্রি যোগ করুন' : 'Add New Transaction'}
+          </button>
+        </div>
       </div>
 
       {/* Interactive Date Filter & General Config Bar */}
@@ -2768,6 +2837,180 @@ export default function PersonalHisab({ user, shopSettings, setNotification }: P
                 </div>
 
               </form>
+            </motion.div>
+          </div>
+        )}
+
+        {showFeedbackModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-100 dark:border-slate-800 relative overflow-hidden"
+            >
+              {/* Background gradient flares */}
+              <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+
+              <div className="flex items-center justify-between pb-4 border-b border-gray-150 dark:border-slate-800/80 mb-5 relative z-10">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-amber-50 dark:bg-amber-950/40 rounded-xl">
+                    <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-800 dark:text-gray-100">
+                      {isBn ? 'মতামত বা রিভিউ দিন' : 'Give Feedback / Review'}
+                    </h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
+                      {isBn ? 'আপনার মূল্যবান মতামত আমাদের অনুপ্রাণিত করে' : 'Help us make the system better'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowFeedbackModal(false)}
+                  className="p-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-all text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {feedbackSuccess ? (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="py-12 flex flex-col items-center text-center space-y-4"
+                >
+                  <div className="w-20 h-20 bg-emerald-50 dark:bg-emerald-950/40 rounded-full flex items-center justify-center text-emerald-500 relative shadow-inner animate-bounce">
+                    <Check className="w-10 h-10" />
+                    <Sparkles className="absolute -top-1 -right-1 w-6 h-6 text-amber-400 animate-pulse" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h4 className="text-lg font-black text-slate-850 dark:text-gray-100">
+                      {isBn ? 'রিভিউ সফলভাবে গৃহীত হয়েছে!' : 'Feedback Submitted!'}
+                    </h4>
+                    <p className="text-xs text-slate-500 font-medium max-w-xs leading-relaxed">
+                      {isBn 
+                        ? 'আপনার দেওয়া রিভিউর জন্য অসংখ্য ধন্যবাদ। এটি আমাদের প্ল্যাটফর্মকে আরও উন্নত করতে সাহায্য করবে।'
+                        : 'Thank you for your valuable feedback. It helps us improve the platform for everyone.'}
+                    </p>
+                  </div>
+                </motion.div>
+              ) : (
+                <form onSubmit={handleFeedbackSubmit} className="space-y-5 relative z-10">
+                  {/* Star rating selector */}
+                  <div className="space-y-2 text-center py-2 bg-slate-50/50 dark:bg-slate-950/30 rounded-2xl border border-slate-100/50 dark:border-slate-850/40">
+                    <span className="block text-[10px] uppercase font-black tracking-widest text-slate-400">
+                      {isBn ? 'রেটিং সিলেক্ট করুন' : 'Select Rating'}
+                    </span>
+                    <div className="flex justify-center gap-2">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setFeedbackRating(star)}
+                          className="p-1 hover:scale-125 active:scale-95 transition-all cursor-pointer"
+                        >
+                          <Star 
+                            className={`w-8 h-8 transition-colors ${
+                              star <= feedbackRating 
+                                ? 'text-amber-400 fill-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.3)]' 
+                                : 'text-slate-300 dark:text-slate-700'
+                            }`}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                    <span className="block text-xs font-black text-amber-500 mt-1">
+                      {feedbackRating === 5 && (isBn ? 'চমৎকার! (৫/৫)' : 'Excellent! (5/5)')}
+                      {feedbackRating === 4 && (isBn ? 'খুব ভালো! (৪/৫)' : 'Very Good! (4/5)')}
+                      {feedbackRating === 3 && (isBn ? 'ভালো (৩/৫)' : 'Good (3/5)')}
+                      {feedbackRating === 2 && (isBn ? 'মোটামুটি (২/৫)' : 'Fair (2/5)')}
+                      {feedbackRating === 1 && (isBn ? 'উন্নতি দরকার (১/৫)' : 'Needs Improvement (1/5)')}
+                    </span>
+                  </div>
+
+                  {/* Feedback tags */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] uppercase font-black tracking-widest text-slate-400">
+                      {isBn ? 'আপনি সিস্টেমের কোন বিষয়টি সবচেয়ে বেশি পছন্দ করেছেন?' : 'What do you like the most?'}
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: 'UI/UX', bn: 'ডিজাইন ও ইউজার ইন্টারফেস', en: 'Design & UI/UX' },
+                        { id: 'Speed', bn: 'গতি ও পারফরম্যান্স', en: 'Speed & Performance' },
+                        { id: 'EasyToUse', bn: 'সহজ ও সাবলীল ব্যবহার', en: 'Simplicity & Easy Use' },
+                        { id: 'Features', bn: 'কার্যকরী ফিচারসমূহ', en: 'Rich Features' },
+                        { id: 'Security', bn: 'নিরাপত্তা ও গোপনীয়তা', en: 'Privacy & Security' }
+                      ].map((tag) => {
+                        const isSelected = selectedTags.includes(tag.id);
+                        return (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedTags(selectedTags.filter(t => t !== tag.id));
+                              } else {
+                                setSelectedTags([...selectedTags, tag.id]);
+                              }
+                            }}
+                            className={`px-3.5 py-1.5 rounded-xl text-[11px] font-black tracking-wide transition-all cursor-pointer border ${
+                              isSelected
+                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-500/10'
+                                : 'bg-slate-50 dark:bg-slate-950 border-slate-100 dark:border-slate-850 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {isBn ? tag.bn : tag.en}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Textarea comment */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[10px] uppercase font-black tracking-widest text-slate-400">
+                      {isBn ? 'আপনার মন্তব্য বা পরামর্শ লিখুন' : 'Your Detailed Review / Comments'}
+                    </label>
+                    <textarea
+                      placeholder={isBn ? 'আপনার অভিজ্ঞতা শেয়ার করুন এবং কীভাবে আমরা আরও ভালো করতে পারি তা জানান...' : 'Tell us about your experience and how we can improve...'}
+                      value={feedbackText}
+                      onChange={e => setFeedbackText(e.target.value)}
+                      rows={3}
+                      className="px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-850 rounded-2xl text-xs font-bold outline-none focus:border-indigo-500 w-full resize-none placeholder-slate-400 dark:placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/10"
+                    />
+                  </div>
+
+                  {/* Submit actions */}
+                  <div className="pt-3 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowFeedbackModal(false)}
+                      className="px-5 py-2.5 border border-slate-100 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-950 rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer"
+                    >
+                      {isBn ? 'বাতিল' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSubmittingFeedback}
+                      className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer shadow-lg shadow-indigo-500/15"
+                    >
+                      {isSubmittingFeedback ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          {isBn ? 'পাঠানো হচ্ছে...' : 'Submitting...'}
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          {isBn ? 'জমা দিন' : 'Submit Review'}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
             </motion.div>
           </div>
         )}

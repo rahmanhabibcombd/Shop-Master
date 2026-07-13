@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { db, doc, updateDoc, setDoc } from '../firebase';
+import { db, doc, updateDoc, setDoc, collection, query, where, onSnapshot, deleteDoc, addDoc } from '../firebase';
 import PersonalHisab from './PersonalHisab';
+import { NetworkConsole } from './NetworkConsole';
 import { 
   Home, 
   PenTool, 
@@ -70,7 +71,8 @@ import {
   ShieldCheck,
   Building2,
   Briefcase,
-  CheckCircle
+  CheckCircle,
+  Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -5862,7 +5864,656 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
 }
 
 // 4. MERCHANT CONSOLE
+function ReviewModeratorConsole() {
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterRating, setFilterRating] = useState<number | 'all'>('all');
+  const [filterApproved, setFilterApproved] = useState<'all' | 'approved' | 'pending'>('all');
+  const [notif, setNotif] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, 'support_tickets'),
+      where('type', '==', 'feedback')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items = snapshot.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      }));
+      // Sort by creation date descending
+      items.sort((a: any, b: any) => {
+        const dateA = new Date(a.createdAt || 0).getTime();
+        const dateB = new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+      setReviews(items);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error syncing reviews in admin dashboard:", error);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Handle toast clear
+  useEffect(() => {
+    if (notif) {
+      const timer = setTimeout(() => setNotif(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [notif]);
+
+  const handleApprove = async (ticket: any) => {
+    try {
+      const docRef = doc(db, 'support_tickets', ticket.id);
+      await updateDoc(docRef, {
+        approved: true,
+        status: 'approved',
+        updatedAt: new Date().toISOString()
+      });
+
+      // Send real-time notification to the merchant
+      if (ticket.userId && ticket.userId !== 'anonymous') {
+        await addDoc(collection(db, 'community_notifications'), {
+          recipientId: ticket.userId,
+          title: `🎉 Your feedback review has been approved by the Admin and is now Live!`,
+          type: 'success',
+          createdAt: new Date().toISOString(),
+          read: false
+        });
+      }
+
+      setNotif({
+        type: 'success',
+        message: 'Review approved for public API successfully!'
+      });
+    } catch (err: any) {
+      setNotif({ type: 'error', message: `Action failed: ${err.message}` });
+    }
+  };
+
+  const handleDecline = async (ticket: any) => {
+    try {
+      const docRef = doc(db, 'support_tickets', ticket.id);
+      await updateDoc(docRef, {
+        approved: false,
+        status: 'declined',
+        updatedAt: new Date().toISOString()
+      });
+
+      // Send real-time notification to the merchant
+      if (ticket.userId && ticket.userId !== 'anonymous') {
+        await addDoc(collection(db, 'community_notifications'), {
+          recipientId: ticket.userId,
+          title: `❌ Your feedback review was declined by the administrator.`,
+          type: 'warning',
+          createdAt: new Date().toISOString(),
+          read: false
+        });
+      }
+
+      setNotif({
+        type: 'success',
+        message: 'Review declined successfully!'
+      });
+    } catch (err: any) {
+      setNotif({ type: 'error', message: `Action failed: ${err.message}` });
+    }
+  };
+
+  const handleDeleteReview = async (id: string) => {
+    if (!window.confirm("Are you sure you want to permanently delete this review?")) return;
+    try {
+      const docRef = doc(db, 'support_tickets', id);
+      await deleteDoc(docRef);
+      setNotif({ type: 'success', message: 'Review deleted successfully!' });
+    } catch (err: any) {
+      setNotif({ type: 'error', message: `Delete failed: ${err.message}` });
+    }
+  };
+
+  const filteredReviews = useMemo(() => {
+    return reviews.filter(item => {
+      if (filterRating !== 'all' && item.rating !== filterRating) return false;
+      if (filterApproved === 'approved' && !item.approved) return false;
+      if (filterApproved === 'pending' && (item.approved || item.status === 'declined')) return false;
+      if (filterApproved === 'declined' && item.status !== 'declined') return false;
+      return true;
+    });
+  }, [reviews, filterRating, filterApproved]);
+
+  return (
+    <div className="space-y-6">
+      {/* Toast Alert */}
+      <AnimatePresence>
+        {notif && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3.5 rounded-2xl shadow-xl flex items-center gap-2.5 border text-xs font-black uppercase tracking-wider ${
+              notif.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-300'
+                : 'bg-rose-50 dark:bg-rose-950 border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300'
+            }`}
+          >
+            {notif.type === 'success' ? (
+              <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+            )}
+            <span>{notif.message}</span>
+            <button
+              onClick={() => setNotif(null)}
+              className="ml-1 hover:bg-black/5 dark:hover:bg-white/5 p-0.5 rounded-lg cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Filter Row */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-2xl border border-slate-100 dark:border-slate-850/60">
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="p-1.5 bg-indigo-50 dark:bg-indigo-950/40 rounded-lg text-indigo-600 dark:text-indigo-400">
+            <Star className="w-4 h-4 fill-indigo-600 dark:fill-indigo-400" />
+          </div>
+          <div>
+            <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 uppercase tracking-wider">Review Mod Filters</h4>
+            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Select stars or approval level</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+          <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-100 dark:border-slate-800">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Stars:</span>
+            <select
+              value={filterRating}
+              onChange={e => setFilterRating(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+              className="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-300 outline-none border-none focus:ring-0 p-0 cursor-pointer"
+            >
+              <option value="all">All Ratings</option>
+              <option value="5">⭐⭐⭐⭐⭐ (5 Stars)</option>
+              <option value="4">⭐⭐⭐⭐ (4 Stars)</option>
+              <option value="3">⭐⭐⭐ (3 Stars)</option>
+              <option value="2">⭐⭐ (2 Stars)</option>
+              <option value="1">⭐ (1 Star)</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-100 dark:border-slate-800">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status:</span>
+            <select
+              value={filterApproved}
+              onChange={e => setFilterApproved(e.target.value as any)}
+              className="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-300 outline-none border-none focus:ring-0 p-0 cursor-pointer"
+            >
+              <option value="all">All Reviews</option>
+              <option value="approved">Approved & Live</option>
+              <option value="pending">Pending Approval</option>
+              <option value="declined">Declined Reviews</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="py-24 flex flex-col items-center justify-center space-y-3 bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800/80 rounded-3xl">
+          <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Loading submitted reviews...</span>
+        </div>
+      ) : filteredReviews.length === 0 ? (
+        <div className="py-20 flex flex-col items-center justify-center space-y-4 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl bg-white dark:bg-slate-900">
+          <div className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-2xl text-slate-400">
+            <Star className="w-8 h-8" />
+          </div>
+          <div className="text-center space-y-1">
+            <h4 className="text-xs font-black text-slate-750 dark:text-slate-200 uppercase tracking-wider">No Merchant Reviews Found</h4>
+            <p className="text-[10px] text-slate-400 font-bold max-w-xs leading-relaxed uppercase tracking-widest">
+              No matching feedback tickets were found in the database.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {filteredReviews.map((ticket) => {
+            let tags: string[] = [];
+            let comment = ticket.description || '';
+            if (comment.startsWith('[Tags: ')) {
+              const tagEndIndex = comment.indexOf('] ');
+              if (tagEndIndex !== -1) {
+                const tagContent = comment.substring(7, tagEndIndex);
+                tags = tagContent.split(', ').map((t: string) => t.trim());
+                comment = comment.substring(tagEndIndex + 2);
+              }
+            }
+
+            return (
+              <motion.div
+                key={ticket.id}
+                layout
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-2xl p-5 shadow-sm space-y-4 relative flex flex-col justify-between"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] bg-slate-100 dark:bg-slate-950 border border-slate-200/50 dark:border-slate-850 px-2.5 py-1 rounded-lg text-slate-500 dark:text-slate-400 font-mono font-black">
+                      🏪 Shop: {ticket.shopId}
+                    </span>
+                    <span className={`text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg border ${
+                      ticket.approved 
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-100 dark:border-emerald-900/40 text-emerald-600 dark:text-emerald-400' 
+                        : ticket.status === 'declined'
+                          ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-100 dark:border-rose-900/40 text-rose-600 dark:text-rose-400'
+                          : 'bg-amber-50 dark:bg-amber-950/30 border-amber-100 dark:border-amber-900/30 text-amber-600 dark:text-amber-400'
+                    }`}>
+                      {ticket.approved 
+                        ? '🌐 Live API' 
+                        : ticket.status === 'declined'
+                          ? '❌ Declined'
+                          : '🔒 Pending'
+                      }
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Star 
+                        key={star} 
+                        className={`w-4 h-4 ${
+                          star <= (ticket.rating || 5) 
+                            ? 'text-amber-400 fill-amber-400 drop-shadow-sm' 
+                            : 'text-slate-200 dark:text-slate-800'
+                        }`} 
+                      />
+                    ))}
+                    <span className="text-[10px] font-black text-slate-400 ml-1">({ticket.rating || 5}/5)</span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-black text-slate-800 dark:text-slate-100 leading-relaxed italic">
+                      "{comment}"
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {tags.map((tag, idx) => (
+                        <span key={idx} className="text-[8px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/30 px-2 py-0.5 rounded font-black tracking-wide uppercase">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-50 dark:border-slate-850/60 mt-4 space-y-3">
+                  <div className="flex items-center justify-between text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                    <span>By: {ticket.userEmail || 'Anonymous'}</span>
+                    <span>{new Date(ticket.createdAt).toLocaleDateString()}</span>
+                  </div>
+
+                  <div className="flex gap-2">
+                    {(!ticket.approved || ticket.status === 'declined') && (
+                      <button
+                        onClick={() => handleApprove(ticket)}
+                        className="flex-1 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900/40 text-emerald-650 dark:text-emerald-400 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        Approve for API
+                      </button>
+                    )}
+
+                    {(ticket.approved || ticket.status !== 'declined') && (
+                      <button
+                        onClick={() => handleDecline(ticket)}
+                        className="flex-1 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-950/50 border border-amber-200 dark:border-amber-900/40 text-amber-650 dark:text-amber-400 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        Decline Review
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => handleDeleteReview(ticket.id)}
+                      className="p-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/30 text-rose-600 dark:text-rose-400 rounded-xl transition-all cursor-pointer"
+                      title="Permanently Delete Review"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ApiIntegrationConsole() {
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [copiedWidget, setCopiedWidget] = useState(false);
+  const [activeSubTab, setActiveSubTab] = useState<'widget' | 'json'>('widget');
+  const [liveCount, setLiveCount] = useState<number | null>(null);
+
+  const apiEndpointUrl = `${window.location.origin}/api/public/reviews`;
+
+  useEffect(() => {
+    // Fetch count of live approved reviews dynamically
+    fetch('/api/public/reviews')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setLiveCount(data.count);
+        }
+      })
+      .catch(err => console.error("Error fetching live reviews count:", err));
+  }, []);
+
+  const widgetSnippet = `<!-- 🏪 SHOP SYNC REVIEWS WIDGET -->
+<div id="shop-reviews-widget" style="font-family: system-ui, -apple-system, sans-serif; max-width: 1200px; margin: 2rem auto; padding: 1.5rem; background-color: #f8fafc; border-radius: 1.5rem; border: 1px solid #e2e8f0;">
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+      <h2 style="margin: 0; font-size: 1.5rem; font-weight: 900; color: #0f172a; text-transform: uppercase; letter-spacing: -0.025em;">Customer Reviews</h2>
+      <p style="margin: 0.35rem 0 0 0; font-size: 0.875rem; color: #64748b; font-weight: 600;" id="widget-reviews-count">Loading feedback reviews...</p>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.5rem; background-color: #ffffff; border: 1px solid #e2e8f0; padding: 0.5rem 1rem; border-radius: 1rem; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);">
+      <span style="width: 8px; height: 8px; background-color: #22c55e; border-radius: 50%; display: inline-block; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></span>
+      <span style="font-size: 0.75rem; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.05em;">Synced Live</span>
+    </div>
+  </div>
+  
+  <div id="reviews-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem;">
+    <!-- Reviews will be loaded dynamically by the fetch script below -->
+  </div>
+</div>
+
+<script>
+(async function() {
+  const container = document.getElementById('reviews-container');
+  const countLabel = document.getElementById('widget-reviews-count');
+  const apiEndpoint = '${apiEndpointUrl}';
+
+  try {
+    const res = await fetch(apiEndpoint);
+    const data = await res.json();
+    
+    if (data.success && data.reviews && data.reviews.length > 0) {
+      countLabel.textContent = "Based on " + data.count + " approved merchant reviews";
+      container.innerHTML = '';
+      
+      data.reviews.forEach(review => {
+        const card = document.createElement('div');
+        card.style.backgroundColor = '#ffffff';
+        card.style.border = '1px solid #e2e8f0';
+        card.style.borderRadius = '1.25rem';
+        card.style.padding = '1.5rem';
+        card.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05)';
+        card.style.display = 'flex';
+        card.style.flexDirection = 'column';
+        card.style.justifyContent = 'space-between';
+        card.style.transition = 'transform 0.2s ease, box-shadow 0.2s ease';
+        
+        card.onmouseenter = () => {
+          card.style.transform = 'translateY(-2px)';
+          card.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.05)';
+        };
+        card.onmouseleave = () => {
+          card.style.transform = 'none';
+          card.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05)';
+        };
+        
+        let starsHtml = '';
+        for (let i = 1; i <= 5; i++) {
+          starsHtml += '<svg style="width: 1.125rem; height: 1.125rem; margin-right: 3px; fill: ' + (i <= review.rating ? '#fbbf24' : '#e2e8f0') + '" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>';
+        }
+        
+        const dateStr = new Date(review.createdAt).toLocaleDateString();
+        
+        card.innerHTML = \`
+          <div style="margin-bottom: 1.25rem;">
+            <div style="display: flex; align-items: center; margin-bottom: 0.75rem;">
+              <div style="display: flex; margin-right: 0.5rem;">\${starsHtml}</div>
+              <span style="font-size: 0.75rem; font-weight: 800; color: #fbbf24;">\${review.rating}.0</span>
+            </div>
+            <p style="margin: 0; font-size: 0.925rem; font-weight: 750; color: #1e293b; line-height: 1.6; font-style: italic;">"\${review.comment}"</p>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #f1f5f9; padding-top: 1rem; font-size: 0.75rem; color: #64748b; font-weight: 700;">
+            <div style="display: flex; align-items: center; gap: 0.35rem;">
+              <span style="display: flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; background-color: #f1f5f9; border-radius: 50%; font-size: 0.65rem; font-weight: 900; color: #475569;">👤</span>
+              <span>By: \${review.author}</span>
+            </div>
+            <span>\${dateStr}</span>
+          </div>
+        \`;
+        container.appendChild(card);
+      });
+    } else {
+      countLabel.textContent = "No approved reviews found";
+      container.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 3rem 1.5rem; border: 1px dashed #cbd5e1; border-radius: 1.25rem; background-color: #ffffff;"><span style="font-size: 1.5rem; display: block; margin-bottom: 0.5rem;">⭐</span>No reviews approved for public display yet. Approve some from the Merchant Panel!</div>';
+    }
+  } catch (err) {
+    console.error('Failed to load reviews:', err);
+    countLabel.textContent = "Failed to load reviews";
+    container.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #ef4444; padding: 3rem 1.5rem; font-weight: 700;">Error loading public reviews. Please check your connection.</div>';
+  }
+})();
+</script>
+
+<style>
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
+}
+</style>`;
+
+  const handleCopyUrl = () => {
+    navigator.clipboard.writeText(apiEndpointUrl);
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2000);
+  };
+
+  const handleCopyWidget = () => {
+    navigator.clipboard.writeText(widgetSnippet);
+    setCopiedWidget(true);
+    setTimeout(() => setCopiedWidget(false), 2000);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* URL Endpoint panel */}
+        <div className="lg:col-span-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl text-indigo-600 dark:text-indigo-400">
+              <Globe className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-black text-slate-800 dark:text-slate-100 uppercase tracking-wider">Public Web API</h3>
+              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Connect any website or app</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Live API Endpoint:</span>
+              <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950/60 p-3 rounded-2xl border border-slate-100 dark:border-slate-850">
+                <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-900/30 px-2 py-0.5 rounded-lg">GET</span>
+                <input
+                  type="text"
+                  readOnly
+                  value={apiEndpointUrl}
+                  className="bg-transparent border-none text-[10px] font-mono font-bold text-slate-600 dark:text-slate-300 w-full outline-none select-all"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleCopyUrl}
+                className="flex-1 py-3 px-4 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/30 dark:hover:bg-indigo-950/50 border border-indigo-200/50 dark:border-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-2xl font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                {copiedUrl ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    Copied Link!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    Copy Endpoint URL
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-50 dark:border-slate-850/60 pt-4 space-y-4">
+            <div className="flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              <span>Endpoint Status</span>
+              <span className="flex items-center gap-1 text-emerald-500">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Active
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-50 dark:bg-slate-950/30 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-850">
+                <span className="text-[9px] font-bold text-slate-400 block mb-0.5 uppercase tracking-wider">Approved Reviews</span>
+                <span className="text-sm font-black text-slate-800 dark:text-slate-100">
+                  {liveCount !== null ? liveCount : '...'}
+                </span>
+              </div>
+              <div className="bg-slate-50 dark:bg-slate-950/30 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-850">
+                <span className="text-[9px] font-bold text-slate-400 block mb-0.5 uppercase tracking-wider">CORS Access</span>
+                <span className="text-sm font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
+                  Enabled
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Dynamic Integration Panel */}
+        <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col justify-between">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl text-indigo-600 dark:text-indigo-400">
+                  <Link2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black text-slate-800 dark:text-slate-100 uppercase tracking-wider">Embed Code & Widgets</h3>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Add dynamic review modules to your site</p>
+                </div>
+              </div>
+
+              {/* Sub tabs */}
+              <div className="flex bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-100 dark:border-slate-850 text-[9px] font-black uppercase tracking-wider">
+                <button
+                  onClick={() => setActiveSubTab('widget')}
+                  className={`px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                    activeSubTab === 'widget'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-100 dark:border-slate-800'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  HTML Embed
+                </button>
+                <button
+                  onClick={() => setActiveSubTab('json')}
+                  className={`px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                    activeSubTab === 'json'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-100 dark:border-slate-800'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  JSON Payload
+                </button>
+              </div>
+            </div>
+
+            {/* Code display */}
+            <div className="bg-slate-950 text-slate-200 p-4 rounded-2xl border border-slate-900 relative">
+              <div className="flex justify-between items-center text-[9px] text-slate-500 font-mono font-bold uppercase tracking-widest pb-3 mb-3 border-b border-slate-900">
+                <span>{activeSubTab === 'widget' ? 'html & javascript snippet' : 'raw response payload'}</span>
+                <button
+                  onClick={activeSubTab === 'widget' ? handleCopyWidget : () => {
+                    const sample = {
+                      success: true,
+                      count: liveCount || 0,
+                      reviews: [
+                        {
+                          id: "ticket_sample_id",
+                          rating: 5,
+                          comment: "The absolute best POS synchronization gateway in Bangladesh!",
+                          author: "st*******@gmail.com",
+                          createdAt: new Date().toISOString()
+                        }
+                      ]
+                    };
+                    navigator.clipboard.writeText(JSON.stringify(sample, null, 2));
+                    setCopiedWidget(true);
+                    setTimeout(() => setCopiedWidget(false), 2000);
+                  }}
+                  className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-white rounded-lg transition-all cursor-pointer flex items-center gap-1"
+                >
+                  {copiedWidget ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-400 animate-bounce" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      Copy Code
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {activeSubTab === 'widget' ? (
+                <pre className="text-[10px] font-mono leading-relaxed overflow-x-auto max-h-56 select-all scrollbar-thin scrollbar-thumb-slate-850">
+                  <code>{widgetSnippet}</code>
+                </pre>
+              ) : (
+                <pre className="text-[10px] font-mono leading-relaxed overflow-x-auto max-h-56 select-all scrollbar-thin scrollbar-thumb-slate-850 text-emerald-400">
+                  <code>{`{
+  "success": true,
+  "count": ${liveCount !== null ? liveCount : 0},
+  "reviews": [
+    {
+      "id": "ST_3c875_example",
+      "rating": 5,
+      "comment": "Outstanding real-time whatsapp sync gateway!",
+      "author": "st*******@gmail.com",
+      "createdAt": "${new Date().toISOString()}"
+    }
+  ]
+}`}</code>
+                </pre>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-slate-50 dark:bg-slate-950/20 p-4 rounded-2xl border border-slate-100 dark:border-slate-850/60 mt-4">
+            <span className="text-[10px] font-black text-slate-800 dark:text-slate-100 uppercase tracking-wider block mb-1">💡 Integration Quick-start</span>
+            <p className="text-[9px] text-slate-400 font-bold leading-relaxed uppercase tracking-widest">
+              Simply copy the HTML snippet above and paste it directly into your main landing page, dashboard index file, or WordPress widget area. It fetches live, real-time approved reviews seamlessly from your portal.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AdminMerchantConsole() {
+  const [consoleTab, setConsoleTab] = useState<'network' | 'shell' | 'reviews' | 'api'>('reviews');
   const [command, setCommand] = useState('');
   const [logs, setLogs] = useState<string[]>([
     'Secure System Diagnostic Shell v1.0.0 Initiated.',
@@ -5920,38 +6571,132 @@ export function AdminMerchantConsole() {
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6 max-w-7xl mx-auto p-4 md:p-6"
     >
-      <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-gray-100 dark:border-slate-800/80 shadow-sm">
-        <h2 className="text-xl font-black text-gray-900 dark:text-gray-100 tracking-tight uppercase mb-1">Merchant Dev Console</h2>
-        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Execute diagnostics, audit API schemas, and stream backend container events.</p>
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-gray-100 dark:border-slate-800/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-black text-gray-900 dark:text-gray-100 tracking-tight uppercase mb-1">Merchant Dev Console</h2>
+          <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Execute diagnostics, audit API schemas, and stream backend container events.</p>
+        </div>
+        
+        {/* Navigation Tabs */}
+        <div className="flex bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl border border-slate-200/50 dark:border-slate-850 self-start md:self-auto shrink-0 select-none overflow-x-auto max-w-full">
+          <button
+            onClick={() => setConsoleTab('reviews')}
+            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
+              consoleTab === 'reviews'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-md border border-slate-100 dark:border-slate-800'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 animate-pulse" />
+            Review Moderator
+          </button>
+          <button
+            onClick={() => setConsoleTab('api')}
+            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
+              consoleTab === 'api'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-md border border-slate-100 dark:border-slate-800'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <Link2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            API Integration
+          </button>
+          <button
+            onClick={() => setConsoleTab('network')}
+            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
+              consoleTab === 'network'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-md border border-slate-100 dark:border-slate-800'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            Network Master
+          </button>
+          <button
+            onClick={() => setConsoleTab('shell')}
+            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
+              consoleTab === 'shell'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-md border border-slate-100 dark:border-slate-800'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <Terminal className="w-3.5 h-3.5 text-slate-500" />
+            System Shell
+          </button>
+        </div>
       </div>
 
-      <div className="bg-slate-950 text-emerald-400 p-6 rounded-3xl border border-slate-850 shadow-2xl h-[450px] flex flex-col font-mono text-[12px] relative overflow-hidden">
-        <div className="absolute top-4 right-6 flex items-center gap-1.5">
-          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></div>
-          <span className="text-[9px] font-black uppercase text-emerald-500 tracking-widest">LIVE CONNECTION</span>
-        </div>
-
-        <div className="flex-1 overflow-y-auto space-y-2 pr-2 scrollbar-thin scrollbar-thumb-emerald-800/40">
-          {logs.map((log, i) => (
-            <div key={i} className="whitespace-pre-wrap leading-relaxed select-text">
-              {log}
+      <AnimatePresence mode="wait">
+        {consoleTab === 'reviews' ? (
+          <motion.div
+            key="reviews"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.15 }}
+          >
+            <ReviewModeratorConsole />
+          </motion.div>
+        ) : consoleTab === 'api' ? (
+          <motion.div
+            key="api"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.15 }}
+          >
+            <ApiIntegrationConsole />
+          </motion.div>
+        ) : consoleTab === 'network' ? (
+          <motion.div
+            key="network"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.15 }}
+          >
+            <div className="bg-red-50/10 rounded-3xl shadow-xl border-2 border-red-100 overflow-hidden min-h-[600px] relative dark:border-slate-800/80">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 via-rose-500 to-red-600 opacity-80" />
+              <NetworkConsole />
             </div>
-          ))}
-          <div ref={consoleEndRef} />
-        </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="shell"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.15 }}
+            className="bg-slate-950 text-emerald-400 p-6 rounded-3xl border border-slate-850 shadow-2xl h-[450px] flex flex-col font-mono text-[12px] relative overflow-hidden"
+          >
+            <div className="absolute top-4 right-6 flex items-center gap-1.5">
+              <div className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></div>
+              <span className="text-[9px] font-black uppercase text-emerald-500 tracking-widest">LIVE CONNECTION</span>
+            </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 border-t border-emerald-950/60 pt-4 flex items-center gap-2">
-          <span className="text-indigo-400 font-black shrink-0">root@stratproamz:~$</span>
-          <input
-            type="text"
-            value={command}
-            onChange={e => setCommand(e.target.value)}
-            className="flex-1 bg-transparent border-none outline-none focus:ring-0 p-0 text-emerald-300 font-mono text-[12px]"
-            placeholder="Type terminal directive here..."
-            autoFocus
-          />
-        </form>
-      </div>
+            <div className="flex-1 overflow-y-auto space-y-2 pr-2 scrollbar-thin scrollbar-thumb-emerald-800/40">
+              {logs.map((log, i) => (
+                <div key={i} className="whitespace-pre-wrap leading-relaxed select-text">
+                  {log}
+                </div>
+              ))}
+              <div ref={consoleEndRef} />
+            </div>
+
+            <form onSubmit={handleSubmit} className="mt-4 border-t border-emerald-950/60 pt-4 flex items-center gap-2">
+              <span className="text-indigo-400 font-black shrink-0 select-none">root@stratproamz:~$</span>
+              <input
+                type="text"
+                value={command}
+                onChange={e => setCommand(e.target.value)}
+                className="flex-1 bg-transparent border-none outline-none focus:ring-0 p-0 text-emerald-300 font-mono text-[12px]"
+                placeholder="Type terminal directive here..."
+                autoFocus
+              />
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
