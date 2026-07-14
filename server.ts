@@ -17,7 +17,7 @@ async function startServer() {
     if (fs.existsSync(configPath)) {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       firebaseApp = initServerFirebase(config, 'server-app');
-      firestoreDb = getServerFirestore(firebaseApp);
+      firestoreDb = getServerFirestore(firebaseApp, config.firestoreDatabaseId);
       console.log('[Server Firebase] Initialized successfully.');
     } else {
       console.warn('[Server Firebase] Configuration file not found at:', configPath);

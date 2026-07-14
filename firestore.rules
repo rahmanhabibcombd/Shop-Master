@@ -206,6 +206,10 @@ service cloud.firestore {
         resource != null && 
         resource.data.shopId != null && 
         isOwnerOrStaff(resource.data.shopId)
+      ) || (
+        resource != null &&
+        resource.data.type == 'feedback' &&
+        resource.data.approved == true
       );
       allow create: if isMasterAdmin() || (
         isSignedIn() && 

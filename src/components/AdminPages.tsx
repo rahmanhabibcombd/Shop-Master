@@ -6513,7 +6513,7 @@ function ApiIntegrationConsole() {
 }
 
 export function AdminMerchantConsole() {
-  const [consoleTab, setConsoleTab] = useState<'network' | 'shell' | 'reviews' | 'api'>('reviews');
+  const [consoleTab, setConsoleTab] = useState<'network' | 'shell' | 'reviews' | 'api'>('network');
   const [command, setCommand] = useState('');
   const [logs, setLogs] = useState<string[]>([
     'Secure System Diagnostic Shell v1.0.0 Initiated.',
@@ -6580,6 +6580,17 @@ export function AdminMerchantConsole() {
         {/* Navigation Tabs */}
         <div className="flex bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl border border-slate-200/50 dark:border-slate-850 self-start md:self-auto shrink-0 select-none overflow-x-auto max-w-full">
           <button
+            onClick={() => setConsoleTab('network')}
+            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
+              consoleTab === 'network'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-md border border-slate-100 dark:border-slate-800'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            Network Master
+          </button>
+          <button
             onClick={() => setConsoleTab('reviews')}
             className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
               consoleTab === 'reviews'
@@ -6600,17 +6611,6 @@ export function AdminMerchantConsole() {
           >
             <Link2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
             API Integration
-          </button>
-          <button
-            onClick={() => setConsoleTab('network')}
-            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
-              consoleTab === 'network'
-                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-md border border-slate-100 dark:border-slate-800'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-            }`}
-          >
-            <Globe className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-            Network Master
           </button>
           <button
             onClick={() => setConsoleTab('shell')}
