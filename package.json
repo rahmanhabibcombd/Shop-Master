@@ -31,6 +31,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
     "dotenv": "^17.2.3",
+    "electron-updater": "^6.8.9",
     "esbuild": "^0.27.7",
     "express": "^5.2.1",
     "firebase": "^12.10.0",
@@ -71,6 +72,11 @@
   "build": {
     "appId": "com.shopmaster.pos",
     "productName": "ShopMaster",
+    "publish": {
+      "provider": "github",
+      "owner": "Stratprollc",
+      "repo": "Shop-Master"
+    },
     "directories": {
       "output": "dist-desktop"
     },

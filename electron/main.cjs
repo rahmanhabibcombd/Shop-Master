@@ -1,6 +1,31 @@
 const { app, BrowserWindow, shell } = require('electron');
 const path = require('path');
 const { fork } = require('child_process');
+const { autoUpdater } = require('electron-updater');
+
+// Configure autoUpdater logging and basic behavior
+autoUpdater.logger = console;
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+
+autoUpdater.on('checking-for-update', () => {
+  console.log('[Electron Update] Checking for update...');
+});
+autoUpdater.on('update-available', (info) => {
+  console.log('[Electron Update] Update available. Downloading in background...', info);
+});
+autoUpdater.on('update-not-available', (info) => {
+  console.log('[Electron Update] Update not available.', info);
+});
+autoUpdater.on('error', (err) => {
+  console.error('[Electron Update] Error in auto-updater:', err);
+});
+autoUpdater.on('download-progress', (progressObj) => {
+  console.log(`[Electron Update] Download speed: ${progressObj.bytesPerSecond} - Downloaded ${progressObj.percent}%`);
+});
+autoUpdater.on('update-downloaded', (info) => {
+  console.log('[Electron Update] Update downloaded; will be installed on app quit.', info);
+});
 
 let mainWindow;
 let serverProcess;
@@ -94,6 +119,14 @@ if (!gotTheLock) {
     // Start local server and then create the Electron window
     startBackendServer();
     createWindow();
+
+    // Check for updates shortly after startup
+    setTimeout(() => {
+      console.log('[Electron Update] Checking for updates...');
+      autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+        console.error('[Electron Update] Error checking for updates:', err);
+      });
+    }, 5000);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
