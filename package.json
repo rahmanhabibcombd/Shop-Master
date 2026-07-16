@@ -89,7 +89,7 @@
           ]
         }
       ],
-      "icon": "public/LOGO.JPG"
+      "icon": "public/logo.svg"
     },
     "nsis": {
       "oneClick": false,
