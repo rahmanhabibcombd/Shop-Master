@@ -2617,6 +2617,47 @@ function SettingsPanel({
   const systemLang = settings.systemLanguage || 'en';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
   const [activeSubTab, setActiveSubTab] = useState<'shop' | 'download'>('shop');
+
+  const [downloadLinks, setDownloadLinks] = useState({
+    androidAppUrl: '',
+    merchantAppUrl: '',
+    customerAppUrl: '',
+    whDeliveryAppUrl: '',
+    desktopAppUrl: 'https://github.com/Stratprollc/Shop-Master/releases/download/v1.0.3/ShopMaster%20Setup%201.0.3.exe'
+  });
+  const [isUpdatingLink, setIsUpdatingLink] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'global_settings', 'download_links'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setDownloadLinks({
+          androidAppUrl: data.androidAppUrl || '',
+          merchantAppUrl: data.merchantAppUrl || '',
+          customerAppUrl: data.customerAppUrl || '',
+          whDeliveryAppUrl: data.whDeliveryAppUrl || '',
+          desktopAppUrl: data.desktopAppUrl || 'https://github.com/Stratprollc/Shop-Master/releases/download/v1.0.3/ShopMaster%20Setup%201.0.3.exe'
+        });
+      }
+    }, (err) => {
+      console.warn("Error loading global download links:", err);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleUpdateDownloadLink = async (key: string, value: string) => {
+    try {
+      setIsUpdatingLink(key);
+      await setDoc(doc(db, 'global_settings', 'download_links'), {
+        [key]: value
+      }, { merge: true });
+    } catch (err) {
+      console.error("Failed to update download link:", err);
+      alert("Failed to save the download link. Please check your permissions.");
+    } finally {
+      setIsUpdatingLink(null);
+    }
+  };
   const shopCodeForQr = (settings.shopCode || settings.shopId || '').toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '').slice(0, 6);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(settings.logoBase64 || null);
@@ -3368,409 +3409,351 @@ function SettingsPanel({
 
 
       {activeSubTab === 'download' && (
-        <div className="space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-              <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <Download className="w-6 h-6 text-indigo-600" />
-                Inventory & Products
-              </h3>
-              <p className="text-gray-500 mb-6 text-sm">Download your current stock list, prices, and categories in CSV format.</p>
-              <button 
-                onClick={() => {
-                  const data = products.map(p => ({
-                    'Product ID': p.id,
-                    'Name': p.name,
-                    'Category': p.category,
-                    'Price': p.price,
-                    'Stock': p.stock,
-                    'Unit': p.unit,
-                    'Barcode': p.barcode || 'N/A'
-                  }));
-                  const csv = Papa.unparse(data);
-                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                  const link = document.createElement('a');
-                  link.href = URL.createObjectURL(blob);
-                  link.setAttribute('download', `inventory_${format(new Date(), 'yyyy-MM-dd')}.csv`);
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-                }}
-                className="w-full py-4 bg-indigo-50 text-indigo-700 font-bold rounded-2xl border border-indigo-100 hover:bg-indigo-100 transition-all flex items-center justify-center gap-3"
-              >
-                <FileSpreadsheet className="w-5 h-5" />
-                Download Inventory CSV
-              </button>
-            </div>
+        <div className="space-y-8 animate-fade-in">
+          <div className="grid grid-cols-1 gap-8">
 
-            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-              <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <Users className="w-6 h-6 text-indigo-600" />
-                Customer Database
-              </h3>
-              <p className="text-gray-500 mb-6 text-sm">Download your customer list with contact details and current due balances.</p>
-              <button 
-                onClick={() => {
-                  const data = customers.map(c => ({
-                    'Customer ID': c.id,
-                    'Name': c.name,
-                    'Phone': c.phone,
-                    'Address': c.address || '',
-                    'Initial Due': c.initialDue || 0,
-                    'Created At': safeDate(c.createdAt).toLocaleDateString()
-                  }));
-                  const csv = Papa.unparse(data);
-                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                  const link = document.createElement('a');
-                  link.href = URL.createObjectURL(blob);
-                  link.setAttribute('download', `customers_${format(new Date(), 'yyyy-MM-dd')}.csv`);
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-                }}
-                className="w-full py-4 bg-indigo-50 text-indigo-700 font-bold rounded-2xl border border-indigo-100 hover:bg-indigo-100 transition-all flex items-center justify-center gap-3"
-              >
-                <FileSpreadsheet className="w-5 h-5" />
-                Download Customer CSV
-              </button>
-            </div>
-
-            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-              <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <Smartphone className="w-6 h-6 text-emerald-600" />
-                {st('downloadAndroid')}
-              </h3>
-              <p className="text-gray-500 mb-6 text-sm">Get our Android app for mobile-first inventory management on the go.</p>
-              <button 
-                onClick={onInstallPWA}
-                className="w-full py-4 bg-emerald-50 text-emerald-700 font-bold rounded-2xl border border-emerald-100 hover:bg-emerald-100 transition-all flex items-center justify-center gap-3"
-              >
-                <Smartphone className="w-5 h-5" />
-                Install Mobile App (PWA)
-              </button>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-sm border border-gray-100 dark:border-slate-800 md:col-span-2 space-y-6">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100 dark:border-slate-800 pb-6">
-                <div>
-                  <h3 className="text-xl font-bold flex items-center gap-2 text-slate-800 dark:text-slate-100">
-                    <LucideIcons.Monitor className="w-6 h-6 text-indigo-600" />
-                    {systemLang === 'bn' ? 'ডেস্কটপ অ্যাপ্লিকেশন ও ইন্টিগ্রেশন' : 'Desktop Application & Integration'}
-                  </h3>
-                  <p className="text-gray-500 dark:text-slate-400 text-sm mt-1">
+            {/* UNIFIED APPS DOWNLOAD CONTAINER */}
+            <div className="bg-white dark:bg-slate-900 p-8 md:p-10 rounded-3xl shadow-sm border border-gray-100 dark:border-slate-800 space-y-8">
+              
+              {/* SECTION 1: ANDROID APPS */}
+              <div className="space-y-6">
+                <div className="text-center max-w-2xl mx-auto space-y-2">
+                  <span className="px-3 py-1 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-full text-xs font-black uppercase tracking-wider">
+                    {systemLang === 'bn' ? 'মোবাইল সলিউশন' : 'Mobile Solution'}
+                  </span>
+                  <h3 className="text-xl md:text-2xl font-black text-slate-800 dark:text-slate-100 leading-tight">
                     {systemLang === 'bn' 
-                      ? 'রিয়েল-টাইম প্রিন্টিং ও অফলাইন সিঙ্ক কার্যকারিতার জন্য ডেক্সটপ এজেন্ট ব্যবহার করুন।' 
-                      : 'Use the desktop agent for real-time printing & offline synchronization features.'}
+                      ? 'যেকোনো জায়গায় মোবাইলেই ইনভেন্টরি ম্যানেজমেন্টের জন্য আমাদের অ্যান্ড্রয়েড অ্যাপ ডাউনলোড করুন।' 
+                      : 'Get our Android app for mobile-first inventory management on the go.'}
+                  </h3>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 font-medium">
+                    {systemLang === 'bn'
+                      ? 'অ্যান্ড্রয়েড স্মার্টফোন, ট্যাবলেটের জন্য সম্পূর্ণ অপ্টিমাইজড অফলাইন-সাপোর্টেড মোবাইল ক্লায়েন্ট।'
+                      : 'Fully optimized, offline-first mobile clients for Android smartphones and tablets.'}
                   </p>
                 </div>
-                
-                {/* Mode Selector Tabs */}
-                <div className="flex bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200/50 dark:border-slate-700/50 self-start md:self-auto">
-                  <button
-                    type="button"
-                    onClick={() => setDesktopInstallMethod('pwa')}
-                    className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 cursor-pointer ${desktopInstallMethod === 'pwa' ? 'bg-white dark:bg-slate-950 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
-                  >
-                    <LucideIcons.Smartphone className="w-4 h-4" />
-                    {systemLang === 'bn' ? 'ব্রাউজার PWA অ্যাপ' : 'Browser PWA App'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDesktopInstallMethod('powershell')}
-                    className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 cursor-pointer ${desktopInstallMethod === 'powershell' ? 'bg-white dark:bg-slate-950 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
-                  >
-                    <LucideIcons.Terminal className="w-4 h-4" />
-                    {systemLang === 'bn' ? 'পাওয়ারশেল ১-ক্লিক CLI' : 'PowerShell Direct CLI'}
-                  </button>
-                </div>
-              </div>
 
-              {desktopInstallMethod === 'pwa' ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                  <div className="space-y-4">
-                    <div className="bg-indigo-50/50 dark:bg-indigo-950/20 p-4 rounded-2xl border border-indigo-100/30">
-                      <h4 className="font-bold text-slate-800 dark:text-slate-200 text-sm mb-1">
-                        {systemLang === 'bn' ? 'সুবিধাসমূহ (Features):' : 'Key Advantages:'}
-                      </h4>
-                      <ul className="text-xs text-slate-600 dark:text-slate-400 space-y-1.5 list-disc pl-4 mt-2">
-                        <li>{systemLang === 'bn' ? 'ডেস্কটপ হোম স্ক্রিন শর্টকাট আইকন' : 'Direct desktop shortcut on your screen.'}</li>
-                        <li>{systemLang === 'bn' ? 'অফলাইনেও ক্যাশে মেমোরি থেকে দ্রুত লোড হবে' : 'Loads extremely fast using cache memory.'}</li>
-                        <li>{systemLang === 'bn' ? 'অটোমেটিক আপডেট সাপোর্ট' : 'Automatic background updates supported.'}</li>
-                      </ul>
-                    </div>
-                    
-                    <button 
-                      onClick={onInstallPWA}
-                      className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg shadow-indigo-600/10 cursor-pointer"
-                    >
-                      <LucideIcons.Monitor className="w-5 h-5" />
-                      Install Desktop App (PWA)
-                    </button>
-                  </div>
-                  
-                  <div className="text-center p-6 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl bg-slate-50/50 dark:bg-slate-900/50">
-                    <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-950/40 rounded-2xl flex items-center justify-center mx-auto mb-3 text-indigo-600 dark:text-indigo-400">
-                      <LucideIcons.HelpCircle className="w-6 h-6" />
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                      {systemLang === 'bn'
-                        ? 'আপনার ক্রোম বা এজ ব্রাউজার দিয়ে ইনস্টল অপশনটি দেখতে পাবেন। কোনো অতিরিক্ত সফটওয়্যার ইনস্টল করতে হবে না।'
-                        : 'Simply install using your Chrome or Edge browser. No additional heavy software is required to start.'}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl">
-                    <p className="text-xs text-amber-800 dark:text-amber-400 font-bold flex items-center gap-1.5">
-                      <LucideIcons.ShieldAlert className="w-4 h-4" />
-                      {systemLang === 'bn' 
-                        ? 'পাওয়ারশেল ১-ক্লিক ডিরেক্ট সেটাপ (Windows PowerShell Direct Setup)' 
-                        : 'PowerShell One-Click Direct Setup (Enterprise Style)'}
-                    </p>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1.5 leading-relaxed">
-                      {systemLang === 'bn'
-                        ? 'গিটহাব থেকে সরাসরি সিকিউর কানেকশন ও প্রিন্টার এজেন্ট সার্ভিস ডাউনলোড ও রানিং করার জন্য নিচের কমান্ডটি আপনার কম্পিউটারের PowerShell ওপেন করে পেস্ট করুন।'
-                        : 'Run this optimized Windows PowerShell command to download, authorize, and sync your POS agent automatically from GitHub releases.'}
-                    </p>
-                  </div>
-
-                  {/* Terminal Command 1: Bypass Installer */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                        {systemLang === 'bn' ? '১-ক্লিক অটো ইনস্টলার (প্রস্তাবিত ও অটো-আপডেট)' : '1-Click Auto Installer (Recommended & Auto-Detect)'}
-                      </span>
-                      <span className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 uppercase font-black">GitHub Releases</span>
-                    </div>
-
-                    <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden relative group font-mono text-xs">
-                      {/* Terminal window top bar */}
-                      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800/80">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-                          <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                          <span className="text-[10px] text-slate-500 ml-2 font-sans font-bold">Windows PowerShell (Admin)</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const cmdText = `powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; $r = Invoke-RestMethod -Uri 'https://api.github.com/repos/Stratprollc/Shop-Master/releases/latest'; $a = $r.assets | Where-Object { $_.name -like '*.exe' } | Select-Object -First 1; if ($a) { $d = Join-Path $HOME ('ShopMaster\\' + $a.name); New-Item -ItemType Directory -Force -Path (Split-Path $d); iwr -useb $a.browser_download_url -OutFile $d; Start-Process $d } else { Write-Error 'No installer exe found!' }"`;
-                            navigator.clipboard.writeText(cmdText);
-                            setCopiedCmd('auto');
-                            setTimeout(() => setCopiedCmd(null), 2500);
-                          }}
-                          className="text-slate-400 hover:text-white transition-all p-1 flex items-center gap-1.5 text-[11px] font-sans font-bold cursor-pointer"
-                        >
-                          {copiedCmd === 'auto' ? (
-                            <>
-                              <LucideIcons.Check className="w-3.5 h-3.5 text-emerald-400" />
-                              <span className="text-emerald-400">কপি হয়েছে!</span>
-                            </>
-                          ) : (
-                            <>
-                              <LucideIcons.Copy className="w-3.5 h-3.5" />
-                              <span>কপি কমান্ড</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                      
-                      <div className="p-4 overflow-x-auto text-slate-300 whitespace-pre leading-relaxed select-all">
-                        <span className="text-indigo-400 font-bold">PS C:\&gt;</span> {"powershell -NoProfile -ExecutionPolicy Bypass -Command \"[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; $r = Invoke-RestMethod -Uri 'https://api.github.com/repos/Stratprollc/Shop-Master/releases/latest'; $a = $r.assets | Where-Object { $_.name -like '*.exe' } | Select-Object -First 1; if ($a) { $d = Join-Path $HOME ('ShopMaster\\' + $a.name); New-Item -ItemType Directory -Force -Path (Split-Path $d); iwr -useb $a.browser_download_url -OutFile $d; Start-Process $d } else { Write-Error 'No installer exe found!' }\""}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Terminal Command 2: Manual Direct Download & Extract */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-                        {systemLang === 'bn' ? 'বিকল্প সরাসরি ১.০.৩ সংস্করণ ডাউনলোড' : 'Alternative Direct 1.0.3 Version Download'}
-                      </span>
-                    </div>
-
-                    <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden relative group font-mono text-xs">
-                      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800/80">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 opacity-60"></span>
-                          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 opacity-60"></span>
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 opacity-60"></span>
-                          <span className="text-[10px] text-slate-500 ml-2 font-sans font-bold">PowerShell Downloader</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const cmdText = `powershell -Command "[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; New-Item -ItemType Directory -Force -Path '$HOME\\ShopMaster'; iwr -useb 'https://github.com/Stratprollc/Shop-Master/releases/download/v1.0.3/ShopMaster%20Setup%201.0.3.exe' -OutFile '$HOME\\ShopMaster\\ShopMasterSetup.exe'; Start-Process '$HOME\\ShopMaster\\ShopMasterSetup.exe'"`;
-                            navigator.clipboard.writeText(cmdText);
-                            setCopiedCmd('manual');
-                            setTimeout(() => setCopiedCmd(null), 2500);
-                          }}
-                          className="text-slate-400 hover:text-white transition-all p-1 flex items-center gap-1.5 text-[11px] font-sans font-bold cursor-pointer"
-                        >
-                          {copiedCmd === 'manual' ? (
-                            <>
-                              <LucideIcons.Check className="w-3.5 h-3.5 text-emerald-400" />
-                              <span className="text-emerald-400">কপি হয়েছে!</span>
-                            </>
-                          ) : (
-                            <>
-                              <LucideIcons.Copy className="w-3.5 h-3.5" />
-                              <span>কপি কমান্ড</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                      
-                      <div className="p-4 overflow-x-auto text-slate-300 whitespace-pre leading-relaxed select-all">
-                        <span className="text-indigo-400 font-bold">PS C:\&gt;</span> powershell -Command &quot;[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; New-Item -ItemType Directory -Force -Path '$HOME\ShopMaster'; iwr -useb 'https://github.com/Stratprollc/Shop-Master/releases/download/v1.0.3/ShopMaster%20Setup%201.0.3.exe' -OutFile '$HOME\ShopMaster\ShopMasterSetup.exe'; Start-Process '$HOME\ShopMaster\ShopMasterSetup.exe'&quot;
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Private Repository Warning/Notice */}
-                  <div className="bg-amber-500/5 border border-amber-500/20 p-4 rounded-2xl text-xs space-y-1">
-                    <p className="font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
-                      <LucideIcons.Lock className="w-3.5 h-3.5" />
-                      {systemLang === 'bn' ? 'প্রাইভেট রিপোজিটরি সংক্রান্ত নোটিশ:' : 'Private Repository Notice:'}
-                    </p>
-                    <p className="text-slate-600 dark:text-slate-400 leading-relaxed">
-                      {systemLang === 'bn' 
-                        ? 'আপনার গিটহাব রিপোজিটরি যদি প্রাইভেট (ব্যক্তিগত) হয়ে থাকে, তবে সরাসরি পাওয়ারশেল দিয়ে ডাউনলোড করতে এটি কাজ নাও করতে পারে। সেক্ষেত্রে আপনার ব্রাউজার থেকে সরাসরি আপনার GitHub রিলিজ পেজে গিয়ে ডাউনলোড করে নিন।'
-                        : 'If your GitHub repository is private, command-line download requires GitHub Authentication. In that case, please download the executable directly through your web browser via GitHub Release page.'}
-                    </p>
-                  </div>
-
-                  {/* Step by Step Guideline */}
-                  <div className="bg-indigo-50/30 dark:bg-slate-950 p-5 rounded-2xl border border-indigo-100/50 dark:border-slate-800">
-                    <h4 className="font-bold text-xs text-indigo-700 dark:text-indigo-400 uppercase tracking-wider mb-3">
-                      {systemLang === 'bn' ? 'ব্যবহারের নিয়মাবলী (How to run):' : 'Step-by-step Execution:'}
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-sans">
-                      <div className="space-y-1">
-                        <p className="font-black text-indigo-500">১. ওপেন করুন</p>
-                        <p className="text-slate-600 dark:text-slate-400 leading-relaxed">উইন্ডোজ স্টার্ট মেনু থেকে <b>PowerShell</b> লিখে সার্চ করে এটি ওপেন করুন।</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="font-black text-indigo-500">২. পেস্ট ও এন্টার</p>
-                        <p className="text-slate-600 dark:text-slate-400 leading-relaxed">ওপরের যেকোনো একটি কমান্ড কপি করে পাওয়ারশেল উইন্ডোতে রাইট ক্লিক করে এন্টার চাপুন।</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="font-black text-indigo-500">৩. অটো কানেক্ট</p>
-                        <p className="text-slate-600 dark:text-slate-400 leading-relaxed">কমান্ডটি স্বয়ংক্রিয়ভাবে ডাউনলোড সম্পন্ন করে আপনার ডেক্সটপ উইন্ডো ওপেন করে দিবে।</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-              <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <Banknote className="w-6 h-6 text-indigo-600" />
-                Sales History (Last 1000)
-              </h3>
-              <p className="text-gray-500 mb-6 text-sm">Export recent transaction logs including payment methods and amounts.</p>
-              <button 
-                onClick={() => {
-                  const data = sales.slice(0, 1000).map(s => ({
-                    'Invoice ID': s.id,
-                    'Date': safeDate(s.timestamp).toLocaleString(),
-                    'Customer': s.customerName || 'Walk-in',
-                    'Total': s.finalAmount,
-                    'Paid': s.paidAmount,
-                    'Due': s.dueAmount,
-                    'Method': s.paymentMethod
-                  }));
-                  const csv = Papa.unparse(data);
-                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                  const link = document.createElement('a');
-                  link.href = URL.createObjectURL(blob);
-                  link.setAttribute('download', `sales_history_${format(new Date(), 'yyyy-MM-dd')}.csv`);
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-                }}
-                className="w-full py-4 bg-indigo-50 text-indigo-700 font-bold rounded-2xl border border-indigo-100 hover:bg-indigo-100 transition-all flex items-center justify-center gap-3"
-              >
-                <FileSpreadsheet className="w-5 h-5" />
-                Download Sales CSV
-              </button>
-            </div>
-
-            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-              <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <Receipt className="w-6 h-6 text-indigo-600" />
-                Expense Records
-              </h3>
-              <p className="text-gray-500 mb-6 text-sm">Download breakdown of categorized expenses for your bookkeeping.</p>
-              <button 
-                onClick={() => {
-                  const data = expenses.map(e => ({
-                    'ID': e.id,
-                    'Date': safeDate(e.timestamp).toLocaleDateString(),
-                    'Category': e.category,
-                    'Description': e.description,
-                    'Amount': e.amount
-                  }));
-                  const csv = Papa.unparse(data);
-                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                  const link = document.createElement('a');
-                  link.href = URL.createObjectURL(blob);
-                  link.setAttribute('download', `expenses_${format(new Date(), 'yyyy-MM-dd')}.csv`);
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-                }}
-                className="w-full py-4 bg-indigo-50 text-indigo-700 font-bold rounded-2xl border border-indigo-100 hover:bg-indigo-100 transition-all flex items-center justify-center gap-3"
-              >
-                <FileSpreadsheet className="w-5 h-5" />
-                Download Expense CSV
-              </button>
-            </div>
-
-            {/* PWA Install Section */}
-            <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-8 rounded-3xl shadow-xl text-white md:col-span-2 overflow-hidden relative">
-              <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-                <Smartphone className="w-32 h-32" />
-              </div>
-              <div className="relative z-10 space-y-4">
-                <h3 className="text-2xl font-bold flex items-center gap-2">
-                  <Download className="w-8 h-8" />
-                  Install ShopMaster App (পিডব্লিউএ)
-                </h3>
-                <p className="text-indigo-100 max-w-lg">
-                  {systemLang === 'bn' 
-                    ? 'আপনার ফোনে বা কম্পিউটারে এই সিস্টেমটি অ্যাপ হিসেবে ব্যবহার করতে নিচের বাটনে ক্লিক করুন। এটি অফলাইনেও দ্রুত কাজ করবে।' 
-                    : 'Install this system as an app on your phone or computer. It stays on your home screen and works offline.'}
-                </p>
-                <div className="flex flex-wrap gap-4 pt-2">
+                {/* Main Android App Wide Button */}
+                <div className="max-w-xl mx-auto space-y-4">
                   <button 
                     onClick={() => {
-                      if (deferredPrompt) {
-                        deferredPrompt.prompt();
-                        deferredPrompt.userChoice.then((choiceResult: any) => {
-                          if (choiceResult.outcome === 'accepted') {
-                            console.log('User accepted the A2HS prompt');
-                          }
-                        });
+                      if (downloadLinks.androidAppUrl) {
+                        window.open(downloadLinks.androidAppUrl, '_blank');
                       } else {
-                        alert(systemLang === 'bn' 
-                          ? 'আপনার ব্রাউজারে ইতিমধ্যে ইন্সটল করা আছে অথবা এটি সাপোর্ট করছে না। সরাসরি ব্রাউজারের "Install App" অপশন ব্যবহার করুন।' 
-                          : 'The app is already installed or your browser doesn\'t support this. Use the "Install App" option in your browser menu.');
+                        onInstallPWA();
                       }
                     }}
-                    className="px-8 py-4 bg-white text-indigo-600 font-bold rounded-2xl hover:bg-indigo-50 transition-all flex items-center gap-3 shadow-lg shadow-black/10"
+                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 active:scale-98 text-white font-black rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg shadow-indigo-600/20 cursor-pointer text-base group"
                   >
-                    <Plus className="w-6 h-6" />
-                    {systemLang === 'bn' ? 'অ্যান্ড্রয়েড/ডেস্কটপে ইন্সটল করুন' : 'Install for Android/Desktop'}
+                    <LucideIcons.Smartphone className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    {systemLang === 'bn' ? 'অ্যান্ড্রয়েড অ্যাপ ডাউনলোড করুন' : 'Download Android App'}
                   </button>
+
+                  {isBrandingAuthorized && (
+                    <div className="p-4 bg-indigo-50/50 dark:bg-slate-950 rounded-2xl border border-indigo-100 dark:border-indigo-950/60 text-left space-y-2">
+                      <label className="block text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+                        {systemLang === 'bn' ? 'অ্যান্ড্রয়েড অ্যাপ লিংক কাস্টমাইজ করুন (Admin Only)' : 'Customize Android App Download Link (Admin Only)'}
+                      </label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={downloadLinks.androidAppUrl} 
+                          onChange={(e) => setDownloadLinks(prev => ({ ...prev, androidAppUrl: e.target.value }))}
+                          placeholder="e.g. https://example.com/android_app.apk" 
+                          className="flex-1 px-4 py-2.5 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-slate-800 rounded-xl text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800 dark:text-slate-200"
+                        />
+                        <button 
+                          onClick={() => handleUpdateDownloadLink('androidAppUrl', downloadLinks.androidAppUrl)}
+                          disabled={isUpdatingLink === 'androidAppUrl'}
+                          className="px-4 py-2.5 bg-indigo-600 text-white text-xs font-black uppercase tracking-wider rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-50"
+                        >
+                          {isUpdatingLink === 'androidAppUrl' ? 'Saving...' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Secondary Apps Tri-Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto pt-2">
+                  
+                  {/* Merchant App */}
+                  <div className="bg-slate-50 dark:bg-slate-950 p-5 rounded-2xl border border-slate-100 dark:border-slate-800/60 hover:border-indigo-500/50 dark:hover:border-indigo-400/50 transition-all duration-300 flex flex-col items-stretch text-center space-y-3">
+                    <div className="flex flex-col items-center space-y-3">
+                      <div className="w-10 h-10 bg-indigo-100/60 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center">
+                        <LucideIcons.Store className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">
+                          {systemLang === 'bn' ? 'মার্চেন্ট অ্যাপ' : 'Merchant App'}
+                        </h4>
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                          {systemLang === 'bn' ? 'ম্যানেজার ও ওনার প্যানেল ট্র্যাকিং' : 'Full shop management on the go'}
+                        </p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        if (downloadLinks.merchantAppUrl) {
+                          window.open(downloadLinks.merchantAppUrl, '_blank');
+                        } else {
+                          alert(systemLang === 'bn' 
+                            ? 'মার্চেন্ট অ্যাপটি ডাউনলোডের জন্য প্রস্তুত হচ্ছে। শীঘ্রই এটি সরাসরি ডাউনলোড করা যাবে।' 
+                            : 'Merchant App bundle is preparing. Direct download link will be online shortly.');
+                        }
+                      }}
+                      className="w-full py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                    >
+                      {systemLang === 'bn' ? 'ডাউনলোড মার্চেন্ট' : 'Download Merchant'}
+                    </button>
+
+                    {isBrandingAuthorized && (
+                      <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800 text-left space-y-1">
+                        <label className="block text-[8px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+                          Link (Admin)
+                        </label>
+                        <div className="flex gap-1">
+                          <input 
+                            type="text" 
+                            value={downloadLinks.merchantAppUrl} 
+                            onChange={(e) => setDownloadLinks(prev => ({ ...prev, merchantAppUrl: e.target.value }))}
+                            placeholder="Link" 
+                            className="flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-slate-800 rounded-lg text-[10px] outline-none text-slate-800 dark:text-slate-200"
+                          />
+                          <button 
+                            onClick={() => handleUpdateDownloadLink('merchantAppUrl', downloadLinks.merchantAppUrl)}
+                            disabled={isUpdatingLink === 'merchantAppUrl'}
+                            className="px-2 py-1.5 bg-indigo-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            {isUpdatingLink === 'merchantAppUrl' ? '...' : 'Save'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Customer App */}
+                  <div className="bg-slate-50 dark:bg-slate-950 p-5 rounded-2xl border border-slate-100 dark:border-slate-800/60 hover:border-indigo-500/50 dark:hover:border-indigo-400/50 transition-all duration-300 flex flex-col items-stretch text-center space-y-3">
+                    <div className="flex flex-col items-center space-y-3">
+                      <div className="w-10 h-10 bg-indigo-100/60 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center">
+                        <LucideIcons.Users className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">
+                          {systemLang === 'bn' ? 'কাস্টমার অ্যাপ' : 'Customer App'}
+                        </h4>
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                          {systemLang === 'bn' ? 'অর্ডার ও বকেয়া বিল চেক করার জন্য' : 'Check dues, purchases & statement'}
+                        </p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        if (downloadLinks.customerAppUrl) {
+                          window.open(downloadLinks.customerAppUrl, '_blank');
+                        } else {
+                          alert(systemLang === 'bn' 
+                            ? 'কাস্টমার পোর্টাল অ্যাপটি ডাউনলোডের জন্য প্রস্তুত হচ্ছে।' 
+                            : 'Customer Portal App bundle is preparing. Direct link is coming soon.');
+                        }
+                      }}
+                      className="w-full py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                    >
+                      {systemLang === 'bn' ? 'ডাউনলোড কাস্টমার' : 'Download Customer'}
+                    </button>
+
+                    {isBrandingAuthorized && (
+                      <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800 text-left space-y-1">
+                        <label className="block text-[8px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+                          Link (Admin)
+                        </label>
+                        <div className="flex gap-1">
+                          <input 
+                            type="text" 
+                            value={downloadLinks.customerAppUrl} 
+                            onChange={(e) => setDownloadLinks(prev => ({ ...prev, customerAppUrl: e.target.value }))}
+                            placeholder="Link" 
+                            className="flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-slate-800 rounded-lg text-[10px] outline-none text-slate-800 dark:text-slate-200"
+                          />
+                          <button 
+                            onClick={() => handleUpdateDownloadLink('customerAppUrl', downloadLinks.customerAppUrl)}
+                            disabled={isUpdatingLink === 'customerAppUrl'}
+                            className="px-2 py-1.5 bg-indigo-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            {isUpdatingLink === 'customerAppUrl' ? '...' : 'Save'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* WH Delivery */}
+                  <div className="bg-slate-50 dark:bg-slate-950 p-5 rounded-2xl border border-slate-100 dark:border-slate-800/60 hover:border-indigo-500/50 dark:hover:border-indigo-400/50 transition-all duration-300 flex flex-col items-stretch text-center space-y-3">
+                    <div className="flex flex-col items-center space-y-3">
+                      <div className="w-10 h-10 bg-indigo-100/60 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center">
+                        <LucideIcons.Truck className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">
+                          {systemLang === 'bn' ? 'ডেলিভারি অ্যাপ (WH)' : 'WH Delivery'}
+                        </h4>
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                          {systemLang === 'bn' ? 'ডেলিভারি ট্র্যাকিং ও স্টক আপডেট' : 'Warehouse delivery & tracking'}
+                        </p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        if (downloadLinks.whDeliveryAppUrl) {
+                          window.open(downloadLinks.whDeliveryAppUrl, '_blank');
+                        } else {
+                          alert(systemLang === 'bn' 
+                            ? 'ওয়ারহাউস ও ডেলিভারি অ্যাপটি ডাউনলোডের জন্য প্রস্তুত হচ্ছে।' 
+                            : 'WH Delivery App bundle is preparing. Download link will be active soon.');
+                        }
+                      }}
+                      className="w-full py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                    >
+                      {systemLang === 'bn' ? 'ডাউনলোড ডেলিভারি' : 'Download WH Delivery'}
+                    </button>
+
+                    {isBrandingAuthorized && (
+                      <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800 text-left space-y-1">
+                        <label className="block text-[8px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+                          Link (Admin)
+                        </label>
+                        <div className="flex gap-1">
+                          <input 
+                            type="text" 
+                            value={downloadLinks.whDeliveryAppUrl} 
+                            onChange={(e) => setDownloadLinks(prev => ({ ...prev, whDeliveryAppUrl: e.target.value }))}
+                            placeholder="Link" 
+                            className="flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-slate-800 rounded-lg text-[10px] outline-none text-slate-800 dark:text-slate-200"
+                          />
+                          <button 
+                            onClick={() => handleUpdateDownloadLink('whDeliveryAppUrl', downloadLinks.whDeliveryAppUrl)}
+                            disabled={isUpdatingLink === 'whDeliveryAppUrl'}
+                            className="px-2 py-1.5 bg-indigo-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            {isUpdatingLink === 'whDeliveryAppUrl' ? '...' : 'Save'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                 </div>
               </div>
+
+              {/* RED/ACCENT DECORATIVE DIVIDER MATCHING SKETCH */}
+              <div className="border-t-2 border-dashed border-red-500/80 my-10 relative">
+                <span className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 px-4 bg-white dark:bg-slate-900 text-[10px] font-black uppercase tracking-widest text-red-500 border border-red-200 dark:border-red-950 rounded-full py-1 shadow-sm">
+                  {systemLang === 'bn' ? 'ডিভাইস সমন্বয় লাইন' : 'DEVICE SYNC COUPLING'}
+                </span>
+              </div>
+
+              {/* SECTION 2: DESKTOP APPS */}
+              <div className="space-y-6">
+                <div className="text-center max-w-2xl mx-auto space-y-2">
+                  <span className="px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-full text-xs font-black uppercase tracking-wider">
+                    {systemLang === 'bn' ? 'ডেস্কটপ সলিউশন' : 'Desktop Agent'}
+                  </span>
+                  <h3 className="text-xl md:text-2xl font-black text-slate-800 dark:text-slate-100 leading-tight">
+                    {systemLang === 'bn' 
+                      ? 'রিয়েল-টাইম প্রিন্টিং এবং অফলাইন সিঙ্কিং-এর জন্য ডেস্কটপ এজেন্ট ডাউনলোড করুন।' 
+                      : 'Use the desktop agent for real-time printing & offline synchronization features.'}
+                  </h3>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 font-medium">
+                    {systemLang === 'bn'
+                      ? 'ডেক্সটপ এজেন্ট সরাসরি উইন্ডোজ সিস্টেমের ব্যাকগ্রাউন্ডে থেকে আপনার ব্লুটুথ ও থার্মাল প্রিন্টারকে সংযুক্ত করে।'
+                      : 'Our background agent syncs data continuously and interfaces with local thermal printers.'}
+                  </p>
+                </div>
+
+                {/* Main Desktop App Wide Button */}
+                <div className="max-w-xl mx-auto space-y-4">
+                  <a
+                    href={downloadLinks.desktopAppUrl || "https://github.com/Stratprollc/Shop-Master/releases/download/v1.0.3/ShopMaster%20Setup%201.0.3.exe"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 active:scale-98 text-white font-black rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg shadow-indigo-600/20 cursor-pointer text-base group text-center block"
+                  >
+                    <LucideIcons.Monitor className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    {systemLang === 'bn' ? 'ডেস্কটপ অ্যাপ্লিকেশন ও ইন্টিগ্রেশন' : 'Desktop Application & Integration'}
+                  </a>
+
+                  {isBrandingAuthorized && (
+                    <div className="p-4 bg-indigo-50/50 dark:bg-slate-950 rounded-2xl border border-indigo-100 dark:border-indigo-950/60 text-left space-y-2">
+                      <label className="block text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+                        {systemLang === 'bn' ? 'ডেস্কটপ অ্যাপ লিংক কাস্টমাইজ করুন (Admin Only)' : 'Customize Desktop App Download Link (Admin Only)'}
+                      </label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={downloadLinks.desktopAppUrl} 
+                          onChange={(e) => setDownloadLinks(prev => ({ ...prev, desktopAppUrl: e.target.value }))}
+                          placeholder="e.g. https://github.com/Stratprollc/Shop-Master/releases/download/v1.0.3/ShopMaster%20Setup%201.0.3.exe" 
+                          className="flex-1 px-4 py-2.5 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-slate-800 rounded-xl text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800 dark:text-slate-200"
+                        />
+                        <button 
+                          onClick={() => handleUpdateDownloadLink('desktopAppUrl', downloadLinks.desktopAppUrl)}
+                          disabled={isUpdatingLink === 'desktopAppUrl'}
+                          className="px-4 py-2.5 bg-indigo-600 text-white text-xs font-black uppercase tracking-wider rounded-xl hover:bg-indigo-750 transition-all disabled:opacity-50"
+                        >
+                          {isUpdatingLink === 'desktopAppUrl' ? 'Saving...' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Easiest Guide */}
+                <div className="bg-indigo-50/30 dark:bg-slate-950 p-6 rounded-2xl border border-indigo-100/50 dark:border-slate-800/80 max-w-4xl mx-auto">
+                  <h4 className="font-bold text-xs text-indigo-700 dark:text-indigo-400 uppercase tracking-wider mb-4 flex items-center gap-1.5 justify-center md:justify-start">
+                    <LucideIcons.Sparkles className="w-4 h-4 text-amber-500 animate-spin" />
+                    {systemLang === 'bn' ? 'কিভাবে সেটআপ করবেন (Quick Setup Guide):' : 'Easy Setup Guideline:'}
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs font-sans">
+                    <div className="space-y-1.5 p-1 bg-white/40 dark:bg-slate-900/40 rounded-xl">
+                      <p className="font-black text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                        <span className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px]">১</span>
+                        {systemLang === 'bn' ? 'ডাউনলোড করুন' : 'Download File'}
+                      </p>
+                      <p className="text-slate-600 dark:text-slate-400 leading-relaxed pl-6">
+                        {systemLang === 'bn' 
+                          ? 'ওপরের সরাসরি ডাউনলোড বাটনটিতে ক্লিক করে .exe ফাইলটি ডাউনলোড করুন।' 
+                          : 'Click the direct download button above to grab the .exe installer.'}
+                      </p>
+                    </div>
+                    <div className="space-y-1.5 p-1 bg-white/40 dark:bg-slate-900/40 rounded-xl">
+                      <p className="font-black text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                        <span className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px]">২</span>
+                        {systemLang === 'bn' ? 'ডাবল ক্লিক করে রান' : 'Run the Installer'}
+                      </p>
+                      <p className="text-slate-600 dark:text-slate-400 leading-relaxed pl-6">
+                        {systemLang === 'bn'
+                          ? 'ডাউনলোডকৃত ফাইলটিতে ডাবল ক্লিক করুন। এটি উইন্ডোজে স্বয়ংক্রিয়ভাবে ইনস্টলেশন শুরু করবে।'
+                          : 'Double click the downloaded file. Windows will launch the seamless installer automatically.'}
+                      </p>
+                    </div>
+                    <div className="space-y-1.5 p-1 bg-white/40 dark:bg-slate-900/40 rounded-xl">
+                      <p className="font-black text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                        <span className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px]">৩</span>
+                        {systemLang === 'bn' ? 'রেডি টু গো!' : 'Ready to Launch!'}
+                      </p>
+                      <p className="text-slate-600 dark:text-slate-400 leading-relaxed pl-6">
+                        {systemLang === 'bn'
+                          ? 'ইনস্টল শেষ হলে আপনার ডেস্কটপে শর্টকাট চলে আসবে ও অ্যাপটি সচল হবে।'
+                          : 'Once complete, a shortcut will appear on your desktop ready for instant use.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
             </div>
+
           </div>
         </div>
       )}
