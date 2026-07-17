@@ -577,6 +577,41 @@ const determineLocalCache = () => {
     if (typeof window === 'undefined') {
       return memoryLocalCache();
     }
+
+    // Check if we previously marked IndexedDB as corrupted or closing
+    if (localStorage.getItem('use_memory_cache') === 'true') {
+      console.warn("Firestore: Utilizing memory cache due to previous IndexedDB connection closing/failure state.");
+      
+      // Asynchronously attempt to clean up and delete databases to heal on subsequent reloads
+      setTimeout(() => {
+        if (window.indexedDB && typeof window.indexedDB.databases === 'function') {
+          window.indexedDB.databases().then((dbs) => {
+            dbs.forEach((dbInfo) => {
+              if (dbInfo.name && dbInfo.name.includes('firestore')) {
+                console.log("Cleaning up corrupted Firestore IndexedDB database:", dbInfo.name);
+                window.indexedDB.deleteDatabase(dbInfo.name);
+              }
+            });
+            localStorage.removeItem('use_memory_cache');
+          }).catch(() => {
+            try {
+              window.indexedDB.deleteDatabase('firestore/[DEFAULT]/ShopMaster/main');
+              window.indexedDB.deleteDatabase('firestore/[DEFAULT]/react-example/main');
+              localStorage.removeItem('use_memory_cache');
+            } catch (e) {}
+          });
+        } else {
+          try {
+            window.indexedDB.deleteDatabase('firestore/[DEFAULT]/ShopMaster/main');
+            window.indexedDB.deleteDatabase('firestore/[DEFAULT]/react-example/main');
+            localStorage.removeItem('use_memory_cache');
+          } catch (e) {}
+        }
+      }, 2000);
+
+      return memoryLocalCache();
+    }
+
     // Sandboxed preview iframes block IndexedDB, which locks Firestore. Fallback to memory local cache.
     if (window.self !== window.top) {
       console.log("Firestore detected sandboxed iframe environment. Defensively utilizing memory cache to prevent sandboxed security-context query locks.");
@@ -593,6 +628,33 @@ const determineLocalCache = () => {
     return memoryLocalCache();
   }
 };
+
+// Global handlers to listen for IndexedDB database connection closing errors and gracefully heal them on reload
+if (typeof window !== 'undefined') {
+  const handleIDBError = (errorMsg: string) => {
+    if (
+      errorMsg.includes('IDBDatabase') || 
+      errorMsg.includes('database connection is closing') || 
+      errorMsg.includes('Failed to execute \'transaction\'') ||
+      errorMsg.includes('The database connection is closing')
+    ) {
+      try {
+        localStorage.setItem('use_memory_cache', 'true');
+        console.warn("[IndexedDB Interceptor] Captured fatal IndexedDB closing error. Enabled memory cache for next boot.", errorMsg);
+      } catch (e) {}
+    }
+  };
+
+  window.addEventListener('error', (event) => {
+    handleIDBError(event?.message || '');
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event?.reason;
+    const msg = reason?.message || String(reason || '');
+    handleIDBError(msg);
+  });
+}
 
 // Initialize Firestore with smart adaptive cache
 export const db = initializeFirestore(app, {
