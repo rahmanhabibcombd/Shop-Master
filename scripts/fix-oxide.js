@@ -1,0 +1,51 @@
+import { execSync } from 'child_process';
+import { createRequire } from 'module';
+import fs from 'fs';
+
+const require = createRequire(import.meta.url);
+
+try {
+  // Try loading @tailwindcss/oxide
+  require('@tailwindcss/oxide');
+  console.log('[@tailwindcss/oxide] Native binding is loaded and working correctly.');
+} catch (error) {
+  console.warn('[@tailwindcss/oxide] Native binding failed to load:', error.message);
+  console.log('[@tailwindcss/oxide] Attempting to install the correct native binary for this platform...');
+
+  const platform = process.platform;
+  const arch = process.arch;
+  let targetPkg = '';
+
+  if (platform === 'linux' && arch === 'x64') {
+    // Check if musl or gnu
+    const isMusl = fs.existsSync('/lib/ld-musl-x86_64.so.1') || 
+                   fs.existsSync('/lib/ld-musl-x86_64.so') ||
+                   (process.report && process.report.getReport().indexOf('musl') !== -1);
+    targetPkg = isMusl ? '@tailwindcss/oxide-linux-x64-musl' : '@tailwindcss/oxide-linux-x64-gnu';
+  } else if (platform === 'linux' && arch === 'arm64') {
+    const isMusl = fs.existsSync('/lib/ld-musl-aarch64.so.1') || 
+                   fs.existsSync('/lib/ld-musl-aarch64.so') ||
+                   (process.report && process.report.getReport().indexOf('musl') !== -1);
+    targetPkg = isMusl ? '@tailwindcss/oxide-linux-arm64-musl' : '@tailwindcss/oxide-linux-arm64-gnu';
+  } else if (platform === 'win32' && arch === 'x64') {
+    targetPkg = '@tailwindcss/oxide-win32-x64-msvc';
+  } else if (platform === 'win32' && arch === 'arm64') {
+    targetPkg = '@tailwindcss/oxide-win32-arm64-msvc';
+  } else if (platform === 'darwin' && arch === 'x64') {
+    targetPkg = '@tailwindcss/oxide-darwin-x64';
+  } else if (platform === 'darwin' && arch === 'arm64') {
+    targetPkg = '@tailwindcss/oxide-darwin-arm64';
+  }
+
+  if (targetPkg) {
+    console.log(`[@tailwindcss/oxide] Selected package for installation: ${targetPkg}`);
+    try {
+      execSync(`npm install --no-save --legacy-peer-deps ${targetPkg}`, { stdio: 'inherit' });
+      console.log('[@tailwindcss/oxide] Successfully installed native binary.');
+    } catch (installError) {
+      console.error('[@tailwindcss/oxide] Failed to install native binary:', installError.message);
+    }
+  } else {
+    console.warn(`[@tailwindcss/oxide] Unsupported platform/architecture: ${platform}/${arch}`);
+  }
+}
