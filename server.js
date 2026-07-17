@@ -27,23 +27,37 @@ process.on('unhandledRejection', (reason) => {
   logCrash(reason);
 });
 
-console.log("[Hostinger Entrypoint Wrapper] Booting up...");
+// Detect if we are running inside Electron
+const isElectron = typeof process !== 'undefined' && process.versions && process.versions.electron;
 
-if (typeof require !== 'undefined') {
-  try {
-    const path = require('path');
-    require(path.join(__dirname, 'dist', 'server.cjs'));
-    console.log("[Hostinger Entrypoint Wrapper] Loaded server.cjs via CommonJS require.");
-  } catch (err) {
-    logCrash(err);
-    process.exit(1);
+if (isElectron) {
+  console.log("[Electron Mode] Running inside Electron. Launching electron/main.cjs...");
+  if (typeof require !== 'undefined') {
+    require('./electron/main.cjs');
+  } else {
+    import('./electron/main.cjs').catch((err) => {
+      console.error("Failed to load electron/main.cjs:", err);
+    });
   }
 } else {
-  import('./dist/server.cjs').then(() => {
-    console.log("[Hostinger Entrypoint Wrapper] Loaded server.cjs via ES dynamic import.");
-  }).catch((err) => {
-    logCrash(err);
-    process.exit(1);
-  });
+  console.log("[Hostinger Entrypoint Wrapper] Booting up...");
+
+  if (typeof require !== 'undefined') {
+    try {
+      const path = require('path');
+      require(path.join(__dirname, 'dist', 'server.cjs'));
+      console.log("[Hostinger Entrypoint Wrapper] Loaded server.cjs via CommonJS require.");
+    } catch (err) {
+      logCrash(err);
+      process.exit(1);
+    }
+  } else {
+    import('./dist/server.cjs').then(() => {
+      console.log("[Hostinger Entrypoint Wrapper] Loaded server.cjs via ES dynamic import.");
+    }).catch((err) => {
+      logCrash(err);
+      process.exit(1);
+    });
+  }
 }
 

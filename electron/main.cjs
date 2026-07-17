@@ -1,3 +1,16 @@
+// Detect if running inside standard web server (like Hostinger Passenger) instead of Electron
+if (!process.versions.electron) {
+  console.log("[Passenger Hybrid Loader] Running electron/main.cjs outside Electron. Loading Web Server instead...");
+  try {
+    const path = require('path');
+    require(path.join(__dirname, '..', 'dist', 'server.cjs'));
+  } catch (err) {
+    console.error("[Passenger Hybrid Loader] Failed to load server.cjs:", err);
+    process.exit(1);
+  }
+  return; // CommonJS wrapper allows top-level return
+}
+
 const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const path = require('path');
 const { fork } = require('child_process');

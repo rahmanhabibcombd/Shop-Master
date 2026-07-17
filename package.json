@@ -11,7 +11,7 @@
   ],
   "version": "1.0.3",
   "type": "module",
-  "main": "electron/main.cjs",
+  "main": "server.js",
   "engines": {
     "node": ">=18"
   },
