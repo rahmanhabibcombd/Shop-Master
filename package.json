@@ -68,9 +68,20 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "tsx": "^4.21.0"
   },
-  "optionalDependencies": {
-    "@tailwindcss/oxide-linux-x64-gnu": "^4.1.14",
-    "@tailwindcss/oxide-win32-x64-msvc": "^4.1.14"
+  "supportedArchitectures": {
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "cpu": [
+      "x64",
+      "arm64"
+    ],
+    "libc": [
+      "glibc",
+      "musl"
+    ]
   },
   "build": {
     "appId": "com.shopmaster.pos",
