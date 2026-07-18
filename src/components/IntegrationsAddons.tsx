@@ -394,11 +394,11 @@ export function IntegrationsAddons({ activeSubTab, hideSidebar }: { activeSubTab
             {/* Sub-navigation inside configuration rail */}
             <div className="bg-slate-50/50 dark:bg-slate-900/30 border border-gray-150 dark:border-slate-800/85 rounded-2xl p-2.5 space-y-1.5 shadow-inner">
               {[
-                { id: 'shopify', label: 'Shopify Webhooks', desc: 'অটো স্টক মাইনাস ও অর্ডার অ্যালার্ট', icon: ShoppingBag, color: 'hover:bg-green-50/50 hover:text-green-600 dark:hover:bg-green-950/20 text-green-600' },
-                { id: 'telegram', label: 'Telegram Bot API', desc: 'setWebhook ও চ্যাট প্যানেল', icon: Send, color: 'hover:bg-sky-50/50 hover:text-sky-600 dark:hover:bg-sky-950/20 text-sky-600' },
-                { id: 'instagram', label: 'Instagram Graph API', desc: 'Comment-to-DM অটো রিপ্লাই', icon: Instagram, color: 'hover:bg-pink-50/50 hover:text-pink-600 dark:hover:bg-pink-950/20 text-pink-600' },
-                { id: 'voice_ai', label: 'Voice Message AI', desc: 'ভয়েস ও টেক্সট টু ভয়েস কনভার্টার', icon: Mic, color: 'hover:bg-indigo-50/50 hover:text-indigo-600 dark:hover:bg-indigo-950/20 text-indigo-600' },
-                { id: 'logs', label: 'Integration Terminal Logs', desc: 'লাইভ অ্যাক্টিভিটি কনসোল', icon: Terminal, color: 'hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-600' }
+                { id: 'shopify', label: 'Shopify', desc: 'অটো স্টক মাইনাস ও অর্ডার অ্যালার্ট', icon: ShoppingBag, color: 'hover:bg-green-50/50 hover:text-green-600 dark:hover:bg-green-950/20 text-green-600' },
+                { id: 'telegram', label: 'Telegram', desc: 'setWebhook ও চ্যাট প্যানেল', icon: Send, color: 'hover:bg-sky-50/50 hover:text-sky-600 dark:hover:bg-sky-950/20 text-sky-600' },
+                { id: 'instagram', label: 'Instagram', desc: 'Comment-to-DM অটো রিপ্লাই', icon: Instagram, color: 'hover:bg-pink-50/50 hover:text-pink-600 dark:hover:bg-pink-950/20 text-pink-600' },
+                { id: 'voice_ai', label: 'Voice AI', desc: 'ভয়েস ও টেক্সট টু ভয়েস কনভার্টার', icon: Mic, color: 'hover:bg-indigo-50/50 hover:text-indigo-600 dark:hover:bg-indigo-950/20 text-indigo-600' },
+                { id: 'logs', label: 'Terminal Logs', desc: 'লাইভ অ্যাক্টিভিটি কনসোল', icon: Terminal, color: 'hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-600' }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -415,8 +415,7 @@ export function IntegrationsAddons({ activeSubTab, hideSidebar }: { activeSubTab
                     <tab.icon className="w-4 h-4" />
                   </div>
                   <div className="overflow-hidden">
-                    <h4 className="text-xs font-bold truncate">{tab.label}</h4>
-                    <p className={`text-[10px] truncate ${subTab === tab.id ? 'text-white/80' : 'text-gray-400 dark:text-gray-500'}`}>{tab.desc}</p>
+                    <h4 className="text-sm font-bold truncate">{tab.label}</h4>
                   </div>
                 </button>
               ))}

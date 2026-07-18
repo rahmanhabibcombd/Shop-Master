@@ -95,7 +95,11 @@ export class GoogleWorkspaceService {
       await setDoc(dbRef, syncData, { merge: true });
       console.log('Workspace auto-sync to Firestore completed.');
     } catch (e) {
-      console.error('Failed to sync Workspace to Firestore:', e);
+      if (e?.message && e.message.includes('missing stream token')) {
+        console.warn('Workspace sync retry (stream token)');
+      } else {
+        console.error('Failed to sync Workspace to Firestore:', e);
+      }
     }
   }
 }

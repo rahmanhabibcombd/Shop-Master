@@ -4337,6 +4337,10 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
       return;
     }
 
+    const landingLabel = (e.currentTarget.elements.namedItem('landingLabel') as HTMLInputElement)?.value.trim() || 'Main Panel';
+    const landingLabelBn = (e.currentTarget.elements.namedItem('landingLabelBn') as HTMLInputElement)?.value.trim() || 'মেইন প্যানেল';
+    const landingPageId = `${id}_main_panel`;
+
     const newSec = {
       id,
       label,
@@ -4344,7 +4348,18 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
       isLocked: false,
       isDeleted: false,
       visibleToRoles: ['admin'],
-      items: []
+      items: [
+        {
+          id: landingPageId,
+          label: landingLabel,
+          label_bn: landingLabelBn,
+          iconName: 'LayoutTemplate',
+          isLocked: false,
+          isDeleted: false,
+          allowedRoles: [...ALL_ROLES],
+          allowedUsers: []
+        }
+      ]
     };
 
     setSections(prev => [...prev, newSec]);
@@ -5593,6 +5608,19 @@ export function AdminSidebarPages({ shopSettings = {}, user = {}, setNotificatio
                   <div>
                     <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Bengali Label (বাংলা নাম)</label>
                     <input type="text" name="secLabelBn" placeholder="আমার মডিউল" className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200" />
+                  </div>
+                  <div className="border-t border-gray-100 dark:border-slate-800 pt-3 mt-3">
+                    <h5 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Default Landing Page</h5>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-[9px] font-black text-gray-400 uppercase tracking-wider mb-1">Landing Page English Label</label>
+                        <input type="text" name="landingLabel" placeholder="Main Panel" className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200" />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-black text-gray-400 uppercase tracking-wider mb-1">Landing Page Bengali Label (বাংলা নাম)</label>
+                        <input type="text" name="landingLabelBn" placeholder="মেইন প্যানেল" className="w-full p-2.5 border border-slate-100 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/50 text-xs outline-none dark:text-gray-200" />
+                      </div>
+                    </div>
                   </div>
                   <button type="submit" className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer">
                     Create Section
